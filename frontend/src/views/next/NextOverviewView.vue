@@ -25,6 +25,11 @@ import {
 } from 'tdesign-icons-vue-next';
 import { UiButton, UiDonut, UiStatusBadge, UiTooltip } from '@/ui';
 import { CHART_OTHER_COLOR, CHART_PALETTE } from '@/lib/chart-palette';
+import {
+  usedInputOutputTokens,
+  windowRanges,
+  type QuotaWindowRange,
+} from '@/lib/quota-window-usage';
 import { costGapNote, type PricingGapFields } from '@/lib/usage-pricing';
 import type {
   ModelApprovalView,
@@ -386,26 +391,95 @@ function quotaUnitLabel(unit?: string): string {
   return unit ? (QUOTA_UNIT_LABELS[unit] ?? unit) : '—';
 }
 
-/** Admin: subscription quota ledger (5h/week/month rolling demo fill). */
+// ---- admin quota ledger: real per-window usage (#1234) ----
+//
+// 每订阅 × 三窗口（5 小时滚动 / 本周 / 本月，UTC 日历，口径见 @/lib/quota-window-usage）
+// = 3 次 adminUsageSummary 读取，只读 totals，已用量 = 输入+输出 Token（网关侧统计）。
+// 每窗口的额度在当前数据模型里不存在（订阅只有单一 quota_total），所以不画比例条：
+// 行尾的 quota_total 以「方案总额度」如实相称，不做任何分母。
+
+interface LedgerWindowUsage {
+  key: QuotaWindowRange['key'];
+  label: string;
+  used: number;
+}
+
+interface LedgerUsageState {
+  windows: LedgerWindowUsage[];
+  /** Row-level read failure (#943/#1160 家族)：读不到就不画数字。 */
+  error: string;
+  loading: boolean;
+}
+
+/** Per-subscription usage state, keyed by subscription id. */
+const ledgerUsage = ref<Record<string, LedgerUsageState>>({});
+
+/** Admin: subscription quota ledger (real window usage; no ratios, no demo fill). */
 const quotaLedger = computed(() =>
   subscriptions.value.map((s) => {
-    const usedRatio = s.quotaTotal ? 0.34 : 0; // demo fill until official usage API lands
+    const state = ledgerUsage.value[s.id ?? ''] ?? { windows: [], error: '', loading: true };
     return {
-      id: s.id,
+      id: s.id ?? '',
       name: s.name,
       productName: s.productName,
       planScope: s.planScope,
       status: s.status,
       quotaTotal: s.quotaTotal,
       quotaUnit: s.quotaUnit ?? '—',
-      segments: [
-        { label: '5 小时', ratio: usedRatio },
-        { label: '本周', ratio: usedRatio * 0.8 },
-        { label: '本月', ratio: usedRatio * 0.6 },
-      ],
+      windows: state.windows,
+      error: state.error,
+      loading: state.loading,
     };
   }),
 );
+
+/** One subscription's three window reads; a failure lands on this row only. */
+async function loadLedgerUsageRow(subscriptionId: string, ranges: QuotaWindowRange[]) {
+  const state = ledgerUsage.value[subscriptionId];
+  if (!state) return;
+  state.loading = true;
+  state.error = '';
+  try {
+    const summaries = await Promise.all(
+      ranges.map((range) =>
+        api.adminUsageSummary({ subscriptionId, from: range.from, to: range.to }),
+      ),
+    );
+    state.windows = ranges.map((range, i) => {
+      const used = usedInputOutputTokens(summaries[i]?.totals?.tokens);
+      if (used === null) {
+        // 2xx 但形状读不出来（totals / tokens 缺字段）同样是读取失败——
+        // 画 0 会把「没读到」说成「没用量」。
+        throw new Error('窗口用量响应缺少 totals.tokens');
+      }
+      return { key: range.key, label: range.label, used };
+    });
+  } catch (error) {
+    state.windows = [];
+    state.error = error instanceof ApiError ? error.message : '读取窗口用量失败，请稍后重试。';
+  } finally {
+    state.loading = false;
+  }
+}
+
+/**
+ * All subscriptions' three-window reads. Called once per page load, not awaited by
+ * `load()`: the rows draw their own loading placeholders while these are in flight.
+ */
+async function loadLedgerUsage() {
+  const ranges = windowRanges(new Date());
+  const states: Record<string, LedgerUsageState> = {};
+  for (const s of subscriptions.value) {
+    if (s.id) states[s.id] = { windows: [], error: '', loading: true };
+  }
+  ledgerUsage.value = states;
+  await Promise.all(Object.keys(states).map((id) => loadLedgerUsageRow(id, ranges)));
+}
+
+/** #1234: 重试只重发该订阅的 3 次窗口读取——其它行不动、页面不重跑。 */
+function retryLedgerUsage(subscriptionId: string) {
+  return loadLedgerUsageRow(subscriptionId, windowRanges(new Date()));
+}
 
 function formatCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -440,6 +514,9 @@ async function load() {
     totals.value = (summary.totals ?? null) as unknown as OverviewTotals | null;
     if (isAdmin.value) {
       subscriptions.value = await api.listSubscriptions();
+      // #1234: the ledger's per-window reads run beside the feed, not before it —
+      // the rows show their own loading placeholders until each one answers.
+      void loadLedgerUsage();
     }
     await loadFeed(keyList, approvalsPromise);
   } catch (error) {
@@ -681,11 +758,18 @@ onMounted(load);
             <div class="ui-panel-head">
               <div>
                 <h2 class="ui-panel-title">额度账本</h2>
-                <span class="ui-panel-sub">5 小时 / 周 / 月滚动窗口</span>
+                <span class="ui-panel-sub"
+                  >5 小时 / 本周 / 本月窗口 · 网关侧统计（输入+输出 Token）</span
+                >
               </div>
             </div>
             <div v-if="quotaLedger.length" class="next-overview__ledger">
-              <div v-for="row in quotaLedger" :key="row.id" class="next-overview__ledger-row">
+              <div
+                v-for="row in quotaLedger"
+                :key="row.id"
+                class="next-overview__ledger-row"
+                data-testid="overview-ledger-row"
+              >
                 <div class="next-overview__ledger-plan">
                   <span class="next-overview__key-name">{{ row.name }}</span>
                   <span class="ui-panel-sub"
@@ -693,34 +777,49 @@ onMounted(load);
                   >
                 </div>
                 <div class="next-overview__ledger-band">
-                  <template v-if="row.quotaTotal">
-                    <div
-                      v-for="seg in row.segments"
-                      :key="seg.label"
-                      class="next-overview__ledger-seg"
+                  <div
+                    v-if="row.error"
+                    class="next-overview__ledger-error"
+                    data-testid="overview-ledger-row-error"
+                  >
+                    <p class="ui-form-error">{{ row.error }}</p>
+                    <UiButton
+                      variant="ghost"
+                      size="sm"
+                      data-testid="overview-ledger-retry"
+                      @click="retryLedgerUsage(row.id)"
+                      >重试</UiButton
                     >
-                      <span class="next-overview__ledger-seg-label"
-                        >{{ seg.label }} · {{ Math.round(seg.ratio * 100) }}%</span
-                      >
-                      <div class="next-overview__ledger-track">
-                        <div
-                          class="next-overview__ledger-fill"
-                          :class="{
-                            'next-overview__ledger-fill--warn': seg.ratio >= 0.6 && seg.ratio < 0.8,
-                            'next-overview__ledger-fill--danger': seg.ratio >= 0.8,
-                          }"
-                          :style="{ width: `${Math.round(seg.ratio * 100)}%` }"
-                        />
-                      </div>
+                  </div>
+                  <p
+                    v-else-if="row.loading"
+                    class="next-overview__ledger-empty"
+                    data-testid="overview-ledger-loading"
+                  >
+                    加载中…
+                  </p>
+                  <template v-else>
+                    <div
+                      v-for="seg in row.windows"
+                      :key="seg.key"
+                      class="next-overview__ledger-seg"
+                      data-testid="overview-ledger-seg"
+                    >
+                      <span class="next-overview__ledger-seg-label">{{ seg.label }}</span>
+                      <span class="next-overview__ledger-seg-value ui-num">{{
+                        formatCount(seg.used)
+                      }}</span>
                     </div>
                   </template>
-                  <span v-else class="next-overview__ledger-unset">未配置滚动额度</span>
                 </div>
-                <span class="next-overview__ledger-quota ui-num">{{
-                  row.quotaTotal
-                    ? `${formatCount(row.quotaTotal)} ${quotaUnitLabel(row.quotaUnit)}`
-                    : '未配置'
-                }}</span>
+                <span class="next-overview__ledger-quota"
+                  ><span class="next-overview__ledger-quota-label">方案总额度：</span
+                  ><span class="ui-num">{{
+                    row.quotaTotal
+                      ? `${formatCount(row.quotaTotal)} ${quotaUnitLabel(row.quotaUnit)}`
+                      : '未配置'
+                  }}</span></span
+                >
               </div>
             </div>
             <p v-else class="next-overview__empty">
@@ -1147,7 +1246,7 @@ onMounted(load);
 
 .next-overview__ledger-seg {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: var(--ui-space-3);
 }
 
@@ -1158,26 +1257,22 @@ onMounted(load);
   color: var(--ui-foreground-secondary);
 }
 
-.next-overview__ledger-track {
-  flex: 1;
-  height: 6px;
-  border-radius: var(--ui-radius-pill);
-  background: var(--ui-muted);
-  overflow: hidden;
+.next-overview__ledger-seg-value {
+  margin-left: auto;
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground);
 }
 
-.next-overview__ledger-fill {
-  height: 100%;
-  border-radius: var(--ui-radius-pill);
-  background: var(--ui-primary);
+.next-overview__ledger-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ui-space-2);
 }
 
-.next-overview__ledger-fill--warn {
-  background: var(--ui-warning-fg);
-}
-
-.next-overview__ledger-fill--danger {
-  background: var(--ui-danger-fg);
+.next-overview__ledger-empty {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
 }
 
 .next-overview__ledger-quota {
@@ -1186,9 +1281,8 @@ onMounted(load);
   color: var(--ui-foreground);
 }
 
-.next-overview__ledger-unset {
-  font-size: var(--ui-font-size-xs);
-  color: var(--ui-foreground-faint);
+.next-overview__ledger-quota-label {
+  color: var(--ui-foreground-secondary);
 }
 
 .next-overview__recent-empty,
