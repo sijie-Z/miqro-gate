@@ -352,17 +352,17 @@ class PostgresUsageEventWriterTest {
         UUID claimedProjectId = UUID.randomUUID();
         // 1) Agent-declared project id: the header claim is the evidence.
         UsageEvent claimed = caaEvent("gw-evi-header-" + suffix, new UsageEvent.ContextAttribution("sess-1",
-                UUID.randomUUID(), claimedProjectId, "RESOLVED_HEADER", "git_remote", "HIGH", "miqro-web"));
+                UUID.randomUUID(), claimedProjectId, "RESOLVED_HEADER", 2, "git_remote", "HIGH", "miqro-web"));
         // 2) legacy suffix selector: the tag in the key is the evidence, no declared
-        // confidence.
+        // confidence. One candidate: the suffix merely matched the only binding.
         UsageEvent bySuffix = caaEvent("gw-evi-suffix-" + suffix,
-                new UsageEvent.ContextAttribution(null, null, null, "RESOLVED_SUFFIX", null, null, "miqro-web"));
+                new UsageEvent.ContextAttribution(null, null, null, "RESOLVED_SUFFIX", 1, null, null, "miqro-web"));
         // 3) sole binding / 4) unattributed policy: resolved without any external
         // signal.
         UsageEvent sole = caaEvent("gw-evi-sole-" + suffix,
-                new UsageEvent.ContextAttribution(null, null, null, "SOLE_BINDING", null, "MEDIUM", "miqro-web"));
+                new UsageEvent.ContextAttribution(null, null, null, "SOLE_BINDING", 1, null, "MEDIUM", "miqro-web"));
         UsageEvent policy = caaEvent("gw-evi-policy-" + suffix,
-                new UsageEvent.ContextAttribution(null, null, null, "POLICY_ROUTED", null, "NONE", null));
+                new UsageEvent.ContextAttribution(null, null, null, "POLICY_ROUTED", 2, null, "NONE", null));
 
         writer.writeBatch(List.of(claimed, bySuffix, sole, policy), List.of(), List.of(), List.of());
 
@@ -401,9 +401,9 @@ class PostgresUsageEventWriterTest {
                 UUID.randomUUID(), UUID.randomUUID(), null, CacheLevel.UPSTREAM,
                 new TokenBucket(10L, 5L, 0L, 0L, 10L, 5L, 15L, 0L), 42L, 200, null, true, false,
                 "gw-evi-drop-" + suffix, CLOCK.instant(), CLIENT_IP, new UsageEvent.ContextAttribution(null, null,
-                        UUID.randomUUID(), "RESOLVED_HEADER", null, "LOW", "miqro-web"));
+                        UUID.randomUUID(), "RESOLVED_HEADER", 2, null, "LOW", "miqro-web"));
         UsageEvent healthy = caaEvent("gw-evi-mate-" + suffix,
-                new UsageEvent.ContextAttribution(null, null, null, "RESOLVED_SUFFIX", null, null, "miqro-web"));
+                new UsageEvent.ContextAttribution(null, null, null, "RESOLVED_SUFFIX", 1, null, null, "miqro-web"));
 
         writer.writeBatch(List.of(dropped, healthy), List.of(), List.of(), List.of());
 
@@ -471,12 +471,13 @@ class PostgresUsageEventWriterTest {
                 UUID.randomUUID(), UUID.randomUUID(), "model-x", CacheLevel.UPSTREAM,
                 new TokenBucket(10L, 5L, 0L, 0L, 10L, 5L, 15L, 0L), 42L, 200, null, true, false, gatewayRequestId,
                 occurredAt, CLIENT_IP, new UsageEvent.ContextAttribution("sess-1", activityId, claimedProjectId,
-                        "RESOLVED_HEADER", "tool_path", "HIGH", "miqro-web"));
+                        "RESOLVED_HEADER", 2, "tool_path", "HIGH", "miqro-web"));
 
         writer.writeBatch(List.of(event), List.of(), List.of(), List.of());
 
         var rows = jdbc.queryForList("""
-                SELECT session_id, activity_id, claimed_project_id, resolution_status, claim_source, claim_confidence
+                SELECT session_id, activity_id, claimed_project_id, resolution_status, resolution_candidates,
+                       claim_source, claim_confidence
                 FROM usage_event WHERE gateway_request_id = :gid
                 """, new MapSqlParameterSource().addValue("gid", gatewayRequestId));
         assertThat(rows).hasSize(1);
@@ -485,6 +486,10 @@ class PostgresUsageEventWriterTest {
         assertThat(row).containsEntry("activity_id", activityId);
         assertThat(row).containsEntry("claimed_project_id", claimedProjectId);
         assertThat(row).containsEntry("resolution_status", "RESOLVED_HEADER");
+        // #1139: the candidate cardinality persists with the ruling — a header pick
+        // among two bindings is a real choice. (int2 may read back as Short or
+        // Integer depending on the driver; compare the numeric value.)
+        assertThat(((Number) row.get("resolution_candidates")).intValue()).isEqualTo(2);
         assertThat(row).containsEntry("claim_source", "tool_path");
         assertThat(row).containsEntry("claim_confidence", "HIGH");
     }

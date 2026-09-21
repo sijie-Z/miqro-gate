@@ -716,22 +716,26 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
         return new LifecycleInfo(wireProtocol, timeToFirstByteMs, requestStatus);
     }
 
-    /** CAA attribution columns (V54); all-null rows predate the feature. */
+    /** CAA attribution columns (V54/V72); all-null rows predate the feature. */
     private static UsageEvent.ContextAttribution attributionOf(java.sql.ResultSet rs) throws java.sql.SQLException {
         String sessionId = rs.getString("session_id");
         Object activityId = rs.getObject("activity_id");
         Object claimedProjectId = rs.getObject("claimed_project_id");
         String resolutionStatus = rs.getString("resolution_status");
+        // #1139: int2 may surface as Short or Integer depending on the driver;
+        // unfold by numeric value. Null = written before V72 — unknown, never 0.
+        Object candidatesRaw = rs.getObject("resolution_candidates");
+        Integer resolutionCandidates = candidatesRaw instanceof Number n ? n.intValue() : null;
         String claimSource = rs.getString("claim_source");
         String claimConfidence = rs.getString("claim_confidence");
         if (sessionId == null && activityId == null && claimedProjectId == null && resolutionStatus == null
-                && claimSource == null && claimConfidence == null) {
+                && resolutionCandidates == null && claimSource == null && claimConfidence == null) {
             return null;
         }
         // bindingTag has no usage_event column (it feeds the evidence table, V55);
         // rows read back from here never carry it.
         return new UsageEvent.ContextAttribution(sessionId, (UUID) activityId, (UUID) claimedProjectId,
-                resolutionStatus, claimSource, claimConfidence, null);
+                resolutionStatus, resolutionCandidates, claimSource, claimConfidence, null);
     }
 
     @Override

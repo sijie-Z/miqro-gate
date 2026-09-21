@@ -4439,6 +4439,8 @@ export interface components {
             cost?: number;
             priced?: boolean;
             resolutionStatus?: string;
+            /** Format: int32 */
+            resolutionCandidates?: number;
             claimSource?: string;
             claimConfidence?: string;
         };

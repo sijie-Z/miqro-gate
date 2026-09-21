@@ -164,14 +164,14 @@ class MeUsageApiIntegrationTest {
     }
 
     @Test
-    @DisplayName("#1128: the self-service records carry the same attribution fields as the admin ones")
+    @DisplayName("#1128/#1139: the self-service records carry the same attribution fields (incl. candidates) as the admin ones")
     void recordsCarryAttribution() throws Exception {
         fx.insertCatalogAndGrant();
         UUID keyId = fx.createOwnKey();
         fx.insertPrices();
         // Distinct instants: the ordering asserted below must not rest on a tie between
         // two rows inserted in the same second.
-        fx.insertAttributedUsage(keyId, "chatcmpl-attr", 10L, 5L, Instant.now().minusSeconds(120), "RESOLVED_SUFFIX",
+        fx.insertAttributedUsage(keyId, "chatcmpl-attr", 10L, 5L, Instant.now().minusSeconds(120), "RESOLVED_SUFFIX", 1,
                 "git_remote", "MEDIUM");
         // Fresh row (the me-side fixture timestamps it at now), so it sorts above the
         // attributed one without relying on a tie-break.
@@ -186,12 +186,16 @@ class MeUsageApiIntegrationTest {
         // The self-service mapper is a second, separately written mapper — a swap there
         // is invisible to the admin test, so it has to be asserted here too.
         Assertions.assertThat(attributed.path("resolutionStatus").asText()).isEqualTo("RESOLVED_SUFFIX");
+        // #1139: 1 candidate = the suffix merely matched the only binding — the same
+        // "no decision" fact SOLE_BINDING records; the count is what tells them apart.
+        Assertions.assertThat(attributed.path("resolutionCandidates").asInt()).isEqualTo(1);
         Assertions.assertThat(attributed.path("claimSource").asText()).isEqualTo("git_remote");
         Assertions.assertThat(attributed.path("claimConfidence").asText()).isEqualTo("MEDIUM");
         // Present-and-null, not absent: doesNotExist() would also accept a field the
         // API
         // stopped sending, which is a different contract.
         Assertions.assertThat(plain.path("resolutionStatus").isNull()).isTrue();
+        Assertions.assertThat(plain.path("resolutionCandidates").isNull()).isTrue();
         Assertions.assertThat(plain.path("claimSource").isNull()).isTrue();
         Assertions.assertThat(plain.path("claimConfidence").isNull()).isTrue();
     }
@@ -365,26 +369,28 @@ class MeUsageApiIntegrationTest {
 
         /**
          * With the CAA attribution the gateway records for a resolved request (#1128) —
-         * the self-service mapper has to carry the same three fields as the admin one.
+         * the self-service mapper has to carry the same fields as the admin one,
+         * including the candidate cardinality (#1139).
          */
         void insertAttributedUsage(UUID keyId, String providerRequestId, long input, long output, Instant occurredAt,
-                String resolutionStatus, String claimSource, String claimConfidence) {
+                String resolutionStatus, Integer resolutionCandidates, String claimSource, String claimConfidence) {
             jdbc.update("""
                     INSERT INTO usage_event
                         (id, tenant_id, provider_request_id, virtual_key_id, project_id, provider_product_id,
                          credential_id, model_id, cache_level, input_tokens, output_tokens, total_tokens, latency_ms,
                          upstream_status_code, is_complete, usage_missing, gateway_request_id, occurred_at,
-                         resolution_status, claim_source, claim_confidence)
+                         resolution_status, resolution_candidates, claim_source, claim_confidence)
                     VALUES (:id, :tenantId, :providerRequestId, :keyId, :projectId, :productId, :credentialId, :model,
                             'UPSTREAM', :input, :output, :total, 42, 200, TRUE, FALSE, 'greq-attr', :occurredAt,
-                            :resolutionStatus, :claimSource, :claimConfidence)
+                            :resolutionStatus, :resolutionCandidates, :claimSource, :claimConfidence)
                     """, new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
                     .addValue("providerRequestId", providerRequestId).addValue("keyId", keyId)
                     .addValue("projectId", projectId).addValue("productId", productId)
                     .addValue("credentialId", credentialId).addValue("model", MODEL).addValue("input", input)
                     .addValue("output", output).addValue("total", input + output)
                     .addValue("occurredAt", Timestamp.from(occurredAt)).addValue("resolutionStatus", resolutionStatus)
-                    .addValue("claimSource", claimSource).addValue("claimConfidence", claimConfidence));
+                    .addValue("resolutionCandidates", resolutionCandidates).addValue("claimSource", claimSource)
+                    .addValue("claimConfidence", claimConfidence));
         }
     }
 

@@ -8,16 +8,22 @@
  * `claimConfidence`). They stay apart in the bubble on purpose — the claim is
  * unverified input, the ruling is the verdict.
  *
- * See {@link informative} for when the chip speaks: the two ordinary routes are
- * silent, while a header-resolved request, a recorded claim, or a "we could not place
- * this" ruling is not. Rows written before V54 (all three columns null) render a
- * dash.
+ * See {@link informative} for when the chip speaks: the no-decision routes stay
+ * silent (with one exception, #1139 below), while a header-resolved request, a
+ * recorded claim, or a "we could not place this" ruling is not. Rows written before
+ * V54 (all columns null) render a dash.
  */
 import { computed } from 'vue';
 import { UiStatusBadge, UiTooltip } from '@/ui';
 
 const props = defineProps<{
   resolutionStatus?: string | null;
+  /**
+   * #1139 (CAA V72): the number of ACTIVE bindings the key held when the ruling
+   * ran. 1 = there was nothing to choose from; >1 = the ruling picked among
+   * candidates; null/undefined = written before V72 — unknown, never guessed.
+   */
+  resolutionCandidates?: number | null;
   claimSource?: string | null;
   claimConfidence?: string | null;
 }>();
@@ -64,33 +70,64 @@ const CLAIM_SOURCE_TEXT: Record<string, string> = {
 };
 
 /**
- * The two routes that record no explicit intent, and the only ones the chip stays
- * quiet on:
+ * The routes that record no explicit intent — `SOLE_BINDING` always, and
+ * `RESOLVED_SUFFIX` in the single-candidate case (see {@link informative}).
+ */
+const QUIET_RULINGS = new Set(['RESOLVED_SUFFIX', 'SOLE_BINDING']);
+
+/**
+ * #1139: `RESOLVED_SUFFIX` mixes two different facts, and the candidate count is
+ * what separates them.
  *
- * - `SOLE_BINDING` — the key has one binding, so nothing had to be decided;
- * - `RESOLVED_SUFFIX` — and this one is the *norm*, not the exception: a key is minted
- *   with its project's tag as its suffix, so the suffix step matches before the
- *   sole-binding fallback and an ordinary single-binding key's rows are recorded as
- *   `RESOLVED_SUFFIX`. Chipping those would print 「按密钥后缀」 down the whole table,
- *   and the console cannot tell "the suffix decided" from "there was only one binding"
- *   — no binding count is exposed (#1139 tracks that discriminator).
+ * - candidates > 1 — **the suffix really chose**: the key held several ACTIVE
+ *   bindings and the suffix in the key picked one. That is an auditable decision, so
+ *   the chip speaks.
+ * - candidates == 1 — **the suffix merely matched**: a key is minted with its
+ *   project's tag as its suffix, so the suffix step hits before the sole-binding
+ *   fallback and there was nothing to choose from. Same "no decision" fact as
+ *   `SOLE_BINDING`; chipping it would print 「按密钥后缀」 down the whole table.
+ * - candidates == null — a row written before V72: the column cannot tell the two
+ *   apart, and guessing would repaint the whole historical table — so it stays quiet
+ *   too, and the bubble (when a claim opens it anyway) says 未知 rather than picking
+ *   a story.
  *
  * Everything else speaks: a recorded claim (someone is using the context mechanism), a
  * header-resolved request (a client *asked* for a project), a policy route (the
  * unattributed bucket), and any value nobody has words for yet — a new ruling
  * reaching the console should be visible on day one, not silently dashed.
  */
-const QUIET_RULINGS = new Set(['RESOLVED_SUFFIX', 'SOLE_BINDING']);
+const informative = computed(() => {
+  const status = props.resolutionStatus ?? '';
+  if (!status) {
+    return false;
+  }
+  if (props.claimSource) {
+    return true;
+  }
+  if (status === 'RESOLVED_SUFFIX') {
+    return (props.resolutionCandidates ?? 0) > 1;
+  }
+  return !QUIET_RULINGS.has(status);
+});
 
-const informative = computed(
-  () =>
-    Boolean(props.resolutionStatus) &&
-    (Boolean(props.claimSource) || !QUIET_RULINGS.has(props.resolutionStatus ?? '')),
-);
+/** #1139: say which of the two `RESOLVED_SUFFIX` facts this row is — or that it is unknown. */
+const candidateNote = computed(() => {
+  const n = props.resolutionCandidates;
+  if (n == null) {
+    return '候选绑定数未记录（V72 之前的行）——无法区分「后缀在多个候选中选定」与「单绑定恰好命中」';
+  }
+  if (n > 1) {
+    return `该密钥有 ${n} 个候选绑定，后缀从中选定`;
+  }
+  return '该密钥仅 1 个候选绑定，后缀只是恰好命中——并无候选可挑（与「唯一绑定」描述同一事实）';
+});
 
 /** The bubble: the ruling, then what the client claimed — and which of the two is verified. */
 const note = computed(() => {
   const parts = [`归属由服务端裁定：${label.value}`];
+  if (props.resolutionStatus === 'RESOLVED_SUFFIX') {
+    parts.push(candidateNote.value);
+  }
   if (props.claimSource) {
     const source = CLAIM_SOURCE_TEXT[props.claimSource] ?? props.claimSource;
     const confidence = props.claimConfidence ? `，置信度 ${props.claimConfidence}` : '';

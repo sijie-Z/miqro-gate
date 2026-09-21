@@ -218,11 +218,12 @@ Key × 项目绑定（标签路由的鉴权权威），与 `virtual_keys.project
 - `latency_ms`、`upstream_status_code`、`cache_key bytea`
 - `is_complete boolean`、`usage_missing boolean`（上游未返回 usage 时标记，用量记 0）
 - `client_ip varchar(45)`（V52，#605：调用方地址——传输层对端，或可信代理名单下 `X-Forwarded-For` 最右非可信跳；可为 NULL）
-- `client_ip` 之后的 **CAA 归属列（V54，#633）**，全部可空、存量行 NULL：
+- `client_ip` 之后的 **CAA 归属列（V54，#633；V72 增候选基数）**，全部可空、存量行 NULL：
   - `session_id varchar(64)`（Agent 会话标识，源自 `X-Claude-Code-Session-Id`，超长/畸形即丢弃）
   - `activity_id uuid`（请求上下文解析器生成的本次活动标识）
   - `claimed_project_id uuid`（Agent **声明**的项目——未经授权校验，仅审计，与裁决列分开）
   - `resolution_status varchar(32)`（服务端裁决：`RESOLVED_HEADER|RESOLVED_SUFFIX|SOLE_BINDING|POLICY_ROUTED|UNATTRIBUTED|AMBIGUOUS`）
+  - `resolution_candidates smallint`（**V72，#1139**：解析当时该 key 的 ACTIVE 绑定数——候选基数。`1`=无候选可挑（后缀恰好命中 / 唯一绑定兜底），`>1`=后缀在多个候选间真的做了选择；V72 之前的行 NULL=未知，消费方不得推测。**只记计数**，不含任何绑定明细）
   - `claim_source varchar(32)`（`prompt_url|tool_path|bash_cwd|system_cwd|git_remote|suffix|none`，白名单外丢弃）、`claim_confidence varchar(16)`（`HIGH|MEDIUM|LOW|NONE`，白名单外丢弃）
 - **价格基座列（V64，#710 / F21-A）**，全部可空：
   - `price_input` / `price_output` / `price_cache_read` / `price_cache_creation numeric(24,10)`——**该事件发生时实际生效的单价**（每百万 token，与 `price_snapshot.unit_price` 同量纲）

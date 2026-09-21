@@ -217,6 +217,30 @@ describe('NextUsageView', () => {
     );
   });
 
+  it('#1139: the self-service log passes the candidate count through — a real choice speaks', async () => {
+    mockApi.usageRecords.mockResolvedValue({
+      ...records,
+      items: [
+        {
+          ...records.items![0]!,
+          resolutionStatus: 'RESOLVED_SUFFIX',
+          resolutionCandidates: 3,
+        },
+      ],
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    // Without the prop wired the chip treats the count as unknown and stays quiet —
+    // this fails on a missing :resolution-candidates binding, not on chip logic.
+    const chip = wrapper.find('[data-testid="usage-attribution-chip"]');
+    expect(chip.exists()).toBe(true);
+    expect(chip.text()).toContain('按密钥后缀');
+    const notes = wrapper.findAllComponents(UiTooltip).map((t) => t.props('text'));
+    expect(notes.some((note) => note.includes('3 个候选绑定'))).toBe(true);
+  });
+
   it('#1097: the 上游成本 cell carries its own composition bar', async () => {
     mockApi.usageSummary.mockResolvedValue({
       ...summary,

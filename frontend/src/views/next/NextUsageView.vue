@@ -953,6 +953,7 @@ function formatTime(iso?: string): string {
           <template #attribution="{ row }">
             <AttributionChip
               :resolution-status="asRecord(row).resolutionStatus"
+              :resolution-candidates="asRecord(row).resolutionCandidates"
               :claim-source="asRecord(row).claimSource"
               :claim-confidence="asRecord(row).claimConfidence"
             />

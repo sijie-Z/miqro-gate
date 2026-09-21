@@ -108,6 +108,7 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
                     .addValue("activityId", attr != null ? attr.activityId() : null)
                     .addValue("claimedProjectId", attr != null ? attr.claimedProjectId() : null)
                     .addValue("resolutionStatus", attr != null ? attr.resolutionStatus() : null)
+                    .addValue("resolutionCandidates", attr != null ? attr.resolutionCandidates() : null)
                     .addValue("claimSource", attr != null ? attr.claimSource() : null)
                     .addValue("claimConfidence", attr != null ? attr.claimConfidence() : null));
             MapSqlParameterSource evidence = evidenceOf(e);
@@ -131,14 +132,16 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
                     prompt_tokens, completion_tokens, total_tokens, reasoning_tokens,
                     latency_ms, upstream_status_code, cache_key, is_complete, usage_missing,
                     gateway_request_id, client_ip, occurred_at,
-                    session_id, activity_id, claimed_project_id, resolution_status, claim_source, claim_confidence)
+                    session_id, activity_id, claimed_project_id, resolution_status, resolution_candidates,
+                    claim_source, claim_confidence)
                 VALUES (:id, :tenantId, :providerRequestId, :virtualKeyId, :projectId, :productId, :credentialId,
                     :modelId, :cacheLevel,
                     :inputTokens, :outputTokens, :cacheCreation, :cacheRead,
                     :promptTokens, :completionTokens, :totalTokens, :reasoningTokens,
                     :latencyMs, :upstreamStatusCode, :cacheKey, :isComplete, :usageMissing,
                     :gatewayRequestId, :clientIp, :occurredAt,
-                    :sessionId, :activityId, :claimedProjectId, :resolutionStatus, :claimSource, :claimConfidence)
+                    :sessionId, :activityId, :claimedProjectId, :resolutionStatus, :resolutionCandidates,
+                    :claimSource, :claimConfidence)
                 ON CONFLICT DO NOTHING
                 """, params.toArray(new MapSqlParameterSource[0]));
         writeContextEvidence(evidenceParams);

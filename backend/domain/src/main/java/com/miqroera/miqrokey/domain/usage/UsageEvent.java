@@ -37,6 +37,15 @@ public record UsageEvent(UUID id, UUID tenantId, String providerRequestId, UUID 
      * carried no context information.
      *
      * <p>
+     * {@code resolutionCandidates} is the number of ACTIVE bindings the key held
+     * when the ladder ran (#1139): 1 means there was nothing to choose from — the
+     * suffix merely matched it — and &gt;1 means the ruling really selected among
+     * candidates. Null only for rows written before V72 (and for legacy fixture
+     * shapes): unknown, never guessed. A count, deliberately not the binding
+     * details.
+     * </p>
+     *
+     * <p>
      * {@code bindingTag} is the resolved binding's project tag. It has no
      * {@code usage_event} column: it is carried here for the audit evidence row
      * ({@code request_context_evidence}, Spec v1.1 §7.2), which records it as the
@@ -47,7 +56,7 @@ public record UsageEvent(UUID id, UUID tenantId, String providerRequestId, UUID 
      * </p>
      */
     public record ContextAttribution(String sessionId, UUID activityId, UUID claimedProjectId, String resolutionStatus,
-            String claimSource, String claimConfidence, String bindingTag) {
+            Integer resolutionCandidates, String claimSource, String claimConfidence, String bindingTag) {
     }
 
     public UsageEvent {
