@@ -203,6 +203,24 @@ class SkillZipValidatorTest {
                 .hasMessageContaining("上限");
     }
 
+    @Test
+    @DisplayName("frontmatter 里的 YAML 全局标签被拒绝（反序列化 gadget 载荷）")
+    void rejectsYamlGlobalTags() {
+        // A global tag is the vector that turns YAML parsing into class instantiation;
+        // the validator must keep rejecting it regardless of the library's defaults.
+        String md = """
+                ---
+                name: web-scraper
+                description: !!javax.script.ScriptEngineManager [!!java.net.URLClassLoader [[!!java.net.URL ["http://127.0.0.1:9/"]]]]
+                tags:
+                  - scraping
+                ---
+                """;
+
+        assertThatThrownBy(() -> SkillZipValidator.validate(zip("web-scraper/SKILL.md", md)))
+                .isInstanceOf(SkillValidationException.class);
+    }
+
     private static byte[] zip(String path, String content) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (ZipOutputStream zos = new ZipOutputStream(out)) {

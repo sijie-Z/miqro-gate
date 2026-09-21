@@ -383,6 +383,8 @@ public class PlatformOidcAuthService {
         Cookie stale = new Cookie(STATE_COOKIE, "");
         stale.setPath("/");
         stale.setMaxAge(0);
+        stale.setHttpOnly(true);
+        stale.setSecure(authProperties.isCookieSecure());
         response.addCookie(stale);
     }
 
