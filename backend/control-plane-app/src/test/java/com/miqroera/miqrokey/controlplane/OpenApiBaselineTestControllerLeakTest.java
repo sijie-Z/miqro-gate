@@ -198,7 +198,7 @@ class OpenApiBaselineTestControllerLeakTest {
             throw new UncheckedIOException(e);
         }
         Set<String> operations = new TreeSet<>();
-        for (Iterator<String> paths = root.path("paths").fieldNames(); paths.hasNext();) {
+        for (Iterator<String> paths = root.path("paths").propertyNames().iterator(); paths.hasNext();) {
             String path = paths.next();
             JsonNode item = root.path("paths").path(path);
             for (String method : HTTP_METHODS) {

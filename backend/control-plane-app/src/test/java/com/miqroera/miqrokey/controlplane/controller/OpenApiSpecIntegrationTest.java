@@ -178,9 +178,9 @@ class OpenApiSpecIntegrationTest {
                 .isEqualTo(sortedNames(consoleSchema.path("required")));
 
         Set<String> fields = new TreeSet<>();
-        consoleSchema.path("properties").fieldNames().forEachRemaining(fields::add);
+        consoleSchema.path("properties").propertyNames().forEach(fields::add);
         Set<String> machineFields = new TreeSet<>();
-        machineSchema.path("properties").fieldNames().forEachRemaining(machineFields::add);
+        machineSchema.path("properties").propertyNames().forEach(machineFields::add);
         assertThat(machineFields).as("%s vs %s: field names", machine, console).isEqualTo(fields);
 
         for (String field : fields) {
