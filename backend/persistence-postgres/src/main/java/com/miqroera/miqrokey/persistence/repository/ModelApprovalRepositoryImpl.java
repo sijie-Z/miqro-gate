@@ -76,13 +76,15 @@ public class ModelApprovalRepositoryImpl implements ModelApprovalRepository {
     }
 
     @Override
-    public List<ModelApproval> findPage(ModelApprovalStatus status, int limit, Instant beforeCreatedAt, UUID beforeId) {
-        var params = new MapSqlParameterSource("status", status == null ? null : status.name()).addValue("limit", limit)
+    public List<ModelApproval> findPage(UUID tenantId, ModelApprovalStatus status, int limit, Instant beforeCreatedAt,
+            UUID beforeId) {
+        var params = new MapSqlParameterSource("tenantId", tenantId)
+                .addValue("status", status == null ? null : status.name()).addValue("limit", limit)
                 .addValue("beforeCreatedAt", toTs(beforeCreatedAt)).addValue("beforeId", beforeId);
         // Explicit casts: PostgreSQL cannot infer a type for a null parameter that
         // appears in both "? IS NULL" and the row-wise keyset comparison.
-        String sql = "SELECT " + COLS + " FROM model_approval"
-                + " WHERE (:status::varchar IS NULL OR status = :status::varchar)"
+        String sql = "SELECT " + COLS + " FROM model_approval" + " WHERE tenant_id = :tenantId"
+                + " AND (:status::varchar IS NULL OR status = :status::varchar)"
                 + " AND (:beforeCreatedAt::timestamptz IS NULL"
                 + "     OR (created_at, id) < (:beforeCreatedAt::timestamptz, :beforeId::uuid))"
                 + " ORDER BY created_at DESC, id DESC LIMIT :limit";
