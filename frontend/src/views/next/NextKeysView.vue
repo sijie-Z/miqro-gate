@@ -210,6 +210,23 @@ const grantOptions = computed(
 
 const selectedGrant = computed(() => grantOptions.value.find((g) => g.id === createGrantId.value));
 
+/**
+ * Picker label for a project. A project with no routing tag cannot host a key
+ * (#503/#647), so the label says what is missing instead of rendering `（null）`.
+ *
+ * This is a **guard, not a path users normally take**: project creation derives a
+ * tag from the code, the one migration that could have left historic rows tagless
+ * backfilled them (V53, `WHERE project_tag IS NULL`), and the only tagless row the
+ * API can still produce is the unattributed bucket — which this picker already
+ * excludes by `system` (#1145). #1149 asked for the tagless project to be *listed
+ * and labelled* rather than hidden, which is the same "keep it visible, say what
+ * is wrong" rule the extra-project list follows (#1157) and what the server's
+ * `ROUTING_TAG_MISSING` detail already tells a caller who reaches it another way.
+ */
+function projectLabel(p: NonNullable<MeGrantsResponse['projects']>[number]): string {
+  return p.projectTag ? `${p.name}（${p.projectTag}）` : `${p.name}（需补路由标签）`;
+}
+
 // ADR-0018: one key may serve several projects. The picker above stays the
 // PRIMARY project (its grant is chosen explicitly); these are extra bindings —
 // the server matches each one to that project's own grant of the same product.
@@ -763,7 +780,7 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
             :options="
               projectsForGrant.map((p) => ({
                 value: p.id ?? '',
-                label: `${p.name}（${p.projectTag}）`,
+                label: projectLabel(p),
               }))
             "
             width="100%"
@@ -805,7 +822,7 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
                 :data-testid="`create-extra-project-${p.id}`"
                 @update:model-value="onExtraProjects"
               >
-                {{ p.name }}（{{ p.projectTag }}）
+                {{ projectLabel(p) }}
               </UiCheckbox>
             </div>
           </div>

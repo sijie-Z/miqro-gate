@@ -219,6 +219,37 @@ const grantsDisjointProducts: MeGrantsResponse = {
   purposes: ['CLAUDE_CODE'],
 };
 
+/**
+ * #1149: a project with **no routing tag**. Creation would refuse it
+ * (`409 ROUTING_TAG_MISSING`), so the picker has to say what is missing rather
+ * than print the raw missing value.
+ */
+const grantsWithTaglessProject: MeGrantsResponse = {
+  projects: [
+    { id: 'p1', code: 'P1', name: 'Core AI', projectTag: 'core-ai' },
+    { id: 'p2', code: 'P2', name: 'Legacy Project' },
+  ],
+  grants: [
+    {
+      id: 'g1',
+      projectId: 'p1',
+      providerProductId: '0190-product',
+      providerProductCode: 'claude-api',
+      providerProductName: 'Claude API',
+      models: ['claude-3-7-sonnet'],
+    },
+    {
+      id: 'g2',
+      projectId: 'p2',
+      providerProductId: '0190-product',
+      providerProductCode: 'claude-api',
+      providerProductName: 'Claude API',
+      models: ['claude-3-7-sonnet'],
+    },
+  ],
+  purposes: ['CLAUDE_CODE'],
+};
+
 const created: CreateVirtualKeyResponse = {
   id: '0190-0002',
   secret: 'mqk_live_newkey',
@@ -247,6 +278,31 @@ describe('NextKeysView', () => {
       },
     });
   }
+
+  it('#1149: a tagged-less project is listed and labelled, never printed as the raw missing value', async () => {
+    mockApi.myGrants.mockResolvedValue(grantsWithTaglessProject);
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="create-key-open"]').trigger('click');
+    await flushPromises();
+
+    // Kept in the list (hiding it would leave the user wondering where their
+    // project went) …
+    const labels = wrapper.findAll('.stub-option').map((el) => el.text());
+    expect(labels.some((l) => l.includes('Legacy Project（需补路由标签）'))).toBe(true);
+    // … and the same wording on the extra-project checkbox. Its data-testid lands
+    // on the hidden input, so the text has to be read from the wrapping label —
+    // reading `.text()` off the input silently yields ''.
+    const extraLabel =
+      wrapper.find('[data-testid="create-extra-project-p2"]').element.closest('label')
+        ?.textContent ?? '';
+    expect(extraLabel).toContain('需补路由标签');
+    // The option label is built in JS, so a missing tag used to reach the user as
+    // the literal string "undefined"; the template rendered it as "（）".
+    expect(labels.join('|')).not.toContain('undefined');
+    expect(extraLabel).not.toContain('（）');
+  });
 
   it('renders masked keys with Chinese statuses, never the plaintext', async () => {
     mockApi.listVirtualKeys.mockResolvedValue([
