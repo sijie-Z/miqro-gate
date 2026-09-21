@@ -107,3 +107,10 @@ export type CreateApiConsumerResponse = components['schemas']['CreateApiConsumer
 // #550 public self-registration switch state (single boolean, anonymous).
 // `enabled` is optional in the schema, so consumers compare against `false`.
 export type RegistrationStatusResponse = components['schemas']['RegistrationStatusResponse'];
+
+// #1201 model plaza: usable models with prices + the approvable catalog set
+export type MePlazaView = components['schemas']['MePlazaView'];
+export type PlazaModel = components['schemas']['PlazaModel'];
+export type PlazaPrice = components['schemas']['PlazaPrice'];
+export type PlazaKeyRef = components['schemas']['PlazaKeyRef'];
+export type RequestableModel = components['schemas']['RequestableModel'];
