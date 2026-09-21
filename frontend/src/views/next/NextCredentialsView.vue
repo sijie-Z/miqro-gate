@@ -284,6 +284,8 @@ async function runRotate() {
 const historyTarget = ref<CredentialView | null>(null);
 const versions = ref<CredentialVersionView[]>([]);
 const historyLoading = ref(false);
+/** #1231: 版本历史**读取**失败（#1160 同族：失败不得画成「没有记录」）。 */
+const historyError = ref('');
 // #440: request-sequence guard — a slow history load for credential A must not
 // land after the drawer re-targets credential B.
 let historyRequestSeq = 0;
@@ -293,6 +295,7 @@ async function openHistory(cred: CredentialView) {
   historyTarget.value = cred;
   historyLoading.value = true;
   versions.value = [];
+  historyError.value = '';
   try {
     // History targets a listed credential; ids are always present.
     const detail: CredentialDetailView = await api.getCredential(cred.id!);
@@ -301,13 +304,22 @@ async function openHistory(cred: CredentialView) {
     }
     versions.value = detail.versions ?? [];
   } catch (error) {
-    if (seq === historyRequestSeq && error instanceof ApiError) {
-      toast.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
+    if (seq !== historyRequestSeq) {
+      return;
     }
+    // #1231: 读取失败记入抽屉里的错误态（UiTable 的 :error 契约自带重试），
+    // 而不是让空态去断言「没有版本记录」。
+    historyError.value = error instanceof ApiError ? error.message : '加载版本历史失败。';
   } finally {
     if (seq === historyRequestSeq) {
       historyLoading.value = false;
     }
+  }
+}
+
+function retryHistory() {
+  if (historyTarget.value) {
+    void openHistory(historyTarget.value);
   }
 }
 
@@ -855,7 +867,9 @@ onMounted(load);
         :loading="historyLoading"
         row-key="id"
         empty-title="没有版本记录"
+        :error="historyError"
         data-testid="credential-versions"
+        @retry="retryHistory"
       >
         <template #status="{ row }">
           <UiStatusBadge

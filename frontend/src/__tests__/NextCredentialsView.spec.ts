@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { computed, defineComponent, h } from 'vue';
 import NextCredentialsView from '@/views/next/NextCredentialsView.vue';
 import * as api from '@/api';
+import { ApiError } from '@/api/http';
 import type { CredentialView, SubscriptionView } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
@@ -221,5 +222,42 @@ describe('NextCredentialsView', () => {
     // Nothing to look at → a 0 must not look like a door.
     expect(counts[1]!.element.tagName).toBe('SPAN');
     expect(counts[1]!.text()).toBe('0');
+  });
+
+  it('shows the history load failure instead of asserting "没有版本记录" (#1231)', async () => {
+    mockApi.getCredential.mockRejectedValue(
+      new ApiError({
+        type: 'about:blank',
+        title: '版本历史读取失败。',
+        status: 500,
+        code: 'INTERNAL_ERROR',
+        detail: '版本历史读取失败。',
+        requestId: 'req-hist-500',
+      }),
+    );
+    const wrapper = mountView();
+    await flushPromises();
+
+    // kebab → 版本历史, the same radix menu flow as UiDrawer.spec.ts.
+    const kebab = wrapper.find('[data-testid="credential-actions-0190-0000-0000-0030"]')
+      .element as HTMLElement;
+    kebab.click();
+    await flushPromises();
+    const historyItem = document.body.querySelector<HTMLElement>(
+      '[data-testid="credential-history"]',
+    );
+    const menuItem = historyItem?.closest('[role="menuitem"]') as HTMLElement | null;
+    expect(menuItem, 'menu item should render').toBeTruthy();
+    menuItem!.focus();
+    menuItem!.click();
+    await flushPromises();
+
+    const drawer = document.querySelector('[data-testid="credential-history-drawer"]');
+    expect(drawer, 'history drawer should render').toBeTruthy();
+    // A failed read must not be painted as "there are no versions"…
+    expect(drawer!.textContent).not.toContain('没有版本记录');
+    // …the table shows the failure with a retry instead.
+    expect(drawer!.querySelector('[data-testid="table-load-failed"]')).toBeTruthy();
+    expect(drawer!.querySelector('[data-testid="table-load-retry"]')).toBeTruthy();
   });
 });
