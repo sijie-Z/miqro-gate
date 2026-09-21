@@ -1,7 +1,7 @@
 package com.miqroera.miqrokey.gateway.mcplog;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.domain.model.McpAccessLogEntry;
 import com.miqroera.miqrokey.domain.model.McpAccessStatus;
 import com.miqroera.miqrokey.testing.GatewayTestKeys;
@@ -69,7 +69,7 @@ class WebhookMcpAccessLogForwarderTest {
             assertThat(array).hasSize(2);
             JsonNode first = array.get(0);
             Set<String> keys = new java.util.TreeSet<>();
-            first.fieldNames().forEachRemaining(keys::add);
+            first.propertyNames().forEach(keys::add);
             assertThat(keys).isEqualTo(new java.util.TreeSet<>(EXPECTED_KEYS));
             assertThat(first.get("aigw.mcp.tool").asText()).isEqualTo("forecast");
             assertThat(first.get("aigw.mcp.request_id").asText()).isEqualTo("req-1");

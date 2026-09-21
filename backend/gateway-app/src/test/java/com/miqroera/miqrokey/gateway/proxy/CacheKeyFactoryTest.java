@@ -1,6 +1,6 @@
 package com.miqroera.miqrokey.gateway.proxy;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.domain.cache.CacheKey;
 import com.miqroera.miqrokey.gateway.vkey.AuthContext;
 import com.miqroera.miqrokey.testing.GatewayTestKeys;
@@ -337,7 +337,7 @@ class CacheKeyFactoryTest {
         private final java.util.concurrent.atomic.AtomicInteger bodyParses = new java.util.concurrent.atomic.AtomicInteger();
 
         @Override
-        public com.fasterxml.jackson.databind.JsonNode readTree(byte[] content) throws java.io.IOException {
+        public tools.jackson.databind.JsonNode readTree(byte[] content) {
             if (content != null && content.length > 0) {
                 bodyParses.incrementAndGet();
             }

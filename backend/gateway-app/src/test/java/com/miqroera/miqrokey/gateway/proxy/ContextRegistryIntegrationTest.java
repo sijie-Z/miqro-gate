@@ -169,7 +169,7 @@ class ContextRegistryIntegrationTest {
         byte[] body = webTestClient.get().uri("/v1/context-registry").header("Authorization", "Bearer " + presented)
                 .exchange().expectStatus().isOk().expectBody().returnResult().getResponseBody();
         try {
-            Map<String, Object> parsed = new com.fasterxml.jackson.databind.ObjectMapper().readValue(body, Map.class);
+            Map<String, Object> parsed = new tools.jackson.databind.ObjectMapper().readValue(body, Map.class);
             return (List<Map<String, Object>>) parsed.get("entries");
         } catch (Exception e) {
             throw new RuntimeException(e);

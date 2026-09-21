@@ -1,6 +1,6 @@
 package com.miqroera.miqrokey.gateway.proxy;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.gateway.GatewayAuthTestConfig;
 import com.miqroera.miqrokey.testing.AnthropicFixtures;
 import com.miqroera.miqrokey.testing.AnthropicMockProvider;
