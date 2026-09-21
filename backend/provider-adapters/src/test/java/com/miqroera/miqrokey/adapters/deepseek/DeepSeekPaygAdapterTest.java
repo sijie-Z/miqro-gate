@@ -1,6 +1,6 @@
 package com.miqroera.miqrokey.adapters.deepseek;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.spi.AdapterCapabilities;
 import com.miqroera.miqrokey.spi.CredentialCheck;
 import com.miqroera.miqrokey.spi.CredentialInjection;

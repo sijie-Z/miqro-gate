@@ -1,6 +1,6 @@
 package com.miqroera.miqrokey.adapters.aliyun;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.spi.ProtocolFamily;
 import com.miqroera.miqrokey.spi.UsageContext;
 import com.miqroera.miqrokey.spi.UsageObservation;
