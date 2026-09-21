@@ -239,7 +239,7 @@ public class AdminCredentialService {
             return null;
         }
         try {
-            var node = new com.fasterxml.jackson.databind.ObjectMapper().readTree(baseUrlTemplates);
+            var node = new tools.jackson.databind.ObjectMapper().readTree(baseUrlTemplates);
             if (node.isArray() && !node.isEmpty()) {
                 String url = node.get(0).path("url").asText(null);
                 return url != null ? URI.create(url) : null;
