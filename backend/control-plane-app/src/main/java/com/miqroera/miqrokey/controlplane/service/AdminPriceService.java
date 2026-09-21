@@ -54,8 +54,7 @@ public class AdminPriceService {
         var snapshot = priceRepository.insert(new PriceSnapshot(UUID.randomUUID(), productId, modelId, type, currency,
                 unitPrice, Instant.now(), source, createdBy, Instant.now()));
         auditService.record(tenantId, createdBy, "PRICE_CREATE", "PRICE_SNAPSHOT", snapshot.id(),
-                "{\"product\":\"" + productId + "\",\"model\":\"" + modelId + "\",\"tokenType\":\"" + type + "\"}",
-                null);
+                AuditSummaries.summary("product", productId, "model", modelId, "tokenType", type), null);
         return toView(snapshot);
     }
 
