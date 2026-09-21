@@ -760,6 +760,18 @@ class AdminOrgApiIntegrationTest {
         assertThat(system).isTrue();
         mockMvc.perform(get("/api/v1/admin/projects").cookie(sessionCookie)).andExpect(status().isOk());
 
+        // …and an update has to echo that same flag (#1150). The service rebuilt the
+        // record through the "regular project" constructor, which defaults `system`
+        // to false, so the update response claimed an ordinary project while the row
+        // stayed system=true — the list endpoint and the update endpoint disagreed
+        // about the same project.
+        mockMvc.perform(patch("/api/v1/admin/projects/" + bucketId).contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content("{\"name\":\"Bucket Renamed\"}")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.system").value(true));
+        assertThat(jdbc.queryForObject("SELECT system FROM projects WHERE id = :id",
+                new MapSqlParameterSource("id", UUID.fromString(bucketId)), Boolean.class)).isTrue();
+
         // A model outside the catalog is rejected.
         mockMvc.perform(put("/api/v1/admin/unattributed-policy").contentType(MediaType.APPLICATION_JSON)
                 .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
