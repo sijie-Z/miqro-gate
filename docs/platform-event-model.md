@@ -89,7 +89,7 @@ MiQroGate 现有告警链只认识一种事件：「某个租户的事实行，�
   - 退避 `2^attempt × 60s`、封顶 3 次尝试（:34 `MAX_ATTEMPTS`、:213-215）；
   - **耗尽后 `next_retry_at = NULL`，静默终止**：没有 dead-letter 状态、没有门户提示、没有重放接口（生产主代码 `src/main` 零命中：`UPDATE alert_events` / `DELETE FROM alert_events` / `DELETE FROM webhook_delivery_attempts`——测试夹具用拼接 SQL 清表，如 `UsageQueueSaturationAlertIntegrationTest.java:402`，不计入清理语义；投递状态不写回 `alert_events.status`，那张表的 status 只有 FIRED/DEDUPED 两种值，`V12:48-49`）；
   - 规则或端点被禁用会同时停掉首投和已 arm 的重试（:240-241、:260 双重门），重新启用后按既有退避继续（:223-228 注释）。
-  - 注意一处**文档与代码的漂移**：`docs/operations-runbook.md:137` 与 `docs/release-checklist.md:94` 提到「超过窗口转 dead-letter 并在门户告警」「dead-letter 和人工重放测试通过」，但代码里找不到 dead-letter 状态转换、门户告警或重放接口。本稿如实记录代码事实；措辞修正已随 2026-09-20 拍板后的文档轮落地（见 `operations-runbook.md` §8 与 `release-checklist.md`）。
+  - 注意一处**文档与代码的漂移**：修正前的 `docs/operations-runbook.md:137` 与 `docs/release-checklist.md:94` 曾提到「超过窗口转 dead-letter 并在门户告警」「dead-letter 和人工重放测试通过」，但代码里找不到 dead-letter 状态转换、门户告警或重放接口。本稿如实记录代码事实；措辞修正已随 2026-09-20 拍板后的文档轮落地（见 `operations-runbook.md` §8 与 `release-checklist.md`）。
 - **重试**：见上，最多 3 次尝试、指数退避、开关可随时打断。
 - **幂等键**：投递尝试表 `(event_id, endpoint_id, attempt)` 唯一（`V12:65`）；webhook 信封带 `eventId`（:168）与签名（`WebhookEndpointService.java:37,279`，HMAC-SHA256，`X-MiQroKey-Signature: sha256=…`）。**投递语义是 at-least-once**：接收方若在回 5xx 前实际已收到（例如回执丢失），会再收到同 `eventId` 的重试——**建议把「按 eventId 幂等」写成 webhook 接入方的契约**（这是建议，现状没有强制）。
 
