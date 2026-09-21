@@ -161,10 +161,11 @@ describe('NextAdminAuditView', () => {
 
     // Second phase: two quick ranges in flight at once — 近 30 天 is issued
     // first, 近 7 天 (the user's final pick) answers first.
-    const pending: Array<{ resolve: (v: typeof events) => void }> = [];
+    type AuditEvents = Awaited<ReturnType<typeof api.auditEvents>>;
+    const pending: Array<{ resolve: (v: AuditEvents) => void }> = [];
     mockApi.auditEvents.mockImplementation(
       () =>
-        new Promise<typeof events>((resolve) => {
+        new Promise<AuditEvents>((resolve) => {
           pending.push({ resolve });
         }),
     );
