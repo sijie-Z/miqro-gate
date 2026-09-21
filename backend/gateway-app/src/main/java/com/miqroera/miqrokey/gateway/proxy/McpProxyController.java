@@ -12,6 +12,7 @@ import com.miqroera.miqrokey.domain.model.McpResiliencePolicy;
 import com.miqroera.miqrokey.domain.model.McpRetryPolicy;
 import com.miqroera.miqrokey.domain.route.RouteSnapshot;
 import com.miqroera.miqrokey.gateway.mcplog.McpAccessLogSink;
+import com.miqroera.miqrokey.gateway.observability.LogValues;
 import com.miqroera.miqrokey.route.RouteSnapshotProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -317,9 +318,11 @@ public class McpProxyController {
                             "Consumer is not allowed to call tool: " + toolName);
                 }
             }
+            // #1303: rpcMethod/toolName come straight out of the caller's JSON —
+            // flatten them so a line break cannot forge a second log line.
             log.info("aigw.mcp.call requestId={} service={} consumer={} rpcMethod={} tool={}", gatewayRequestId,
-                    service.name(), consumer.name(), rpcMethod == null ? "-" : rpcMethod,
-                    toolName == null ? "-" : toolName);
+                    service.name(), consumer.name(), rpcMethod == null ? "-" : LogValues.forLog(rpcMethod),
+                    toolName == null ? "-" : LogValues.forLog(toolName));
             McpResiliencePolicy servicePolicy = service.resilience() == null
                     ? McpResiliencePolicy.disabled()
                     : service.resilience();
@@ -415,7 +418,7 @@ public class McpProxyController {
                 record(context, rpcMethod, toolName, McpAccessStatus.CIRCUIT_OPEN, 503);
                 rowRecorded[0] = true;
                 log.info("aigw.mcp.circuit_open requestId={} service={} bucket={}", context.gatewayRequestId,
-                        context.service.name(), toolName == null ? rpcMethod : toolName);
+                        context.service.name(), LogValues.forLog(toolName == null ? rpcMethod : toolName));
                 return target.errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "circuit_open",
                         "MCP upstream circuit is open");
             }
