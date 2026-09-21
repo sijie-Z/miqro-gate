@@ -30,15 +30,17 @@ import java.util.Set;
  * penalties / logprobs / reasoning effort / thinking budget / … — chat bodies
  * keep only the conversation scope below, so these must be an explicit key
  * dimension or two requests that differ only in sampling configuration would
- * share one entry; see {@link #GENERATION_FIELDS} for the exact list and why
- * every protocol's spelling of a knob has to be listed), and {@code scope} is the
- * <em>semantic scope</em> of the conversation: the system prompt plus the
- * <b>last user message</b> (aligned with Tencent's "latest user message" and
- * Higress's GJSON content extraction — see docs/ai-gateway-comparison.md). The
- * system part covers chat {@code system} messages, the Anthropic top-level
- * {@code system} field, and the OpenAI Responses {@code instructions} field;
- * earlier conversation turns do not change the key, so a repeated question
- * inside different histories still hits the cache.
+ * share one entry — see {@link #GENERATION_FIELDS} for the exact list and why
+ * every protocol's spelling of a knob has to be listed, nested object spellings
+ * such as the Responses {@code text} / {@code reasoning} included), and
+ * {@code scope} is the <em>semantic scope</em> of the conversation: the system
+ * prompt plus the <b>last user message</b> (aligned with Tencent's "latest user
+ * message" and Higress's GJSON content extraction — see
+ * docs/ai-gateway-comparison.md). The system part covers chat {@code system}
+ * messages, the Anthropic top-level {@code system} field, and the OpenAI
+ * Responses {@code instructions} field; earlier conversation turns do not
+ * change the key, so a repeated question inside different histories still hits
+ * the cache.
  * </p>
  *
  * <p>
@@ -83,11 +85,32 @@ public final class CacheKeyFactory {
      * {@code max_tokens}/{@code max_completion_tokens}). The same applies to
      * response-shaping flags such as {@code logprobs}/{@code top_logprobs}.
      * </p>
+     *
+     * <p>
+     * A knob spelled as a <em>nested object</em> is listed as the whole object
+     * (#1302 follow-up): the Responses protocol nests {@code text.format} ≈
+     * {@code response_format}, {@code text.verbosity} ≈ {@code verbosity} and
+     * {@code reasoning.effort} ≈ {@code reasoning_effort}, and picking single
+     * sub-fields would leave the next sub-field (and the next protocol's nesting)
+     * colliding one level down. The object is taken whole and key-sorted like any
+     * other value, so this stays one entry per knob.
+     * </p>
+     *
+     * <p>
+     * The remaining entries are near-misses of the same rule, kept because a wrong
+     * replay costs more than a lost hit: {@code include}/{@code modalities}/
+     * {@code audio}/{@code background} change the payload the client receives back
+     * (extra output items, a base64 audio envelope, an in-progress envelope rather
+     * than a finished answer), {@code truncation} changes what the model is shown,
+     * and {@code previous_response_id} is the only representation of a conversation
+     * the gateway cannot see — the body carries just the new turn.
+     * </p>
      */
     private static final List<String> GENERATION_FIELDS = List.of("temperature", "top_p", "top_k", "max_tokens",
             "max_completion_tokens", "max_output_tokens", "n", "seed", "stop", "stop_sequences", "frequency_penalty",
             "presence_penalty", "logit_bias", "logprobs", "top_logprobs", "response_format", "reasoning_effort",
-            "thinking", "verbosity", "stream_options");
+            "thinking", "verbosity", "stream_options", "text", "reasoning", "include", "truncation", "background",
+            "modalities", "audio", "previous_response_id");
 
     private final ObjectMapper objectMapper;
 

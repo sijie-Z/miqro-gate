@@ -25,16 +25,16 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * ADR-0008 request coalescing (opt-in): what a <em>waiter</em> receives when the
- * leader's response is not replayable.
+ * ADR-0008 request coalescing (opt-in): what a <em>waiter</em> receives when
+ * the leader's response is not replayable.
  *
  * <p>
  * {@code RequestCoalescer}'s contract says a waiter whose leader failed — or
  * which timed out waiting — falls back to its own upstream call. A response the
  * gateway refused to store (non-2xx, oversized, or one that references tool
- * calls) is returned to {@code forward} as a no-cache marker: an empty body with
- * {@code isComplete=false}. Replaying that marker to a waiter produces an empty
- * success response, which is not something the leader ever received.
+ * calls) is returned to {@code forward} as a no-cache marker: an empty body
+ * with {@code isComplete=false}. Replaying that marker to a waiter produces an
+ * empty success response, which is not something the leader ever received.
  * </p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
@@ -121,8 +121,8 @@ class CoalescerWaiterReplayContractTest {
         // receive it is its own upstream call — which is what the coalescer
         // contract promises when the shared work cannot be replayed.
         assertThat(mockProvider.getCapturedRequests())
-                .as("upstream calls (waiter reply: HTTP %d, X-MiQroKey-Cache=%s, %d body bytes)",
-                        waiterReply.status(), waiterReply.cacheHeader(), waiterReply.body().length)
+                .as("upstream calls (waiter reply: HTTP %d, X-MiQroKey-Cache=%s, %d body bytes)", waiterReply.status(),
+                        waiterReply.cacheHeader(), waiterReply.body().length)
                 .hasSize(2);
         assertThat(bodyOf(waiterReply)).as("waiter body (\"coalesced\" must never mean \"empty\")")
                 .isEqualTo(TOOL_CALL_BODY);
@@ -149,8 +149,8 @@ class CoalescerWaiterReplayContractTest {
         }
 
         assertThat(mockProvider.getCapturedRequests())
-                .as("upstream calls (waiter reply: HTTP %d, X-MiQroKey-Cache=%s, %d body bytes)",
-                        waiterReply.status(), waiterReply.cacheHeader(), waiterReply.body().length)
+                .as("upstream calls (waiter reply: HTTP %d, X-MiQroKey-Cache=%s, %d body bytes)", waiterReply.status(),
+                        waiterReply.cacheHeader(), waiterReply.body().length)
                 .hasSize(2);
         assertThat(bodyOf(waiterReply)).as("waiter body (the upstream error text must not be dropped)")
                 .isEqualTo(ERROR_BODY);
@@ -161,7 +161,8 @@ class CoalescerWaiterReplayContractTest {
                 .header(CacheEligibility.CACHEABLE_HEADER, "1").bodyValue(payload).exchange().expectBody()
                 .returnResult();
         byte[] body = result.getResponseBody();
-        String cacheHeader = result.getResponseHeaders() == null ? null
+        String cacheHeader = result.getResponseHeaders() == null
+                ? null
                 : result.getResponseHeaders().getFirst(SseReplayEngine.X_MIQROKEY_CACHE);
         return new Reply(result.getStatus().value(), cacheHeader, body == null ? new byte[0] : body);
     }

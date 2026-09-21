@@ -622,9 +622,9 @@ class VirtualKeyAuthContractTest {
         }
 
         /**
-         * Posts both bodies with the cache opt-in header and asserts the second one
-         * is a MISS with its own upstream exchange — i.e. the two bodies are
-         * different cache keys.
+         * Posts both bodies with the cache opt-in header and asserts the second one is
+         * a MISS with its own upstream exchange — i.e. the two bodies are different
+         * cache keys.
          */
         private void assertSplits(String first, String second) throws InterruptedException {
             webTestClient.post().uri("/v1/chat/completions").header(CacheEligibility.CACHEABLE_HEADER, "1")
@@ -635,8 +635,8 @@ class VirtualKeyAuthContractTest {
 
             byte[] replayed = webTestClient.post().uri("/v1/chat/completions")
                     .header(CacheEligibility.CACHEABLE_HEADER, "1").bodyValue(second).exchange().expectStatus().isOk()
-                    .expectHeader().valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss").expectBody()
-                    .returnResult().getResponseBody();
+                    .expectHeader().valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss").expectBody().returnResult()
+                    .getResponseBody();
 
             assertThat(new String(replayed, StandardCharsets.UTF_8)).isEqualTo(ChatFixtures.RESPONSE_BASIC);
             assertThat(mockProvider.getCapturedRequests()).hasSize(before + 1);
