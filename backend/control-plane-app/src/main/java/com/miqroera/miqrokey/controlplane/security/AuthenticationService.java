@@ -188,10 +188,11 @@ public class AuthenticationService {
         // already uses for the failure path. The Argon2 rehash (the slow part) is
         // computed
         // before the lock is taken, so the row is never locked across hashing.
-        byte[] rehashedHash = passwordHasher.needsRehash(user.passwordHash()) ? passwordHasher.hash(password) : null;
+        byte[] validatedHash = user.passwordHash();
+        byte[] rehashedHash = passwordHasher.needsRehash(validatedHash) ? passwordHasher.hash(password) : null;
         User afterSuccess = self != null
-                ? self.applySuccessfulLogin(user.id(), now, rehashedHash)
-                : applySuccessfulLogin(user.id(), now, rehashedHash);
+                ? self.applySuccessfulLogin(user.id(), validatedHash, now, rehashedHash)
+                : applySuccessfulLogin(user.id(), validatedHash, now, rehashedHash);
         UserStatus newStatus = afterSuccess.status();
 
         SessionToken tokens = sessionService.createSession(afterSuccess);
@@ -223,12 +224,15 @@ public class AuthenticationService {
      * laundered into a session. An expired lock is still cleared, unchanged.
      * </p>
      *
+     * @param validatedPasswordHash
+     *            the hash the password was verified against before the lock was
+     *            taken; a row whose hash no longer equals it was changed under us
      * @param rehashedPassword
      *            the upgraded password hash to write, or {@code null} to keep the
      *            stored one
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public User applySuccessfulLogin(UUID userId, Instant now, byte[] rehashedPassword) {
+    public User applySuccessfulLogin(UUID userId, byte[] validatedPasswordHash, Instant now, byte[] rehashedPassword) {
         User fresh = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new IllegalStateException("User disappeared: " + userId));
 
@@ -238,10 +242,19 @@ public class AuthenticationService {
             throw new AuthenticationException(LOGIN_FAILED);
         }
 
+        // Only upgrade the hash we actually verified the password against. If the
+        // stored hash changed while we were hashing (another request rehashed it, or
+        // the user changed their password), writing ours would silently revert that
+        // change — keep the fresh one and let the next login re-evaluate it.
+        byte[] passwordHash = rehashedPassword != null && validatedPasswordHash != null
+                && MessageDigest.isEqual(fresh.passwordHash(), validatedPasswordHash)
+                        ? rehashedPassword
+                        : fresh.passwordHash();
+
         UserStatus newStatus = fresh.status() == UserStatus.LOCKED ? UserStatus.ACTIVE : fresh.status();
-        User updated = new User(fresh.id(), fresh.tenantId(), fresh.username(), fresh.displayName(),
-                rehashedPassword != null ? rehashedPassword : fresh.passwordHash(), fresh.role(), newStatus,
-                fresh.mustChangePassword(), 0, null, now, fresh.version() + 1, fresh.createdAt(), now);
+        User updated = new User(fresh.id(), fresh.tenantId(), fresh.username(), fresh.displayName(), passwordHash,
+                fresh.role(), newStatus, fresh.mustChangePassword(), 0, null, now, fresh.version() + 1,
+                fresh.createdAt(), now);
         userRepository.update(updated);
         return updated;
     }

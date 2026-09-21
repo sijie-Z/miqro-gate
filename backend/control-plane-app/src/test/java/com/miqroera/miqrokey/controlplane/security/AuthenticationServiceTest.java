@@ -266,6 +266,33 @@ class AuthenticationServiceTest {
             verify(userRepository).update(captor.capture());
             assertThat(captor.getValue().passwordHash()).isEqualTo(upgraded);
         }
+
+        @Test
+        @DisplayName("does not revert a password change that landed while the password was being verified")
+        void doesNotRevertAPasswordChangeThatLandedMidLogin() {
+            byte[] upgraded = "upgraded".getBytes();
+            byte[] changedUnderUs = "changed-under-us".getBytes();
+            User snapshot = buildActiveUser();
+            // The user changed their password after we read the snapshot but before we
+            // took the row lock: the rehash we computed against the OLD hash must not
+            // overwrite the new one.
+            User locked = new User(USER_ID, TENANT_ID, "admin", "Admin User", changedUnderUs, UserRole.SYSTEM_ADMIN,
+                    UserStatus.ACTIVE, true, 0, null, null, 1, Instant.now(), Instant.now());
+            when(userRepository.findByTenantIdAndUsername(TENANT_ID, "admin")).thenReturn(Optional.of(snapshot));
+            when(passwordHasher.verify("correct", PASSWORD_HASH)).thenReturn(true);
+            when(passwordHasher.needsRehash(PASSWORD_HASH)).thenReturn(true);
+            when(passwordHasher.hash("correct")).thenReturn(upgraded);
+            when(userRepository.findByIdForUpdate(USER_ID)).thenReturn(Optional.of(locked));
+            when(sessionService.createSession(any())).thenReturn(new SessionToken("sess", "csrf"));
+
+            service.login("admin", "correct", "req-1");
+
+            ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+            verify(userRepository).update(captor.capture());
+            assertThat(captor.getValue().passwordHash())
+                    .as("the concurrent password change must survive the login that started before it")
+                    .isEqualTo(changedUnderUs);
+        }
     }
 
     @Nested
