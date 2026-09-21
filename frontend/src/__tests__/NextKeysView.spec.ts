@@ -227,7 +227,12 @@ const grantsDisjointProducts: MeGrantsResponse = {
 const grantsWithTaglessProject: MeGrantsResponse = {
   projects: [
     { id: 'p1', code: 'P1', name: 'Core AI', projectTag: 'core-ai' },
-    { id: 'p2', code: 'P2', name: 'Legacy Project' },
+    // `projectTag` is NULL in the database for this row, and the wire carries that
+    // as `"projectTag": null` rather than by omitting the key — Jackson includes
+    // nulls by default and nothing here changes that. The generated type only says
+    // the field is *optional* (`projectTag?: string`), which is why the cast is
+    // needed to write the shape the browser actually receives.
+    { id: 'p2', code: 'P2', name: 'Legacy Project', projectTag: null as unknown as string },
   ],
   grants: [
     {
@@ -301,9 +306,11 @@ describe('NextKeysView', () => {
       wrapper.find('[data-testid="create-extra-project-p2"]').element.closest('label')
         ?.textContent ?? '';
     expect(extraLabel).toContain('需补路由标签');
-    // The option label is built in JS, so a missing tag used to reach the user as
-    // the literal string "undefined"; the template rendered it as "（）".
-    expect(labels.join('|')).not.toContain('undefined');
+    // Both of these are belts rather than the primary guard: a label regression
+    // trips the `需补路由标签` assertions above first. They pin the two reject-shapes
+    // a regression would produce — the JS-built option label printing the raw value
+    // (`（null）`), and the template interpolation printing empty parens.
+    expect(labels.join('|')).not.toContain('（null）');
     expect(extraLabel).not.toContain('（）');
   });
 

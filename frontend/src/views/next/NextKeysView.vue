@@ -213,8 +213,11 @@ const selectedGrant = computed(() => grantOptions.value.find((g) => g.id === cre
 /**
  * Picker label for a project. A project with no routing tag cannot host a key
  * (#503/#647), so the label names what is missing instead of printing the gap: the
- * select's option label is built in JS (so it read `Name（undefined）`) and the
- * checkbox's is a template interpolation (so it read `Name（）`).
+ * select's option label is built in JS from whatever the wire carries — a NULL
+ * `project_tag` arrives as `"projectTag": null` (Jackson's default inclusion;
+ * nothing in `application.yml` or the DTO overrides it), so it read `Name（null）`
+ * — while the checkbox is a template interpolation, where `null` and an absent
+ * field both render as `Name（）`.
  *
  * This is a **fuse, not a path users take**. `createProject` derives a tag from the
  * code (`generateProjectTag`), `updateProject` rejects a blank one and the V4 CHECK
