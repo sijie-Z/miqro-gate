@@ -31,11 +31,13 @@ git diff --cached --check
 git diff --cached
 ```
 
-**Java 改动推送前跑一次格式**（在 `backend/` 下）：
+**Java 改动推送前跑一次格式**（在**仓库根目录**下）：
 
 ```bash
 ./mvnw spotless:apply
 ```
+
+（Windows 用 `.\mvnw.cmd spotless:apply`。POM 在 `backend/`，但这个 wrapper 固定在仓库根并自己定位过去——`backend/` 下**没有** `mvnw`，别在那里跑。）
 
 `spotless:apply` 一次覆盖全部模块——它改写文件而不是失败，所以不会像 `spotless:check` 那样按 reactor 顺序在**首个**违规模块处中止、把其余模块跳过。只修手里这一个模块，下一个要等到下一轮 CI 才暴露（#1198）。CI 的 `Backend format (spotless)` 会在几分钟内变红，但让它一次都别红更省事。
 

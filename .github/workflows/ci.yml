@@ -173,9 +173,9 @@ jobs:
   # `verify`, i.e. after a full unit+integration round, and the reactor then
   # stopped at the first violating module — so the second one waited for the next
   # push. Measured on 2026-09-21 with a violation in `domain` (the second of 11
-  # modules): `spotless:check` reported it and left the remaining 7 modules
-  # SKIPPED, and `--fail-at-end` behaved identically — every module depends on
-  # `domain`, so one violation there skips the whole tail.
+  # modules): `spotless:check` reported it and left the other 9 modules SKIPPED,
+  # and `--fail-at-end` behaved identically — every module depends on `domain`,
+  # so one violation there skips the whole tail.
   #
   # `spotless:apply` has no such problem: it rewrites files instead of failing,
   # so a single plain run covers all 11 modules (measured — it fixed violations
@@ -218,7 +218,7 @@ jobs:
             echo "Every module is spotless-clean."
             exit 0
           fi
-          echo "::error title=Format::spotless would reformat the files below. In backend/, run ./mvnw spotless:apply for every module the change touches, then push the result."
+          echo "::error title=Format::spotless would reformat the files below. From the repository root run ./mvnw spotless:apply, then push the result."
           git diff --stat
           exit 1
 
