@@ -31,6 +31,7 @@
 - [ADR-0022：语义缓存启用评估——正文向量化出网关的合规边界（Accepted：维持不启用 + 批准 P0/P1 测量，P2 若做则 B2 优先）](0022-semantic-cache-evaluation.md)
 - [ADR-0024：请求侧可选改造②——错误驱动的整流重试（Accepted（部分）：选项 B 观察档已作为一期交付（#770 / PR #1018）；C/D/E 仍为提案，见文件 §7）](0024-request-side-rectification-retry.md)
 - [ADR-0025：Agent 生命周期补齐——删除 / 重新启用 / 改名（Accepted：选项 D，实现见 #1012）](0025-agent-lifecycle.md)
+- [ADR-0027：内容过滤 Phase 2——本地规则 + shadow + 异步 + 不阻断（Accepted，2026-09-20；#740 保持 OPEN 跟踪实现）](0027-content-filtering-phase2.md)
 
 ## 已被取代
 
