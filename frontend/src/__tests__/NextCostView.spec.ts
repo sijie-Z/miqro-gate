@@ -389,6 +389,32 @@ describe('NextCostView', () => {
     expect(mockApi.deleteProjectBudget).toHaveBeenCalledWith('p1', '2026-09');
   });
 
+  /**
+   * #1291: 面板的「月」必须是后端解释这个月名时用的那个日历月。
+   * `month=YYYY-MM` 由服务端按 **UTC 日历月** 解析成窗口
+   * （AdminBudgetService.spend() → UsageStatsService.summary(from, to)），
+   * 告警引擎也在同一窗口上评估 BUDGET_THRESHOLD；而这里过去用 new Date()
+   * 的本地 getter 造月名。UTC+8 的浏览器在本地 10-01 00:00–08:00 之间会
+   * 请求 2026-10 —— 那个 UTC 窗口还没开始：面板显示 已用 0 / 正常，
+   * 而告警引擎此刻评估的是仍在跑的 2026-09。
+   *
+   * 断言本身与时区无关（该瞬时在 UTC 就是 9 月）；它在 UTC+8 下复现红，
+   * 因为那时本地月已经是 10 月。只伪造 Date，flushPromises 的 setTimeout
+   * 仍是真时钟。
+   */
+  it('#1291: 预算面板取的是 UTC 日历月，与后端窗口同口径', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-30T16:30:00Z')); // 本地(UTC+8) = 2026-10-01 00:30
+    try {
+      mountView();
+      await flushPromises();
+
+      expect(mockApi.adminBudgets).toHaveBeenCalledWith('2026-09');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('shows the top-consumer and cache-hit token cards (I15)', async () => {
     const wrapper = mountView();
     await flushPromises();
