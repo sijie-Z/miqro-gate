@@ -1,7 +1,7 @@
 package com.miqroera.miqrokey.adapters.common;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.spi.UsageObservation;
 import com.miqroera.miqrokey.spi.UsageSource;
 
