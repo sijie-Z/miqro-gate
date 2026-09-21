@@ -1277,7 +1277,8 @@ Gateway 生成 `X-MiQroKey-Request-Id`。若供应商已有 request ID，两个 
 
 ## 8. OpenAPI 与兼容性
 
-- Control Plane 生成 **OpenAPI 3.1**（F09 已实现）：`GET /v3/api-docs`（springdoc，无 swagger-ui；`springdoc.api-docs.version=OPENAPI_3_1`）。机器可读基线提交于 `docs/openapi/openapi-3.1.json`；CI（backend-integration job）对每次生成结果跑破坏性 diff（`deploy/openapi/check-openapi-breaking.py`：删除 path/operation/response code/参数、属性变 required 即失败）。本文仍是业务语义事实源；生成物是机器可读镜像，OpenAPI 不得改变本文语义。
+- Control Plane 生成 **OpenAPI 3.1**（F09 已实现）：`GET /v3/api-docs`（springdoc，无 swagger-ui；`springdoc.api-docs.version=OPENAPI_3_1`）。机器可读基线提交于 `docs/openapi/openapi-3.1.json`；CI（backend-integration job）对每次生成结果跑破坏性 diff（`deploy/openapi/check-openapi-breaking.py`）。判定为破坏的改动：删除 path/operation/response code/参数，属性变 required 或从 required 消失，属性或 schema 被删，类型/格式变化（按类型集合比较，拓宽到接受 `null` 视为放宽），枚举值减少，约束收紧（下界抬高、上界压低、`pattern` 新增或改变），默认值变化，可空性丢失。新增与放宽一律放行并只打印摘要。该 diff 的每条判定由 `deploy/tests/openapi_breaking_regression.py` 固定（CI `openapi-guard` job），因此门禁本身被改松时会红。
+  门禁比较的是**生成的 head** 与**提交的基线**：同一 commit 里既改 DTO 又刷新基线时 base == head，门禁必然通过（实测 34/45 个 DTO 提交属此类，见 #1315）。它挡的是「忘记刷新基线」，不是「有意破坏」——有意破坏需要新的 major 与一条显式豁免通路，后者尚未实现。本文仍是业务语义事实源；生成物是机器可读镜像，OpenAPI 不得改变本文语义。
 - 前端 TypeScript client **目前由手写 `frontend/src/api` + `types/api` 维护**（未从 OpenAPI 生成——规格愿景；codegen 迁移列为发布前候选，届时删除手写 DTO）。
 - 同一 major 版本只允许新增可选字段和新端点；删除、改名、改变含义必须进入下一 major。
 - 推理入口不进入管理 API 的 DTO 生成流程，以透明代理契约和 fixtures 验证。
