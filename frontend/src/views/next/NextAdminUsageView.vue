@@ -1274,6 +1274,7 @@ onMounted(() => {
         <template #attribution="{ row }">
           <AttributionChip
             :resolution-status="(row as UsageRecord).resolutionStatus"
+            :resolution-candidates="(row as UsageRecord).resolutionCandidates"
             :claim-source="(row as UsageRecord).claimSource"
             :claim-confidence="(row as UsageRecord).claimConfidence"
           />
