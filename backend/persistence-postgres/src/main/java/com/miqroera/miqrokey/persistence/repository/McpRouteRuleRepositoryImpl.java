@@ -1,6 +1,6 @@
 package com.miqroera.miqrokey.persistence.repository;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.domain.model.McpHeaderCondition;
 import com.miqroera.miqrokey.domain.model.McpRouteRule;
 import com.miqroera.miqrokey.domain.repository.McpRouteRuleRepository;
@@ -124,7 +124,7 @@ public class McpRouteRuleRepositoryImpl implements McpRouteRuleRepository {
                 .addValue("createdBy", rule.createdBy());
         try {
             p.addValue("headerConditions", objectMapper.writeValueAsString(rule.headerConditions()));
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+        } catch (tools.jackson.core.JacksonException e) {
             throw new IllegalStateException("Cannot serialize route header conditions", e);
         }
         return p;
@@ -150,7 +150,7 @@ public class McpRouteRuleRepositoryImpl implements McpRouteRuleRepository {
                         entry.get("value").asText()));
             }
             return conditions;
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+        } catch (tools.jackson.core.JacksonException e) {
             throw new SQLException("Cannot parse route header conditions", e);
         }
     }
