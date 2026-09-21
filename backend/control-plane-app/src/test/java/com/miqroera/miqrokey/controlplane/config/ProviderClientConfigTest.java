@@ -1,6 +1,6 @@
 package com.miqroera.miqrokey.controlplane.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.adapters.aliyun.AliyunBailianAdapter;
 import com.miqroera.miqrokey.adapters.baidu.BaiduQianfanAdapter;
 import com.miqroera.miqrokey.adapters.deepseek.DeepSeekPaygAdapter;
