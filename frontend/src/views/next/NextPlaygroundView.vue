@@ -282,8 +282,9 @@ onMounted(async () => {
           data-testid="playground-model"
         />
         <div class="ui-field">
-          <span class="ui-field__label">内容</span>
+          <label class="ui-field__label" for="playground-prompt">内容</label>
           <textarea
+            id="playground-prompt"
             v-model="prompt"
             class="ui-textarea"
             rows="5"
