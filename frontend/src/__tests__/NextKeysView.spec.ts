@@ -279,7 +279,7 @@ describe('NextKeysView', () => {
     });
   }
 
-  it('#1149: a tagged-less project is listed and labelled, never printed as the raw missing value', async () => {
+  it('#1149: a tagless project is listed and labelled, never printed as the raw missing value', async () => {
     mockApi.myGrants.mockResolvedValue(grantsWithTaglessProject);
 
     const wrapper = mountView();
@@ -287,9 +287,12 @@ describe('NextKeysView', () => {
     await wrapper.find('[data-testid="create-key-open"]').trigger('click');
     await flushPromises();
 
+    // The ordinary shape is unchanged — pinned, because the rest of this test would
+    // still pass if the label dropped the tag entirely for *every* project.
+    const labels = wrapper.findAll('.stub-option').map((el) => el.text());
+    expect(labels).toContain('Core AI（core-ai）');
     // Kept in the list (hiding it would leave the user wondering where their
     // project went) …
-    const labels = wrapper.findAll('.stub-option').map((el) => el.text());
     expect(labels.some((l) => l.includes('Legacy Project（需补路由标签）'))).toBe(true);
     // … and the same wording on the extra-project checkbox. Its data-testid lands
     // on the hidden input, so the text has to be read from the wrapping label —

@@ -212,16 +212,22 @@ const selectedGrant = computed(() => grantOptions.value.find((g) => g.id === cre
 
 /**
  * Picker label for a project. A project with no routing tag cannot host a key
- * (#503/#647), so the label says what is missing instead of rendering `（null）`.
+ * (#503/#647), so the label names what is missing instead of printing the gap: the
+ * select's option label is built in JS (so it read `Name（undefined）`) and the
+ * checkbox's is a template interpolation (so it read `Name（）`).
  *
- * This is a **guard, not a path users normally take**: project creation derives a
- * tag from the code, the one migration that could have left historic rows tagless
- * backfilled them (V53, `WHERE project_tag IS NULL`), and the only tagless row the
- * API can still produce is the unattributed bucket — which this picker already
- * excludes by `system` (#1145). #1149 asked for the tagless project to be *listed
- * and labelled* rather than hidden, which is the same "keep it visible, say what
- * is wrong" rule the extra-project list follows (#1157) and what the server's
- * `ROUTING_TAG_MISSING` detail already tells a caller who reaches it another way.
+ * This is a **fuse, not a path users take**. `createProject` derives a tag from the
+ * code (`generateProjectTag`), `updateProject` rejects a blank one and the V4 CHECK
+ * rejects it at the database, the historic NULLs were backfilled by V53
+ * (`WHERE project_tag IS NULL`), and the one tagless row the API can still create
+ * is the unattributed bucket — which `grantOptions` drops **server-side** by
+ * `system` (#1145), so it never reaches this picker. What the fuse catches is a
+ * *new* writer: manual SQL, or a future creation path that forgets the tag.
+ *
+ * #1149 (owner decision): keep a tagless project listed and labelled rather than
+ * hide it — the same "keep it visible, say what is wrong" rule the extra-project
+ * list follows (#1157), and what the server's `ROUTING_TAG_MISSING` detail says to
+ * a caller who reaches it another way.
  */
 function projectLabel(p: NonNullable<MeGrantsResponse['projects']>[number]): string {
   return p.projectTag ? `${p.name}（${p.projectTag}）` : `${p.name}（需补路由标签）`;
