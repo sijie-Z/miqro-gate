@@ -131,6 +131,56 @@ class CostAllocationApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("fixed cost prorates a sub-day window instead of dropping the fraction of a day")
+    void fixedCostProratesSubDayWindow() throws Exception {
+        fx.insertCatalogAndSubscription();
+        fx.insertPrices();
+        fx.insertUsage(fx.projectA, "req-a-1", 1_000L, 500L); // occurred 2026-08-10T00:00:00Z
+
+        // 12h of the 30-day period (2026-08-01T00:00Z..2026-08-31T00:00Z) is
+        // 1/60 of the 100.00 plan price: 100 * 0.5 / 30 = 1.6666666667.
+        mockMvc.perform(post("/api/v1/admin/subscriptions/" + fx.subscriptionId + "/cost-allocation/allocate")
+                .param("from", "2026-08-10T00:00:00Z").param("to", "2026-08-10T12:00:00Z")
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1)).andExpect(jsonPath("$[0].usageCost").value(0.002))
+                .andExpect(jsonPath("$[0].fixedCost").value(1.6666666667))
+                .andExpect(jsonPath("$[0].allocatedAmount").value(1.6686666667));
+    }
+
+    @Test
+    @DisplayName("fixed cost prorates a window that covers one and a half days")
+    void fixedCostProratesPartialDayWindow() throws Exception {
+        fx.insertCatalogAndSubscription();
+        fx.insertPrices();
+        fx.insertUsage(fx.projectA, "req-a-1", 1_000L, 500L); // occurred 2026-08-10T00:00:00Z
+
+        // 36h of the 30-day period is 1.5 days: 100 * 1.5 / 30 = 5.0000000000.
+        mockMvc.perform(post("/api/v1/admin/subscriptions/" + fx.subscriptionId + "/cost-allocation/allocate")
+                .param("from", "2026-08-10T00:00:00Z").param("to", "2026-08-11T12:00:00Z")
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1)).andExpect(jsonPath("$[0].fixedCost").value(5.0));
+    }
+
+    @Test
+    @DisplayName("a window whose only usage rows carry no tokens still allocates the plan fixed cost")
+    void tokenlessUsageWindowStillAllocates() throws Exception {
+        fx.insertCatalogAndSubscription();
+        // COALESCED rows carry no usage of their own (V6): token columns are NULL.
+        fx.insertTokenlessCoalescedUsage(fx.projectA, Instant.parse("2026-08-10T00:00:00Z"));
+
+        // The token weight is zero for every project in the window, so a
+        // token-weighted split is undefined — but the plan fixed cost of the
+        // window (full 30-day period here: 100.00) must still be attributed
+        // rather than crashing the allocation.
+        mockMvc.perform(post("/api/v1/admin/subscriptions/" + fx.subscriptionId + "/cost-allocation/allocate")
+                .param("from", "2026-08-01T00:00:00Z").param("to", "2026-08-31T00:00:00Z")
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1)).andExpect(jsonPath("$[0].weightTokens").value(0))
+                .andExpect(jsonPath("$[0].fixedCost").value(100.0))
+                .andExpect(jsonPath("$[0].allocatedAmount").value(100.0));
+    }
+
+    @Test
     @DisplayName("unknown subscriptions are 404 and anonymous is 401")
     void errorPaths() throws Exception {
         mockMvc.perform(get("/api/v1/admin/subscriptions/" + UUID.randomUUID() + "/cost-allocation")
@@ -252,6 +302,10 @@ class CostAllocationApiIntegrationTest {
         }
 
         void insertUsage(UUID projectId, String providerRequestId, long input, long output) {
+            insertUsageAt(projectId, providerRequestId, input, output, Instant.parse("2026-08-10T00:00:00Z"));
+        }
+
+        void insertUsageAt(UUID projectId, String providerRequestId, long input, long output, Instant occurredAt) {
             jdbc.update("""
                     INSERT INTO usage_event
                         (id, tenant_id, provider_request_id, virtual_key_id, project_id, provider_product_id,
@@ -260,11 +314,34 @@ class CostAllocationApiIntegrationTest {
                     VALUES (:id, :tenantId, :providerRequestId, '00000000-0000-0000-0000-000000000000', :projectId,
                             :productId, :credentialId, :model, 'UPSTREAM', :input, :output, :total, 42, 200, TRUE,
                             FALSE, 'greq', :occurredAt)
-                    """, new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
-                    .addValue("providerRequestId", providerRequestId).addValue("projectId", projectId)
-                    .addValue("productId", productId).addValue("credentialId", credentialId).addValue("model", MODEL)
-                    .addValue("input", input).addValue("output", output).addValue("total", input + output)
-                    .addValue("occurredAt", Timestamp.from(Instant.parse("2026-08-10T00:00:00Z"))));
+                    """,
+                    new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                            .addValue("providerRequestId", providerRequestId).addValue("projectId", projectId)
+                            .addValue("productId", productId).addValue("credentialId", credentialId)
+                            .addValue("model", MODEL).addValue("input", input).addValue("output", output)
+                            .addValue("total", input + output).addValue("occurredAt", Timestamp.from(occurredAt)));
+        }
+
+        /**
+         * A COALESCED usage row the way the gateway writes it (ProxyController
+         * deduplicates a concurrent request onto an in-flight one): it belongs to the
+         * credential and project, but carries no usage of its own, so every token
+         * column is NULL (V6 header).
+         */
+        void insertTokenlessCoalescedUsage(UUID projectId, Instant occurredAt) {
+            jdbc.update("""
+                    INSERT INTO usage_event
+                        (id, tenant_id, provider_request_id, virtual_key_id, project_id, provider_product_id,
+                         credential_id, model_id, cache_level, input_tokens, output_tokens, total_tokens, latency_ms,
+                         upstream_status_code, is_complete, usage_missing, gateway_request_id, occurred_at)
+                    VALUES (:id, :tenantId, NULL, '00000000-0000-0000-0000-000000000000', :projectId,
+                            :productId, :credentialId, :model, 'COALESCED', NULL, NULL, NULL, 42, 200, TRUE,
+                            TRUE, 'greq-coalesced', :occurredAt)
+                    """,
+                    new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                            .addValue("projectId", projectId).addValue("productId", productId)
+                            .addValue("credentialId", credentialId).addValue("model", MODEL)
+                            .addValue("occurredAt", Timestamp.from(occurredAt)));
         }
     }
 

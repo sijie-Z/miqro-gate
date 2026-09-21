@@ -87,8 +87,7 @@ public class CostAllocationService {
 
         List<CostAllocation> rows = new ArrayList<>(usage.size());
         for (ProjectAllocation project : usage) {
-            BigDecimal fixedShare = fixedCost.multiply(BigDecimal.valueOf(project.tokens()))
-                    .divide(BigDecimal.valueOf(totalTokens), 10, RoundingMode.HALF_UP);
+            BigDecimal fixedShare = fixedShare(fixedCost, project.tokens(), totalTokens, usage.size());
             rows.add(allocationRepository
                     .upsert(new CostAllocation(UUID.randomUUID(), tenantId, subscriptionId, periodStart, periodEnd,
                             CostAllocationTargetType.PROJECT, project.projectId(), fixedShare, project.cost(),
@@ -172,16 +171,35 @@ public class CostAllocationService {
      * Fixed cost for the period: the subscription price prorated by the share of
      * the subscription period the allocation window covers. PAYG subscriptions have
      * no fixed cost. Returns zero when the subscription price is unknown.
+     *
+     * <p>
+     * The share is measured in milliseconds of the subscription period, not in
+     * whole days: a window that covers half of a day must cost half of a day's
+     * share, and a sub-day window must not collapse to zero.
      */
     private static BigDecimal fixedCostFor(UpstreamSubscription subscription, Instant from, Instant to) {
         if (subscription.billingMode() == BillingMode.PAYG || subscription.subscriptionPrice() == null
                 || subscription.periodStart() == null || subscription.periodEnd() == null) {
             return BigDecimal.ZERO;
         }
-        long subDays = Math.max(1, Duration.between(subscription.periodStart(), subscription.periodEnd()).toDays());
-        long windowDays = Duration.between(from, to).toDays();
-        return subscription.subscriptionPrice().multiply(BigDecimal.valueOf(windowDays))
-                .divide(BigDecimal.valueOf(subDays), 10, RoundingMode.HALF_UP);
+        long subMillis = Math.max(1, Duration.between(subscription.periodStart(), subscription.periodEnd()).toMillis());
+        long windowMillis = Duration.between(from, to).toMillis();
+        return subscription.subscriptionPrice().multiply(BigDecimal.valueOf(windowMillis))
+                .divide(BigDecimal.valueOf(subMillis), 10, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * One project's share of the fixed cost, weighted by its tokens. A window whose
+     * usage rows all carry NULL tokens (coalesced requests and cache hits carry no
+     * usage of their own, V6) has no weight to distribute, so the fixed cost is
+     * split evenly among the projects of the window instead of dividing by zero.
+     */
+    private static BigDecimal fixedShare(BigDecimal fixedCost, long tokens, long totalTokens, int projectCount) {
+        if (totalTokens == 0) {
+            return fixedCost.divide(BigDecimal.valueOf(projectCount), 10, RoundingMode.HALF_UP);
+        }
+        return fixedCost.multiply(BigDecimal.valueOf(tokens)).divide(BigDecimal.valueOf(totalTokens), 10,
+                RoundingMode.HALF_UP);
     }
 
     /** Metered cost of one project's usage at the latest price snapshots. */
