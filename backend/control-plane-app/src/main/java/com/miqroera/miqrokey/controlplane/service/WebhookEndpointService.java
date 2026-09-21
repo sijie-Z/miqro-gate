@@ -279,10 +279,50 @@ public class WebhookEndpointService {
                     .header("X-MiQroKey-Signature", "sha256=" + signature)
                     .POST(java.net.http.HttpRequest.BodyPublishers.ofByteArray(payload))
                     .timeout(java.time.Duration.ofMillis(endpoint.timeoutMs())).build();
-            var response = clientBuilder.build().send(request, java.net.http.HttpResponse.BodyHandlers.discarding());
-            return response.statusCode();
+            return statusOf(clientBuilder.build(), request, endpoint.timeoutMs());
         } finally {
             java.util.Arrays.fill(secret, (byte) 0);
+        }
+    }
+
+    /**
+     * Sends the request and returns its status, bounding the <em>whole</em> call —
+     * reading the response body included — by the endpoint's configured timeout.
+     *
+     * <p>
+     * {@code HttpRequest.timeout(..)} alone bounds only the wait for the response
+     * <em>headers</em>: a receiver that answers {@code 200} with a
+     * {@code Content-Length} and then stops writing leaves {@code send(..)} blocked
+     * on the body, however small the configured timeout is. That is not merely a
+     * lost alert — {@link AlertEventDispatcher#attempt} calls this synchronously
+     * from {@code @Scheduled} evaluation/retry work on Spring Boot's
+     * single-threaded default scheduler, so one stalled receiver would stall every
+     * periodic job in the control plane, and because the call never returns the
+     * attempt is never recorded and no backoff is armed either. The wait is
+     * therefore bounded here, and a stall surfaces as a recorded timeout failure.
+     * </p>
+     */
+    private static int statusOf(java.net.http.HttpClient client, java.net.http.HttpRequest request, int timeoutMs)
+            throws Exception {
+        var future = client.sendAsync(request, java.net.http.HttpResponse.BodyHandlers.discarding());
+        try {
+            return future.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS).statusCode();
+        } catch (java.util.concurrent.TimeoutException e) {
+            future.cancel(true);
+            throw new java.net.http.HttpTimeoutException("Webhook request timed out after " + timeoutMs
+                    + " ms: the receiver did not finish its response body");
+        } catch (java.util.concurrent.ExecutionException e) {
+            // Unwrap, so a header-phase timeout still arrives as the JDK's own
+            // HttpTimeoutException and any transport failure as its IOException.
+            Throwable cause = e.getCause();
+            if (cause instanceof Exception exception) {
+                throw exception;
+            }
+            throw new IllegalStateException(cause);
+        } catch (InterruptedException e) {
+            future.cancel(true);
+            Thread.currentThread().interrupt();
+            throw new java.io.IOException("Interrupted while awaiting the webhook response", e);
         }
     }
 
