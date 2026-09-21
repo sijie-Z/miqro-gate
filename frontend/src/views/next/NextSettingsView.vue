@@ -128,6 +128,25 @@ onMounted(() => {
         多项目 Key 的请求在无法判断项目时默认拒绝（400
         CONTEXT_REQUIRED）。配置本策略后，这类请求改走所选凭证，并记账到「未归属」系统项目；建议使用专用凭证（与项目授权资源分离）。
       </p>
+      <!-- #1306: the error used to live *inside* `v-if="policy"`, so a failed
+           load (policy stays null) unmounted the very paragraph that reports it.
+           It now sits outside, and offers a retry instead of F5. -->
+      <div
+        v-if="policyError"
+        class="ui-alert ui-alert--error"
+        data-testid="unattributed-policy-error"
+      >
+        <span>{{ policyError }}</span>
+        <UiButton
+          v-if="!policy"
+          variant="ghost"
+          size="sm"
+          data-testid="unattributed-policy-retry"
+          @click="loadPolicy"
+        >
+          重试
+        </UiButton>
+      </div>
       <div v-if="policy" class="next-settings__policy" data-testid="unattributed-policy-state">
         <span class="next-settings__policy-state">
           {{ policy.configured ? '已启用' : '未配置（失败关闭）' }}
@@ -176,7 +195,6 @@ onMounted(() => {
             清除
           </UiButton>
         </div>
-        <p v-if="policyError" class="ui-alert ui-alert--error">{{ policyError }}</p>
       </div>
     </section>
 
@@ -191,6 +209,23 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* #1306: `ui-alert` was referenced but never defined in this file, so the
+   message would not have looked like an error even when it rendered. */
+.ui-alert {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+  padding: var(--ui-space-3) var(--ui-space-4);
+  margin-top: var(--ui-space-3);
+  border-radius: var(--ui-radius-control);
+  font-size: var(--ui-font-size-sm);
+}
+
+.ui-alert--error {
+  background: var(--ui-danger-bg);
+  color: var(--ui-danger-fg);
+}
+
 .next-settings__policy {
   margin-top: var(--ui-space-3);
   display: flex;
