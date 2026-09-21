@@ -1,7 +1,7 @@
 package com.miqroera.miqrokey.controlplane.security;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -71,7 +71,7 @@ final class ProblemJson {
         body.put("requestId", requestId);
         try {
             return MAPPER.writeValueAsString(body);
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             // Every value is a String or an int; this cannot happen. Surfacing it beats
             // writing a half-built envelope the caller would then try to parse.
             throw new IllegalStateException("problem+json envelope is not serializable", e);
