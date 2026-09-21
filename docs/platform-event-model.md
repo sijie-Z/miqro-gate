@@ -3,7 +3,7 @@
 > **本稿只定语义，不含实现。**本轮不写 Java、不写 SQL、不建表、不写迁移、不改任何生产代码；文末 §7 的 schema 内容在本轮一律标注「未定稿，等 owner 拍板」（2026-09-20 已拍板，见下一行）。
 > **状态：已拍板（2026-09-20，Q1–Q4 全部按推荐 A）**；本稿口径自此生效。后续新信号按 §7.1 路线甲实现（当前无待实现项——既有队列饱和链已全链落地）。
 >
-> 事实依据：2026-09-20 对 develop（`8d345ffd`）的逐文件阅读，所有「现状」都给出 `文件:行号`；凡无法核实的写「未核实」，凡属本稿主张的写「设计立场」或「建议」，两者不混。附录 A 是坐标索引。
+> 事实依据：2026-09-20 对 develop（`8d345ffd`）的逐文件阅读，所有「现状」都给出 `文件:行号`；凡无法核实的写「未核实」，凡属本稿主张的写「设计立场」或「建议」，两者不混。附录 A 是坐标索引。2026-09-21：随 #1168/#1173 同步 §2.3/§5.2 评估失败语义（per-rule 兜底 + retryDue 保活），`AlertEvaluator` 全部行坐标回流至 develop `7b1672c9`。
 
 ---
 
@@ -23,9 +23,9 @@ MiQroGate 现有告警链只认识一种事件：「某个租户的事实行，�
 
 1. **主体是进程/部署级资源**——队列容量、磁盘、计划任务、网关实例本身，而不是某个租户的某次请求。队列饱和的样本：整个网关进程只有一条用量队列（`PostgresUsageEventBus.java:102`），它被哪个租户的请求填满，事前不可知。
 2. **产生点在租户上下文之外**——事实是热路径上一个纯内存计数，拿不到、也不应该去拿租户身份。样本：`PostgresUsageEventBus.java:133-144` 的 `offer()` 只自增内存计数（丢失计数 `AtomicLong totalDropped` :93，及丢弃时刻的高水位采样 :142/:151-153），不调度后台工作、不碰 JDBC；同文件 :55-62 的注释把这条设计写死为「hot path 只加计数器，从不调度工作、从不碰 JDBC」。
-3. **归因给单个租户会破坏不变量**——要么该租户收到它无法控制、也无法处置的事故，要么评估方必须去读别的租户的行；后者正是 `AlertEvaluator.java:168-172` 明确拒绝的事：「a tenant-owned rule alerting on the platform aggregate would fire on data its operator cannot see, and cannot silence」。
+3. **归因给单个租户会破坏不变量**——要么该租户收到它无法控制、也无法处置的事故，要么评估方必须去读别的租户的行；后者正是 `AlertEvaluator.java:186-190` 明确拒绝的事：「a tenant-owned rule alerting on the platform aggregate would fire on data its operator cannot see, and cannot silence」。
 
-反过来，**Tenant Alert Event（租户告警事件）** 是：事实行携带 `tenant_id`、由该租户自己的请求产生，规则属于同一租户，评估只读自己的行。这是现有告警链的原生形态（`AlertEvaluator.java:175-223` 全部按规则自身 `tenantId` 过滤）。
+反过来，**Tenant Alert Event（租户告警事件）** 是：事实行携带 `tenant_id`、由该租户自己的请求产生，规则属于同一租户，评估只读自己的行。这是现有告警链的原生形态（`AlertEvaluator.java:193-241` 全部按规则自身 `tenantId` 过滤）。
 
 ### 1.2 对照表
 
@@ -36,7 +36,7 @@ MiQroGate 现有告警链只认识一种事件：「某个租户的事实行，�
 | 现有样本 | 用量队列饱和（唯一） | `usage_missing` 行（:590-591）、`upstream_status_code` 行（:590）、预算/配额水位、审批/密钥到期通知 |
 | 事实承载 | `gateway_queue_signal` 挂默认 seed 租户（`PostgresUsageEventBus.java:79`、`V60:19-30`） | `usage_event` 等事实表行自带 `tenant_id`（V1 约定） |
 | 规则归属 | 形式上仍是 tenant-owned 规则，但必须建在 seed 租户下（`AlertRuleService.java:146-149` 无平台类别） | 规则属于事实所属租户（`V12:26`，CRUD 全部按租户过滤 `AlertRuleService.java:72-78`） |
-| 评估过滤 | 同一个 `WHERE tenant_id = :tenantId` 谓词；因为事实固定挂 seed，所以只有 seed 租户的规则能命中（`AlertEvaluator.java:200-203`） | 同一个谓词，天然按事实归属命中（`AlertEvaluator.java:178-188`） |
+| 评估过滤 | 同一个 `WHERE tenant_id = :tenantId` 谓词；因为事实固定挂 seed，所以只有 seed 租户的规则能命中（`AlertEvaluator.java:218-221`） | 同一个谓词，天然按事实归属命中（`AlertEvaluator.java:196-206`） |
 | 投递 | 完全相同：`AlertEventDispatcher`（信封 :167-173、退避 :213-215、attempt 表 :299-315） | 相同 |
 | 去重键 | 相同：`(tenant_id, rule_id, dedupe_key)`（`V12:52`），平台信号落在 seed 租户名下 | 相同 |
 | 多租户可见性 | 仅 seed 租户可见（设计立场见 §3） | 每租户各自可见 |
@@ -46,8 +46,8 @@ MiQroGate 现有告警链只认识一种事件：「某个租户的事实行，�
 ### 1.3 对三类信号的逐一归类（必要的澄清）
 
 - **队列饱和 → Platform Event。** 唯一无租户语义的样本：队列容量是整个进程的（`QueueConfig.QueueProperties @DefaultValue("50000")`、`backend/gateway-app/src/main/resources/application.yml:53`），丢弃发生在没有租户上下文的 `offer()`（`PostgresUsageEventBus.java:141-143`）。V60 迁移的注释里对这三类做过同样的核对：「Queue saturation is the only one with NO queryable fact」（`V60:4-9`）。
-- **解析失败 → Tenant Alert Event。** 判定点 `ProxyController.java:590-591`：`usageMissing = successful && tokens.isEmpty()`——上游 2xx 但解析不出 usage 块。这条事实落在该请求自己的 `usage_event` 行上（`usage_missing` 列，`PostgresUsageEventWriter.java:132,139`），行带 `tenant_id`。解析器本身是纯函数、失败只返回空 Optional、绝不影响被代理请求（`TokenUsageParser.java:27-31,113-116`）。告警早就有：`USAGE_MISSING_RATE`（`AlertEvaluator.java:178-182`）。
-- **供应商错误 → 拆成两层，都不是平台事件。** 第一层是行级事实：上游对某租户请求返回的非 2xx/429 写进该租户 `usage_event` 行的 `upstream_status_code`（`ProxyController.java:590` → `PostgresUsageEventWriter.java:132`），由 `UPSTREAM_ERROR_RATE`（`AlertEvaluator.java:183-188`）与 `UPSTREAM_RATE_LIMITED`（:207-211，ADR-0026 选项 D/#706）消费。第二层是网关进程内的错误体分类器 `UpstreamErrorClassifier.java:43-103`（ADR-0024 选项 B/#770）：它只做 Counter + 日志（:65-74），指标**无租户标签**（:67-69），今天既没有投递通道也不是告警输入。本稿的立场：**它保持观测工具身份，不建议升格为告警**；如果未来要告警「上游供应商整体在批量拒绝」（对全部租户），那是另一条新的平台事件候选，不在本轮范围。
+- **解析失败 → Tenant Alert Event。** 判定点 `ProxyController.java:590-591`：`usageMissing = successful && tokens.isEmpty()`——上游 2xx 但解析不出 usage 块。这条事实落在该请求自己的 `usage_event` 行上（`usage_missing` 列，`PostgresUsageEventWriter.java:132,139`），行带 `tenant_id`。解析器本身是纯函数、失败只返回空 Optional、绝不影响被代理请求（`TokenUsageParser.java:27-31,113-116`）。告警早就有：`USAGE_MISSING_RATE`（`AlertEvaluator.java:196-200`）。
+- **供应商错误 → 拆成两层，都不是平台事件。** 第一层是行级事实：上游对某租户请求返回的非 2xx/429 写进该租户 `usage_event` 行的 `upstream_status_code`（`ProxyController.java:590` → `PostgresUsageEventWriter.java:132`），由 `UPSTREAM_ERROR_RATE`（`AlertEvaluator.java:201-206`）与 `UPSTREAM_RATE_LIMITED`（:225-229，ADR-0026 选项 D/#706）消费。第二层是网关进程内的错误体分类器 `UpstreamErrorClassifier.java:43-103`（ADR-0024 选项 B/#770）：它只做 Counter + 日志（:65-74），指标**无租户标签**（:67-69），今天既没有投递通道也不是告警输入。本稿的立场：**它保持观测工具身份，不建议升格为告警**；如果未来要告警「上游供应商整体在批量拒绝」（对全部租户），那是另一条新的平台事件候选，不在本轮范围。
 - **顺带记录的候选清单（都不是本轮内容）**：F07 剩余的无数据源类目标（Plan 同步、磁盘等，`docs/feature-backlog.md:27`）以及各类系统计划任务失败（如 `PriceSyncScheduler.java:52`、`UsagePriceReconcileScheduler.java:56` 等带 seed 租户的系统任务）——它们形状上都符合平台事件判据，但数据源尚未存在；本模型的意义之一就是让它们以后接入时不再需要发明第二套形状。
 
 ---
@@ -75,14 +75,14 @@ MiQroGate 现有告警链只认识一种事件：「某个租户的事实行，�
 
 术语对齐：在这条链路里「派发」不是把事件推进队列，而是**控制面周期性地把事实评估成规则命中**，命中才生成事件实体并交给投递器。
 
-- **谁负责**：控制面 `AlertEvaluator.evaluateAll()`（`@Scheduled` 默认 5 分钟，`AlertEvaluator.java:78`；默认值来自注解，control-plane 的 application.yml 里没有覆盖项——本轮已核实）。流程：拉取全部 enabled 规则（:81-85）→ 逐规则算指标 `metric(type, tenantId, scopeJson)`（:93，平台信号分支 :200-203）→ 阈值比较 `value >= threshold`（:94）→ 计算去重键并 `INSERT INTO alert_events … ON CONFLICT DO NOTHING`（:114-124）→ 插入成功才 `dispatcher.deliverEvent(…)`（:125-128）。平台信号与租户信号在这里走的是同一个循环、同一套谓词。
-- **失败会怎样**：整个周期包在一个 try/catch 里（:87-89），任何异常只落 WARN 日志，本周期中止、下周期（5 分钟后）从头再来。有一个值得记下的现状细节：**单条规则的指标计算抛错会中止本周期的其余规则**（循环 :83-85 内没有 per-rule 兜底），且该周期不会执行 `retryDue()`（:86）——投递重试也随之推迟一个周期。
+- **谁负责**：控制面 `AlertEvaluator.evaluateAll()`（`@Scheduled` 默认 5 分钟，`AlertEvaluator.java:78`；默认值来自注解，control-plane 的 application.yml 里没有覆盖项——本轮已核实）。流程：拉取全部 enabled 规则并逐条评估（:81-93，含 per-rule 兜底 :87-92）→ 逐规则算指标 `metric(type, tenantId, scopeJson)`（:111，平台信号分支 :218-221）→ 阈值比较 `value >= threshold`（:112）→ 计算去重键并 `INSERT INTO alert_events … ON CONFLICT DO NOTHING`（:132-142）→ 插入成功才 `dispatcher.deliverEvent(…)`（:143-146）。平台信号与租户信号在这里走的是同一个循环、同一套谓词。
+- **失败会怎样**（2026-09-21 随 #1168/#1173 更新——此前「单规则异常中止本周期其余规则并连带跳过 `retryDue()`」的中断面已消除）：单条规则的求值异常在循环内由 **per-rule try/catch** 就地兜底（:87-92），只落一条带 `ruleId` 的 WARN（`Alert rule evaluation failed (ruleId=…, type=…)`），**其余规则照常评估**；周期级 catch（:94-98）现在只剩「规则查询本身失败」一个落点（该情形什么都没评估、仍落 WARN）；`retryDue()` 在其后的**独立 try**（:103-107）中执行——**评估阶段的任何异常都不再阻止到期投递重试**，sweep 自身异常也单独 WARN、不炸周期。任何异常都只落 WARN 日志，下周期（5 分钟后）从头再来。
 - **重试**：靠下一个评估周期，无补偿、无追赶（由此产生的语义缺口见 §5）。
-- **幂等键**：`(tenant_id, rule_id, dedupe_key)` 唯一约束（`V12:52`）+ 去重键构造 `type:小时桶`（`AlertEvaluator.java:105`，truncated to hours）→ 一条规则每个小时窗口最多产生一个事件；平台信号沿用同一构造，落在 seed 租户名下。
+- **幂等键**：`(tenant_id, rule_id, dedupe_key)` 唯一约束（`V12:52`）+ 去重键构造 `type:小时桶`（`AlertEvaluator.java:123`，truncated to hours）→ 一条规则每个小时窗口最多产生一个事件；平台信号沿用同一构造，落在 seed 租户名下。
 
 ### 2.4 投递（Deliver）
 
-- **谁负责**：`AlertEventDispatcher`。首次投递是同步的一次 HTTP 尝试（`deliver` :163-180 → `attempt` :182-207），地址来自规则的 `webhook_endpoint_id`（:155-161，端点是租户自有的 `webhook_endpoints` 行，`V12:9-22`）；重试不靠调度器，而是每次评估周期末尾由 `retryDue()`（:231-285，evaluator 在 :86 调用）扫描「已失败且退避到点」的投递。
+- **谁负责**：`AlertEventDispatcher`。首次投递是同步的一次 HTTP 尝试（`deliver` :163-180 → `attempt` :182-207），地址来自规则的 `webhook_endpoint_id`（:155-161，端点是租户自有的 `webhook_endpoints` 行，`V12:9-22`）；重试不靠调度器，而是每次评估周期末尾由 `retryDue()`（:231-285，evaluator 在 :104 调用）扫描「已失败且退避到点」的投递。
 - **失败会怎样**（现状语义，逐条核对过）：
   - 非 2xx 一律算投递失败（:192-197，注释明确「响应码」是运维可见的失败面）；
   - 5xx（及网络异常/超时）arm 重试；4xx 只记录、不重试（重试不可能成功）；
@@ -107,7 +107,7 @@ MiQroGate 现有告警链只认识一种事件：「某个租户的事实行，�
 |---|---|---|---|---|
 | 产生 | 网关热路径（内存计数） | 不可失败；进程崩溃丢未上报增量（边界） | 无 | 不适用 |
 | 存储 | 网关 1s 上报任务 + 专用 writer | 写失败/调度被拒 → delta 归还，下周期重报 | 下周期自动，无上限 | 随机行 id + 单行单事务（整行落地即一次计数） |
-| 派发 | 控制面 AlertEvaluator（5min 周期） | 周期级 catch + WARN；单规则异常会中止本周期其余规则与 retryDue | 下周期重来，无追赶 | `(tenant_id, rule_id, dedupe_key)` + `type:小时桶` |
+| 派发 | 控制面 AlertEvaluator（5min 周期） | per-rule 兜底：单规则异常只落 WARN（带 ruleId）、其余规则照评（#1168/#1173）；周期级 catch 只包规则查询；retryDue 独立 catch 不再被跳过 | 下周期重来，无追赶 | `(tenant_id, rule_id, dedupe_key)` + `type:小时桶` |
 | 投递 | AlertEventDispatcher | 非 2xx/异常 → arm 重试；4xx 终态；3 次耗尽后静默 | 指数退避最多 3 次 | `(event_id, endpoint_id, attempt)`；接收方建议按 eventId 幂等 |
 | 保留 | （无人负责，现状） | — | — | — |
 
@@ -117,8 +117,8 @@ MiQroGate 现有告警链只认识一种事件：「某个租户的事实行，�
 
 先把问题翻译准确：在本模型里没有「一个事件实体投递给 N 个租户」这种东西——平台事实是**共享的一批事实行**，各租户的规则各自评估它。所以「能否向多个租户派发」的实际含义是：**非 seed 租户的规则，能不能评估到平台事实行**。
 
-- **现状答案：不能。** 两处共同保证：事实行固定挂在 seed 租户（`PostgresUsageEventBus.java:79`、`V60:19-30`），评估 SQL 又固定按 `WHERE tenant_id = :tenantId` 过滤（`AlertEvaluator.java:200-203`）。非 seed 租户的同名规则聚合到空窗口，`COALESCE(SUM(dropped), 0)` 恒为 0，正阈值下恒不触发（有测试固定：`UsageQueueSaturationAlertIntegrationTest.java:202-249`，含 `threshold = 0` 的退化行为）。
-- **设计立场（推荐维持单承载点）**：本期不扇出。理由：产品形态是单客户私有化部署（`CLAUDE.md:31`），seed 租户就是部署方自己，V60 的注释也说这「在单租户部署下严格等价于一个全局信号」（`V60:29-30`）；一旦放开让所有租户的规则都能评估共享事实，就等于要推翻 `AlertEvaluator.java:168-172` 明文拒绝过的不变量（规则不得读他租户的行），需要新造「平台规则豁免」这一类别，复杂度和风险都不划算。
+- **现状答案：不能。** 两处共同保证：事实行固定挂在 seed 租户（`PostgresUsageEventBus.java:79`、`V60:19-30`），评估 SQL 又固定按 `WHERE tenant_id = :tenantId` 过滤（`AlertEvaluator.java:218-221`）。非 seed 租户的同名规则聚合到空窗口，`COALESCE(SUM(dropped), 0)` 恒为 0，正阈值下恒不触发（有测试固定：`UsageQueueSaturationAlertIntegrationTest.java:202-249`，含 `threshold = 0` 的退化行为）。
+- **设计立场（推荐维持单承载点）**：本期不扇出。理由：产品形态是单客户私有化部署（`CLAUDE.md:31`），seed 租户就是部署方自己，V60 的注释也说这「在单租户部署下严格等价于一个全局信号」（`V60:29-30`）；一旦放开让所有租户的规则都能评估共享事实，就等于要推翻 `AlertEvaluator.java:186-190` 明文拒绝过的不变量（规则不得读他租户的行），需要新造「平台规则豁免」这一类别，复杂度和风险都不划算。
 - **未来若要扇出，怎么去重**：**不需要 `(event_id, tenant_id)` 这类唯一键**。因为 `alert_events` 记录的是「某条规则在某窗口命中了」，天然每租户、每规则、每窗口一条，现有唯一约束 `(tenant_id, rule_id, dedupe_key)`（`V12:52`）就是扇出形态下的正确去重键——每个租户各生成自己的事件。只有当模型改成「平台事件先实体化为一条记录、再为每个租户维护投递状态」时，才需要 `(event_id, tenant_id)`；本稿不建议实体化（事实行 + 规则评估已经能表达一切，且复用全部现有机制）。
 - **候选（拍板用，见 §8 Q1）**：A 单承载点维持（推荐）/ B 全租户可见 / C 订阅表。三者代价列在 Q1。
 
@@ -135,7 +135,7 @@ MiQroGate 现有告警链只认识一种事件：「某个租户的事实行，�
 3. `AlertEvaluator` 用与租户信号完全相同的循环评估它（§2.3），命中即按下述信封投递。
 
 **匹配语义：按类型，不按 scope；评估在控制面。**
-- 每个平台信号对应一个规则 `type`（`USAGE_QUEUE_SATURATION` 是第一个样本，`AlertRuleService.java:146-149`），`scope_json` 不参与匹配（目前只为 `BUDGET_THRESHOLD`/`QUOTA_THRESHOLD` 而存在：`AlertRuleService.java:165-173`、`AlertEvaluator.java:219-220`）。
+- 每个平台信号对应一个规则 `type`（`USAGE_QUEUE_SATURATION` 是第一个样本，`AlertRuleService.java:146-149`），`scope_json` 不参与匹配（目前只为 `BUDGET_THRESHOLD`/`QUOTA_THRESHOLD` 而存在：`AlertRuleService.java:165-173`、`AlertEvaluator.java:237-238`）。
 - 评估归控制面，现在唯一可行：网关没有投递通道（`QueueSignal.java:9-11` 原文「The gateway cannot alert on this by itself — it has no delivery channel」）；网关也不写 `alert_events`（本轮 grep 核实：`backend/gateway-app/src/main`、`backend/queue-spi/src/main` 零命中），且 V60 注释已论证直写事件行不可能被投递（`retryDue()` 只扫已有失败尝试的行，`V60:14-17` 对应 `AlertEventDispatcher.java:231-247`）。
 
 **能复用什么（不需要新机制）**：规则 CRUD/审计/乐观锁（`AlertRuleService.java:46-140`）、评估调度与去重（§2.3）、`alert_events`、dispatcher 的签名/退避/attempt/retryDue（§2.4）、seed 承载模式（本仓已有 8 处同类先例，坐标见附录 A）。
@@ -143,11 +143,11 @@ MiQroGate 现有告警链只认识一种事件：「某个租户的事实行，�
 **必须新加什么（每增加一个平台信号类）**：
 1. 网关侧事实产生与上报（§2.1–2.2 形状）；
 2. 新事实表迁移 + `(tenant_id, occurred_at DESC)` 索引（V60:63-66 形状）；
-3. `AlertEvaluator` 的评估分支（返回计数或占比要显式区分，:200-203 的注释是范本）；
-4. **类型注册面——至少 8 处**（本轮逐一定位）：`AlertRuleService.java:146-149`（服务层校验，连同 open-admin 面一起覆盖）、`AlertEvaluator.java:177-222`、迁移 CHECK（模式样本 V60:39-46；现行最新一次为 V71:33-41）、`frontend/src/types/api.ts:75`、`NextAdminAlertRulesView.vue:45` 与 `:77`、`frontend/src/i18n/dict.ts:973`、`docs/api-contract.md:738` 与 `docs/database-schema.md:330,338`。这是目前接一个新信号的真实成本，也是 §8 Q2 的决策背景。
+3. `AlertEvaluator` 的评估分支（返回计数或占比要显式区分，:213-221 的注释与分支是范本）；
+4. **类型注册面——至少 8 处**（本轮逐一定位）：`AlertRuleService.java:146-149`（服务层校验，连同 open-admin 面一起覆盖）、`AlertEvaluator.java:195-240`、迁移 CHECK（模式样本 V60:39-46；现行最新一次为 V71:33-41）、`frontend/src/types/api.ts:75`、`NextAdminAlertRulesView.vue:45` 与 `:77`、`frontend/src/i18n/dict.ts:973`、`docs/api-contract.md:738` 与 `docs/database-schema.md:330,338`。这是目前接一个新信号的真实成本，也是 §8 Q2 的决策背景。
 5. 测试：至少覆盖「命中并签名投递」「阈值是计数不是比例」「非 seed 租户不触发」「跨窗去重」四类（样本：`UsageQueueSaturationAlertIntegrationTest.java:138-290`）。
 
-**与 `AlertEvaluator` 的对齐要求**：新分支必须保持 (i) 按 `:tenantId` 过滤（不变量，:168-172）；(ii) 阈值语义在注释和文档里说清「计数还是占比」（:200-203 是正面样本）；(iii) 去重沿用默认小时桶即可，不需要自定义。
+**与 `AlertEvaluator` 的对齐要求**：新分支必须保持 (i) 按 `:tenantId` 过滤（不变量，:186-190）；(ii) 阈值语义在注释和文档里说清「计数还是占比」（:213-221 是正面样本）；(iii) 去重沿用默认小时桶即可，不需要自定义。
 
 ---
 
@@ -159,9 +159,9 @@ MiQroGate 现有告警链只认识一种事件：「某个租户的事实行，�
 
 ### 5.2 评估失败
 
-周期级 catch + WARN（`AlertEvaluator.java:87-89`），下周期重来。两个必须写进文档的性质：
-- **单规则异常会中止本期其余规则**（§2.3），带病运行期间其他规则的告警时效受影响；
-- **无追赶**：指标是「滚动 1 小时」查询（:181 等），若控制面连续宕机超过 1 小时，窗口里的平台事实就滚出去了——**警报永远不会补发**。评估周期 5 分钟，所以短于 1 小时的罢工恢复后仍会在下个周期命中。这是本模型最需要 owner 知情的一个语义缺口，列为 §8 Q3。
+周期级 catch + WARN（`AlertEvaluator.java:94-98`；`retryDue()` 另有独立 catch :103-107，不再被评估异常跳过），下周期重来。两个必须写进文档的性质：
+- **单规则异常已被隔离（#1168/#1173）**：per-rule try/catch（:87-92）只让出错规则自己落带 `ruleId` 的 WARN——其余规则照常评估、`retryDue()` 照常执行（此前是「一错全停、投递重试随之推迟一个周期」；带病运行期间其他规则的告警时效与投递重试都不再受影响）；
+- **无追赶**：指标是「滚动 1 小时」查询（:199 等），若控制面连续宕机超过 1 小时，窗口里的平台事实就滚出去了——**警报永远不会补发**。评估周期 5 分钟，所以短于 1 小时的罢工恢复后仍会在下个周期命中。这是本模型最需要 owner 知情的一个语义缺口，列为 §8 Q3。
 
 ### 5.3 平台告警链自身的故障，谁来告警？
 
@@ -169,7 +169,7 @@ MiQroGate 现有告警链只认识一种事件：「某个租户的事实行，�
 
 | 本层故障 | 事实留在哪 | 谁来看 |
 |---|---|---|
-| 评估周期异常 | 控制面 WARN 日志（:87-88） | 运维日志/巡检（runbook） |
+| 评估周期异常（规则查询失败 / 单规则求值失败） | 控制面 WARN 日志（:90-97；per-rule 与周期级各带锚点） | 运维日志/巡检（runbook） |
 | 投递失败/耗尽 | attempt 表行（`V12:55-66`）+ WARN 日志（:201-205） | deliveries 接口 / 运维 |
 | 网关丢弃计数丢失（进程崩溃） | 无（内存态，边界见 §2.1） | 网关重启后的 WARN/低分证据链（归因成本高，属已知边界） |
 | 网关上报写失败 | delta 归还 + WARN（:264-268） | 同上，最终要么写出要么随进程消失 |
@@ -230,7 +230,7 @@ MiQroGate 现有告警链只认识一种事件：「某个租户的事实行，�
 ### Q1（来自 §3）：平台事件对非 seed 租户可见吗？
 
 - **A. 单承载点维持（推荐）**：事实挂 seed，只有 seed 租户的规则能评估。代价：多租户部署（今天没有，`CLAUDE.md:31` 是单客户私有化）里其他租户看不到平台事故；好处：零新机制、保住「规则不得读他租户行」的不变量、行为与已上线的 V60 完全一致。
-- **B. 全租户可见**：评估 SQL 去掉事实行的租户过滤，每个租户的同名规则各自触发。代价：要显式新造「平台规则豁免」类别，推翻 `AlertEvaluator.java:168-172` 的书面立场；当事租户收到它无法处置、也看不到原始数据的事故；告警量随租户数放大。
+- **B. 全租户可见**：评估 SQL 去掉事实行的租户过滤，每个租户的同名规则各自触发。代价：要显式新造「平台规则豁免」类别，推翻 `AlertEvaluator.java:186-190` 的书面立场；当事租户收到它无法处置、也看不到原始数据的事故；告警量随租户数放大。
 - **C. 订阅表**：新增平台事件订阅关系，只有订阅的租户能建平台规则。代价：新 schema + 管理面 + 权限语义，收益要在多租户形态下才兑现；可延后。
 
 ### Q2（来自 §4）：平台信号接入规则引擎的方式？
@@ -260,7 +260,7 @@ MiQroGate 现有告警链只认识一种事件：「某个租户的事实行，�
 
 ---
 
-## 附录 A. 关键坐标索引（供核对，全部为 develop `8d345ffd` 实测）
+## 附录 A. 关键坐标索引（供核对，全部为 develop `8d345ffd` 实测；评估器行已随 #1168/#1173 回流至 `7b1672c9`）
 
 | 主题 | 坐标 |
 |---|---|
@@ -275,7 +275,7 @@ MiQroGate 现有告警链只认识一种事件：「某个租户的事实行，�
 | 供应商错误（行级） | `ProxyController.java:541-542,590`；`PostgresUsageEventWriter.java:132,139` |
 | 供应商错误（进程级观测） | `backend/gateway-app/src/main/java/com/miqroera/miqrokey/gateway/proxy/UpstreamErrorClassifier.java:43-103`（枚举 :51-53；无标签指标 :67-69） |
 | 告警表 | `V12__webhook_alerts.sql:24-53`（唯一约束 :52）、`:55-66`（:65）、`:44`/`:59`（级联） |
-| 评估器 | `backend/control-plane-app/src/main/java/com/miqroera/miqrokey/controlplane/service/AlertEvaluator.java:78,81-89,92-129`（平台分支 :200-203；租户不变量 :168-172；占比/计数分支 :178-211） |
+| 评估器 | `backend/control-plane-app/src/main/java/com/miqroera/miqrokey/controlplane/service/AlertEvaluator.java:78,81-107,110-147`（平台分支 :218-221；租户不变量 :186-190；占比/计数分支 :196-229） |
 | 投递器 | `backend/control-plane-app/src/main/java/com/miqroera/miqrokey/controlplane/service/AlertEventDispatcher.java:34,54-93,163-180,182-215,231-285,299-315` |
 | 规则服务 | `backend/control-plane-app/src/main/java/com/miqroera/miqrokey/controlplane/service/AlertRuleService.java:72-78,106-111,132-140,146-149,165-173` |
 | 签名/测试/投递列表 | `WebhookEndpointService.java:37,225,279`；`AdminWebhookController.java:79-81,85-89` |
