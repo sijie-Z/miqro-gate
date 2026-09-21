@@ -95,8 +95,8 @@ const TEXT_EXEMPT: Array<[string, string, string]> = [
   // #1065 表族：子表本身没有 `:error`，但失败信号在紧邻处可见（红条或 toast）。
   ['NextAdminSkillsView.vue', '暂无版本记录', '同对话框有 revisionsError 红条'],
   ['NextAdminWebhooksView.vue', '暂无投递记录', '同抽屉有 deliveriesError 红条'],
-  ['NextProjectsView.vue', '还没有成员', '失败经 toast.error(加载成员失败) 可见'],
-  ['NextTeamsView.vue', '还没有成员', '失败经 toast.error(加载成员失败) 可见'],
+  // `还没有成员` 的两条豁免（团队/项目成员表）已随 #1356 删除：两处改接
+  // `:error="memberError"` + 重试，不再靠 7 秒就消失的 toast 撑可见性。
   // #657 既定决定：目录/依赖元数据降级为空（决策台账 A9）。
   ['NextProvidersView.vue', '暂无目录模型', '#657 目录元数据降级 + 同面板有 modelError 红条'],
 ];

@@ -299,4 +299,46 @@ describe('NextProjectsView', () => {
     expect(mockApi.listUsers).toHaveBeenCalledTimes(2);
     expect(document.querySelector('[data-testid="project-users-error"]')).toBeNull();
   });
+
+  it('#PH69: a failed member load must not leave the drawer claiming「还没有成员」', async () => {
+    mockApi.listProjectMembers.mockRejectedValue(
+      new (await import('@/api/http')).ApiError({
+        type: 'about:blank',
+        status: 500,
+        code: 'INTERNAL',
+        detail: '数据库不可用',
+        requestId: 'req-members',
+        title: 'Error',
+      }),
+    );
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="project-members-open"]').trigger('click');
+    await flushPromises();
+
+    const drawer = document.querySelector('[data-testid="project-members-drawer"]');
+    expect(drawer).toBeTruthy();
+    // Before the fix the drawer's only signal was a toast, gone after
+    // DURATION_ERROR (7 s) while the drawer stays open. What is left is an
+    // assertion about the project's roster that the failed read never
+    // established. #1160 — 加载中 → 失败 → 空 → 有数据 — and the sibling users
+    // list above in this same drawer already honours it.
+    expect(drawer!.textContent).not.toContain('还没有成员');
+    expect(drawer!.textContent).toContain('数据库不可用');
+    expect(drawer!.textContent).toContain('req-members');
+
+    // And the failure carries a way out, instead of 关掉抽屉再点开一次.
+    const retry = document.querySelector(
+      '[data-testid="project-members-drawer"] [data-testid="table-load-retry"]',
+    );
+    expect(retry, 'the members table must offer a retry').toBeTruthy();
+    mockApi.listProjectMembers.mockResolvedValue([member()]);
+    (retry as HTMLButtonElement).click();
+    await flushPromises();
+
+    const after = document.querySelector('[data-testid="project-members-drawer"]');
+    expect(after!.textContent).toContain('alice');
+    expect(after!.textContent).not.toContain('数据库不可用');
+  });
 });
