@@ -1,10 +1,10 @@
 package com.miqroera.miqrokey.gateway.proxy;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 import com.miqroera.miqrokey.domain.cache.CacheKey;
 import com.miqroera.miqrokey.gateway.vkey.AuthContext;
 import org.springframework.stereotype.Component;
@@ -277,7 +277,7 @@ public final class CacheKeyFactory {
             JsonNode stripped = root.deepCopy();
             if (stripped.isObject()) {
                 ObjectNode clean = objectMapper.createObjectNode();
-                stripped.fields().forEachRemaining(entry -> {
+                stripped.properties().forEach(entry -> {
                     if (!STRIP_FIELDS.contains(entry.getKey())) {
                         clean.set(entry.getKey(), entry.getValue());
                     }
@@ -296,7 +296,7 @@ public final class CacheKeyFactory {
         if (node.isObject()) {
             ObjectNode sorted = JsonNodeFactory.instance.objectNode();
             List<Map.Entry<String, JsonNode>> fields = new ArrayList<>();
-            node.fields().forEachRemaining(fields::add);
+            fields.addAll(node.properties());
             fields.sort(Map.Entry.comparingByKey());
             for (Map.Entry<String, JsonNode> field : fields) {
                 sorted.set(field.getKey(), sortKeysRecursively(field.getValue()));

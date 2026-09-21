@@ -1,6 +1,6 @@
 package com.miqroera.miqrokey.gateway.retention;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import com.miqroera.miqrokey.domain.model.RetentionEnvelope;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -46,7 +46,7 @@ class KafkaRetentionPublisherTest {
         // the JSON round-trips without surprises: the field set is exactly the
         // envelope's
         java.util.List<String> names = new java.util.ArrayList<>();
-        node.fieldNames().forEachRemaining(names::add);
+        node.propertyNames().forEach(names::add);
         assertThat(names).containsExactlyInAnyOrder("eventId", "tenantId", "userId", "virtualKeyId", "wireProtocol",
                 "gatewayRequestId", "occurredAt", "keyVersion", "direction", "textCharCount", "truncated", "ciphertext",
                 "nonce");

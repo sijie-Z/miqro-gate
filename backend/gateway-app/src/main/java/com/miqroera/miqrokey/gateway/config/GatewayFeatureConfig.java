@@ -110,7 +110,7 @@ public class GatewayFeatureConfig {
     @ConditionalOnMissingBean
     public CredentialInjector jdbcCredentialInjector(RouteSnapshotProvider routeSnapshotProvider,
             ObjectProvider<com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider> keyEncryptionProvider,
-            Scheduler credentialDecryptScheduler, com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
+            Scheduler credentialDecryptScheduler, tools.jackson.databind.ObjectMapper objectMapper) {
         return new JdbcCredentialInjector(routeSnapshotProvider, keyEncryptionProvider, credentialDecryptScheduler,
                 objectMapper);
     }

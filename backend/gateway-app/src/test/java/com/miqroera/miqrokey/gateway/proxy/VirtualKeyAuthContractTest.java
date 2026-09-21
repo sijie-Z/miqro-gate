@@ -1,7 +1,7 @@
 package com.miqroera.miqrokey.gateway.proxy;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.cache.CachedResponse;
 import com.miqroera.miqrokey.cache.CaffeineCacheProvider;
 import com.miqroera.miqrokey.cache.GatewayResponseCache;
@@ -370,7 +370,7 @@ class VirtualKeyAuthContractTest {
 
             JsonNode root = OBJECT_MAPPER.readTree(body);
             assertThat(root.path("object").asText()).isEqualTo("list");
-            List<String> ids = root.path("data").findValuesAsText("id");
+            List<String> ids = root.path("data").findValuesAsString("id");
             List<String> expected = GatewayTestKeys.MODELS_ALLOWED.stream().sorted().toList();
             assertThat(ids).isEqualTo(expected);
         }
@@ -421,7 +421,7 @@ class VirtualKeyAuthContractTest {
             byte[] body = webTestClient.get().uri("/v1/models").header("Authorization", "Bearer " + key.presented())
                     .exchange().expectStatus().isOk().expectHeader().contentType("application/json").expectBody()
                     .returnResult().getResponseBody();
-            return OBJECT_MAPPER.readTree(body).path("data").findValuesAsText("id");
+            return OBJECT_MAPPER.readTree(body).path("data").findValuesAsString("id");
         }
     }
 

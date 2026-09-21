@@ -81,7 +81,7 @@ class SseUsageObserverTest {
     void boundsMalformedEvents() {
         byte[] oversized = ("data: " + "x".repeat(65) + "\n\n").getBytes(StandardCharsets.UTF_8);
         var buffer = new DefaultDataBufferFactory().wrap(oversized);
-        SseUsageObserver observer = new SseUsageObserver(new com.fasterxml.jackson.databind.ObjectMapper(), 32);
+        SseUsageObserver observer = new SseUsageObserver(new tools.jackson.databind.ObjectMapper(), 32);
 
         var observed = observer.wrap(Flux.just(buffer)).blockFirst();
 
@@ -145,7 +145,7 @@ class SseUsageObserverTest {
     @DisplayName("bounds retained observations to the configured maximum")
     void boundsObservationsToMaximum() {
         String event = "data: {\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}\r\n\r\n";
-        SseUsageObserver observer = new SseUsageObserver(new com.fasterxml.jackson.databind.ObjectMapper(),
+        SseUsageObserver observer = new SseUsageObserver(new tools.jackson.databind.ObjectMapper(),
                 SseUsageObserver.DEFAULT_MAX_EVENT_BYTES, 3);
         var buffer = new DefaultDataBufferFactory()
                 .wrap((event + event + event + event + event).getBytes(StandardCharsets.UTF_8));

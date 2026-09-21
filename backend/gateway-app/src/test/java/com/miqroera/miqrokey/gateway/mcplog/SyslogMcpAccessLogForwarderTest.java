@@ -1,7 +1,7 @@
 package com.miqroera.miqrokey.gateway.mcplog;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.domain.model.McpAccessLogEntry;
 import com.miqroera.miqrokey.domain.model.McpAccessStatus;
 import com.miqroera.miqrokey.testing.GatewayTestKeys;

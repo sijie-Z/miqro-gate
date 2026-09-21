@@ -1,6 +1,6 @@
 package com.miqroera.miqrokey.gateway.mcplog;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.domain.model.McpAccessLogEntry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
