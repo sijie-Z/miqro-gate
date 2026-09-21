@@ -155,6 +155,11 @@ public class ProxyController {
      */
     private final LlmCircuitBreakerRegistry circuitBreaker;
     private final UpstreamErrorClassifier upstreamErrorClassifier;
+    /**
+     * Content-filter shadow (#740, default off): local-vocabulary observation of
+     * the request/reply bytes — counts and a content-free log line only.
+     */
+    private final ContentFilterShadow contentFilterShadow;
 
     public ProxyController(VirtualKeyResolver keyResolver, CredentialInjector credentialInjector,
             GatewayResponseCache responseCache, ObjectProvider<RequestCoalescer> coalescerProvider,
@@ -165,13 +170,14 @@ public class ProxyController {
             BuiltInAdapterRegistry adapterRegistry, ProviderCatalog providerCatalog, RetentionSidecar retentionSidecar,
             GatewayTtfbMetrics ttfbMetrics, ClientAddressResolver clientAddressResolver,
             ContextLimitGuard contextLimitGuard, LlmCircuitBreakerRegistry circuitBreaker,
-            UpstreamErrorClassifier upstreamErrorClassifier) {
+            UpstreamErrorClassifier upstreamErrorClassifier, ContentFilterShadow contentFilterShadow) {
         this.retentionSidecar = retentionSidecar;
         this.clientAddressResolver = clientAddressResolver;
         this.ttfbMetrics = ttfbMetrics;
         this.contextLimitGuard = contextLimitGuard;
         this.circuitBreaker = circuitBreaker;
         this.upstreamErrorClassifier = upstreamErrorClassifier;
+        this.contentFilterShadow = contentFilterShadow;
         this.keyResolver = keyResolver;
         this.credentialInjector = credentialInjector;
         this.responseCache = responseCache;
@@ -259,6 +265,10 @@ public class ProxyController {
             // Compliance retention side-channel (ADR-0014, default off):
             // best-effort, never affects the forwarded outcome.
             retentionSidecar.capture(exchange.getRequest().getPath().value(), body, ctx, requestId);
+            // #740 shadow v1 (ADR-0027, default off): local-vocabulary observation
+            // of the buffered request body — counts and a content-free log line only.
+            // Read-only: the bytes forwarded below are exactly `body`.
+            contentFilterShadow.observeInput(body);
             JsonNode root = parseQuietly(body);
             String modelName = root != null && root.has("model") && root.get("model").isTextual()
                     ? root.get("model").asText()
@@ -595,6 +605,11 @@ public class ProxyController {
                         // (best-effort; disabled unless the tenant opted in).
                         retentionSidecar.captureOutput(exchange.getRequest().getURI().getPath(),
                                 attempt.collector.bytes(), isSse, ctx, requestId, attempt.collector.overflow());
+                        // #740 shadow v1 (ADR-0027, default off): observe the fully
+                        // written reply bytes (same bounded collector, same overflow
+                        // rule) — observation only; the client already received the
+                        // response byte-for-byte.
+                        contentFilterShadow.observeOutput(attempt.collector.bytes(), attempt.collector.overflow());
 
                         CachedResponse cached = null;
                         boolean cacheableResponse = cacheKey != null && successful && !attempt.collector.overflow()
