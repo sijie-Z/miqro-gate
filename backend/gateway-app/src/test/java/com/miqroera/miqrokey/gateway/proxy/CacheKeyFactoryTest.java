@@ -422,5 +422,61 @@ class CacheKeyFactoryTest {
             byte[] b = json("{\"model\":\"gpt-5.2\",\"instructions\":\"answer verbosely\",\"input\":[\"hi\"]}");
             assertThat(factory.compute(ctx, "gpt-5.2", a)).isNotEqualTo(factory.compute(ctx, "gpt-5.2", b));
         }
+
+        @Test
+        @DisplayName("Anthropic stop_sequences is a key dimension")
+        void anthropicStopSequencesSplit() {
+            byte[] unbounded = json("{\"model\":\"claude-3-7-sonnet\",\"max_tokens\":256,"
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            byte[] bounded = json("{\"model\":\"claude-3-7-sonnet\",\"max_tokens\":256,"
+                    + "\"stop_sequences\":[\"\\n\\nHuman:\"],\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+
+            // Anthropic names this parameter "stop_sequences"; "stop" (OpenAI's
+            // name) is already a dimension, so an Anthropic client that bounds the
+            // generation must not replay an unbounded response.
+            assertThat(factory.compute(ctx, "claude-3-7-sonnet", unbounded))
+                    .isNotEqualTo(factory.compute(ctx, "claude-3-7-sonnet", bounded));
+        }
+
+        @Test
+        @DisplayName("max_completion_tokens is a key dimension (current OpenAI name)")
+        void maxCompletionTokensSplit() {
+            byte[] tiny = json("{\"model\":\"gpt-4o-mini\",\"max_completion_tokens\":16,"
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            byte[] large = json("{\"model\":\"gpt-4o-mini\",\"max_completion_tokens\":4096,"
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+
+            // max_tokens (the legacy name) is a dimension; max_completion_tokens is
+            // the name current OpenAI models require, and must split identically.
+            assertThat(factory.compute(ctx, "gpt-4o-mini", tiny))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", large));
+        }
+
+        @Test
+        @DisplayName("logprobs / top_logprobs are key dimensions")
+        void logprobsSplit() {
+            byte[] plain = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            byte[] withLogprobs = json("{\"model\":\"gpt-4o-mini\",\"logprobs\":true,\"top_logprobs\":5,"
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+
+            // A client that asked for token-level probabilities must not receive a
+            // cached response that carries none.
+            assertThat(factory.compute(ctx, "gpt-4o-mini", plain))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", withLogprobs));
+        }
+
+        @Test
+        @DisplayName("stream_options.include_usage is a key dimension")
+        void streamOptionsIncludeUsageSplits() {
+            byte[] withoutUsage = json("{\"model\":\"gpt-4o-mini\",\"stream\":true,"
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            byte[] withUsage = json("{\"model\":\"gpt-4o-mini\",\"stream\":true,"
+                    + "\"stream_options\":{\"include_usage\":true},\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+
+            // include_usage makes the upstream append a final usage chunk; replaying
+            // a stream that lacks it violates the client's stream contract.
+            assertThat(factory.compute(ctx, "gpt-4o-mini", withoutUsage))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", withUsage));
+        }
     }
 }
