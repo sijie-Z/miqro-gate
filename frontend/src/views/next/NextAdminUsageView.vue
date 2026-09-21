@@ -901,8 +901,14 @@ const timelineError = ref('');
 /** 404 is not a failure: it means the id has no lifecycle row at all. */
 const timelineMissing = ref(false);
 
+// #1231: request-sequence guard — a slow timeline for one request must not
+// land after the drawer re-targets another (close it mid-flight, open the
+// next row), which would paint one call's body under another's header.
+let timelineRequestSeq = 0;
+
 async function openTimeline(gatewayRequestId?: string) {
   if (!gatewayRequestId) return;
+  const seq = ++timelineRequestSeq;
   timelineGatewayRequestId.value = gatewayRequestId;
   timelineOpen.value = true;
   timeline.value = null;
@@ -910,8 +916,15 @@ async function openTimeline(gatewayRequestId?: string) {
   timelineMissing.value = false;
   timelineLoading.value = true;
   try {
-    timeline.value = await api.adminUsageTimeline(gatewayRequestId);
+    const result = await api.adminUsageTimeline(gatewayRequestId);
+    if (seq !== timelineRequestSeq) {
+      return; // a newer timeline won — this response is stale
+    }
+    timeline.value = result;
   } catch (error) {
+    if (seq !== timelineRequestSeq) {
+      return;
+    }
     if (error instanceof ApiError && error.status === 404) {
       timelineMissing.value = true;
     } else if (error instanceof ApiError) {
@@ -920,7 +933,9 @@ async function openTimeline(gatewayRequestId?: string) {
       timelineError.value = '加载调用时间线失败，请稍后重试。';
     }
   } finally {
-    timelineLoading.value = false;
+    if (seq === timelineRequestSeq) {
+      timelineLoading.value = false;
+    }
   }
 }
 

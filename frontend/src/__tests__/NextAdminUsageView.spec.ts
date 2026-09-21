@@ -1003,6 +1003,64 @@ describe('NextAdminUsageView', () => {
     wrapper.unmount();
   });
 
+  it('drops a stale timeline response for a request the user left behind (#1231)', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    const pending: Array<{ id: string; resolve: (v: ModelCallTimeline) => void }> = [];
+    mockApi.adminUsageTimeline.mockImplementation(
+      (id) =>
+        new Promise<ModelCallTimeline>((resolve) => {
+          pending.push({ id, resolve });
+        }),
+    );
+
+    // gw-1's timeline is requested first…
+    await wrapper.find('[data-testid="usage-timeline-gw-1"]').trigger('click');
+    await flushPromises();
+
+    // …but the user closes the drawer before it answers, and opens gw-2's.
+    const panel = drawerEl('usage-timeline-drawer') as HTMLElement | null;
+    expect(panel, 'timeline drawer should render').toBeTruthy();
+    panel!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await flushPromises();
+    expect(drawerEl('usage-timeline-drawer')).toBeNull();
+
+    await wrapper.find('[data-testid="usage-timeline-gw-2"]').trigger('click');
+    await flushPromises();
+    expect(pending.map((p) => p.id)).toEqual(['gw-1', 'gw-2']);
+
+    // gw-2 answers first and paints.
+    pending[1]!.resolve(
+      timelineFor('SUCCEEDED', {
+        gatewayRequestId: 'gw-2',
+        upstreamRequestId: 'up-B',
+        modelId: 'model-from-gw2',
+      }),
+    );
+    await flushPromises();
+    expect(drawerEl('usage-timeline-reqid')!.textContent).toContain('gw-2');
+
+    // The stale gw-1 answer lands second and must NOT repaint the body under
+    // the gw-2 header.
+    pending[0]!.resolve(
+      timelineFor('SUCCEEDED', {
+        gatewayRequestId: 'gw-1',
+        upstreamRequestId: 'up-A',
+        modelId: 'model-from-gw1',
+      }),
+    );
+    await flushPromises();
+    const drawer = drawerEl('usage-timeline-drawer')!;
+    expect(drawer.textContent).toContain('up-B');
+    expect(drawer.textContent, 'stale gw-1 timeline repainted under the gw-2 header').toContain(
+      'model-from-gw2',
+    );
+    expect(drawer.textContent).not.toContain('up-A');
+
+    wrapper.unmount();
+  });
+
   it('renders every lifecycle terminal plus the un-finalized state (#707)', async () => {
     const wrapper = mountView();
     await flushPromises();
