@@ -13,6 +13,12 @@ vi.mock('@/api', () => ({
   submitModelApproval: vi.fn(),
 }));
 
+// #1201: the view reads ?model=&keyId= via useRoute() for plaza deep-links;
+// the default mount carries an empty query (no auto-open).
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: {} }),
+}));
+
 const mockApi = vi.mocked(api);
 
 const SelectStub = defineComponent({
