@@ -108,6 +108,17 @@ public class McpProxyController {
     /** SSE keep-alive comment cadence (issue #356). */
     private static final Duration SSE_KEEP_ALIVE = Duration.ofSeconds(15);
 
+    /**
+     * Storage widths of the caller-controlled {@code mcp_access_log} columns (V29
+     * {@code rpc_method}/{@code tool_name}, V45 {@code session_id}). An unbounded
+     * value makes the INSERT fail with SQLSTATE 22001 and — before #1346 — took the
+     * whole batch (and every later row) down with it, so the audit copy is bounded
+     * here, at the single point where the entry is built.
+     */
+    private static final int MAX_RPC_METHOD_CHARS = 64;
+    private static final int MAX_TOOL_NAME_CHARS = 128;
+    private static final int MAX_SESSION_ID_CHARS = 128;
+
     private final RouteSnapshotProvider routeSnapshotProvider;
     private final WebClient proxyWebClient;
     private final ObjectMapper objectMapper;
@@ -509,12 +520,29 @@ public class McpProxyController {
     /**
      * FORWARDED rows carry the upstream first-byte latency (#358); others pass
      * null.
+     *
+     * <p>
+     * The three caller-controlled values are truncated to their column widths
+     * (#1346): an oversize value used to fail the INSERT (SQLSTATE 22001), which
+     * made the queue requeue the batch forever and silently stop writing
+     * <em>every</em> access-log row. Truncating keeps the row — a lossy audit line
+     * still answers "who called what, when, and how was it answered" — where
+     * rejecting it would grow a new caller-visible failure mode on the data plane.
+     * </p>
      */
     private void record(CallContext context, String rpcMethod, String toolName, McpAccessStatus status,
             Integer httpStatus, Long ttfbMs) {
         accessLogSink.record(new McpAccessLogEntry(UUID.randomUUID(), context.service.tenantId(), context.service.id(),
-                context.service.name(), context.consumer.id(), context.consumer.name(), rpcMethod, toolName, status,
-                httpStatus, context.gatewayRequestId, Instant.now(), context.sessionId, ttfbMs));
+                context.service.name(), context.consumer.id(), context.consumer.name(),
+                bounded(rpcMethod, MAX_RPC_METHOD_CHARS), bounded(toolName, MAX_TOOL_NAME_CHARS), status, httpStatus,
+                context.gatewayRequestId, Instant.now(), bounded(context.sessionId, MAX_SESSION_ID_CHARS), ttfbMs));
+    }
+
+    /**
+     * Truncates to a {@code varchar(n)} column; short and null values pass through.
+     */
+    private static String bounded(String value, int maxChars) {
+        return value == null || value.length() <= maxChars ? value : value.substring(0, maxChars);
     }
 
     private static final class CallContext {

@@ -4,6 +4,7 @@ import com.miqroera.miqrokey.domain.model.McpAccessLogEntry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -24,9 +25,15 @@ import java.util.concurrent.atomic.AtomicLong;
  * <li>{@code record()} only offers to a bounded queue — never blocks the
  * Reactor event loop and never throws.</li>
  * <li>Saturation drops the entry and counts it (throttled WARN).</li>
- * <li>A failed batch is re-enqueued and retried on the next flush; the
- * idempotent writer ({@code ON CONFLICT DO NOTHING} on
- * {@code (tenant_id, gateway_request_id)}) makes retries safe.</li>
+ * <li>A batch that failed for a <em>transient</em> reason is re-enqueued and
+ * retried on the next flush; the idempotent writer
+ * ({@code ON CONFLICT DO NOTHING} on {@code (tenant_id, gateway_request_id)})
+ * makes retries safe.</li>
+ * <li>A batch that failed for a <em>deterministic</em> reason (e.g. SQLSTATE
+ * 22001 on an oversize value) is retried row by row instead, so the unwritable
+ * row is abandoned and counted while its healthy neighbours still land (#1346)
+ * — requeueing it whole would re-drain it with every later entry and stop all
+ * access-log writes for good.</li>
  * <li>Flushes run on a dedicated single-thread scheduler, never on the event
  * loop or the shared scheduling thread.</li>
  * </ul>
@@ -42,6 +49,7 @@ public final class McpAccessLogQueue implements McpAccessLogSink, AutoCloseable 
     private final McpAccessLogWriter writer;
     private final List<McpAccessLogForwarder> forwarders;
     private final AtomicLong dropped = new AtomicLong();
+    private final AtomicLong unwritable = new AtomicLong();
     private final ScheduledExecutorService scheduler;
 
     public McpAccessLogQueue(int capacity, long flushIntervalMs, McpAccessLogWriter writer) {
@@ -80,6 +88,15 @@ public final class McpAccessLogQueue implements McpAccessLogSink, AutoCloseable 
     }
 
     /**
+     * Number of entries abandoned because the writer rejected them for a reason no
+     * retry can fix (#1346) — a bounded, per-request audit gap instead of a stalled
+     * pipeline (observability + tests).
+     */
+    public long unwritableCount() {
+        return unwritable.get();
+    }
+
+    /**
      * Drains everything currently queued into the writer (package-private for
      * tests).
      */
@@ -93,29 +110,95 @@ public final class McpAccessLogQueue implements McpAccessLogSink, AutoCloseable 
         if (batch.isEmpty()) {
             return;
         }
+        List<McpAccessLogEntry> written;
         try {
             writer.writeBatch(batch);
+            written = batch;
         } catch (Exception e) {
-            // Audit rows are worth more than the usage queue's drop semantics:
-            // requeue for the next flush (idempotent writes make retries safe).
-            // Re-offer failures (queue became full again) fall back to drop + count.
-            for (McpAccessLogEntry entry : batch) {
-                if (!queue.offer(entry)) {
-                    dropped.incrementAndGet();
-                }
+            if (!isDeterministic(e)) {
+                // Audit rows are worth more than the usage queue's drop semantics:
+                // requeue for the next flush (idempotent writes make retries safe).
+                // Re-offer failures (queue became full again) fall back to drop + count.
+                requeue(batch);
+                log.error("MCP access log batch write of {} rows failed; requeued for retry", batch.size(), e);
+                return;
             }
-            log.error("MCP access log batch write of {} rows failed; requeued for retry", batch.size(), e);
-            return;
+            // #1346: this batch can never succeed as a whole, so requeueing it
+            // would re-drain it together with every later entry — and the
+            // pipeline would never write anything again. Give the healthy rows
+            // their own attempt and abandon only the ones that are truly
+            // unwritable.
+            log.error("MCP access log batch write of {} rows failed deterministically; retrying row by row",
+                    batch.size(), e);
+            written = writeOneByOne(batch);
+            if (written.isEmpty()) {
+                return;
+            }
         }
         // I19: fan out only AFTER the durable write — a requeued batch is never
         // forwarded twice, and a failing sink never affects the audit rows.
         for (McpAccessLogForwarder forwarder : forwarders) {
             try {
-                forwarder.forward(batch);
+                forwarder.forward(written);
             } catch (Exception e) {
                 log.warn("MCP access log forwarder {} failed: {}", forwarder.name(), e.getMessage());
             }
         }
+    }
+
+    private void requeue(List<McpAccessLogEntry> batch) {
+        for (McpAccessLogEntry entry : batch) {
+            if (!queue.offer(entry)) {
+                dropped.incrementAndGet();
+            }
+        }
+    }
+
+    /**
+     * Last resort for a batch that cannot be written as a unit: retry every entry
+     * on its own so one bad row no longer takes its healthy neighbours down with
+     * it, and return the entries that made it (they are the ones to forward).
+     */
+    private List<McpAccessLogEntry> writeOneByOne(List<McpAccessLogEntry> batch) {
+        List<McpAccessLogEntry> written = new ArrayList<>(batch.size());
+        for (McpAccessLogEntry entry : batch) {
+            try {
+                writer.writeBatch(List.of(entry));
+                written.add(entry);
+            } catch (Exception e) {
+                long count = unwritable.incrementAndGet();
+                // Only gateway-generated fields are logged: the entry's
+                // caller-controlled values must not reach a log line.
+                log.error(
+                        "MCP access log row abandoned (unwritable after every retry): requestId={} status={}"
+                                + " service={} — {} rows abandoned so far",
+                        entry.gatewayRequestId(), entry.status(), entry.serviceName(), count, e);
+            }
+        }
+        return written;
+    }
+
+    /**
+     * Whether a retry can never fix this failure: PostgreSQL data exceptions (class
+     * 22 — {@code 22001} value too long, {@code 22003} numeric overflow, …) and
+     * integrity constraint violations (class 23). Everything else — connection loss
+     * (class 08), deadlock/serialization (class 40), timeouts, an unrecognized
+     * error — keeps the requeue path, so a transient outage is never converted into
+     * data loss.
+     */
+    private static boolean isDeterministic(Throwable error) {
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            if (cause instanceof SQLException sqlException) {
+                String state = sqlException.getSQLState();
+                if (state != null && (state.startsWith("22") || state.startsWith("23"))) {
+                    return true;
+                }
+            }
+            if (cause.getCause() == cause) {
+                break;
+            }
+        }
+        return false;
     }
 
     @Override
