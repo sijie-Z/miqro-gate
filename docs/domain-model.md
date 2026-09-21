@@ -242,5 +242,6 @@ PlanSeat 不是所有团队 Plan 都必须存在。腾讯企业 Token Plan 更�
 
 - UsageEvent、QuotaSnapshot、CostAllocation：永久，直到管理员手动删除。
 - AdminAuditEvent：永久，不随 UsageEvent 删除。
-- 登录会话、临时导出文件、告警投递重试：按配置清理。
+- 登录会话、临时导出文件：按配置清理（`ExpiredRecordSweeper`，每小时一轮）。
+- 告警投递重试、告警事件、队列丢弃信号：**不清理**，只随规则/端点级联删除；重试耗尽即静默终止，无 dead-letter、无重放（2026-09-20 拍板 Q4=A，见 `platform-event-model.md` §2.5）。
 - 删除用量时必须指定明确时间范围、二次确认并写入 AdminAuditEvent。
