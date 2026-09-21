@@ -1,6 +1,6 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
 import com.miqroera.miqrokey.controlplane.dto.LoginRequest;
 import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;

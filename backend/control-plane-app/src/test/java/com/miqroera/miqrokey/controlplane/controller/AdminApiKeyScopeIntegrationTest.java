@@ -1,6 +1,6 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;

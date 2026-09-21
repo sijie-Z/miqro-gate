@@ -1,7 +1,7 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
 import org.junit.jupiter.api.AfterEach;
@@ -178,9 +178,9 @@ class OpenApiSpecIntegrationTest {
                 .isEqualTo(sortedNames(consoleSchema.path("required")));
 
         Set<String> fields = new TreeSet<>();
-        consoleSchema.path("properties").fieldNames().forEachRemaining(fields::add);
+        consoleSchema.path("properties").propertyNames().forEach(fields::add);
         Set<String> machineFields = new TreeSet<>();
-        machineSchema.path("properties").fieldNames().forEachRemaining(machineFields::add);
+        machineSchema.path("properties").propertyNames().forEach(machineFields::add);
         assertThat(machineFields).as("%s vs %s: field names", machine, console).isEqualTo(fields);
 
         for (String field : fields) {
