@@ -427,8 +427,8 @@ class AdminUsageApiIntegrationTest {
         final UUID secondProjectId = UUID.randomUUID();
 
         void reset() {
-            for (String table : List.of("usage_event", "cache_hit_event", "request_usage_records", "price_snapshot",
-                    "virtual_key_models", "key_project_binding", "model_approval", "virtual_keys",
+            for (String table : List.of("usage_event", "cache_hit_event", "cache_entry", "request_usage_records",
+                    "price_snapshot", "virtual_key_models", "key_project_binding", "model_approval", "virtual_keys",
                     "project_provider_grant_models", "project_provider_grants", "unattributed_policy",
                     "upstream_credential_versions", "upstream_credentials", "plan_seats", "upstream_subscriptions",
                     "project_memberships", "project_repositories", "projects", "provider_products", "providers",
@@ -718,6 +718,46 @@ class AdminUsageApiIntegrationTest {
             }
             return teamId;
         }
+
+        /**
+         * One cached response plus its hit events (#1200) — the hits half of
+         * {@code groupBy=cache_level}. {@code meta_json} carries the cached response's
+         * token usage, which is what each hit is valued against; the level lives on the
+         * events, never on the entry.
+         */
+        void insertCacheHits(UUID keyId, long inputTokens, long outputTokens, int l1Hits, int l2Hits) {
+            String keyHex = (UUID.randomUUID().toString() + UUID.randomUUID().toString()).replace("-", "");
+            String meta = "{\"usage\":{\"inputTokens\":" + inputTokens + ",\"outputTokens\":" + outputTokens + "}}";
+            jdbc.update("""
+                    INSERT INTO cache_entry
+                        (id, tenant_id, cache_key, virtual_key_id, project_id, provider_product_id, model_id,
+                         status_code, body, meta_json, hit_count_l1, hit_count_l2, created_at, updated_at)
+                    VALUES (:id, :tenantId, decode(:keyHex, 'hex'), :keyId, :projectId, :productId, :model, 200,
+                            decode('', 'hex'), CAST(:meta AS jsonb), :l1, :l2, now(), now())
+                    """,
+                    new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                            .addValue("keyHex", keyHex).addValue("keyId", keyId).addValue("projectId", projectId)
+                            .addValue("productId", productId).addValue("model", MODEL).addValue("meta", meta)
+                            .addValue("l1", l1Hits).addValue("l2", l2Hits));
+            insertHitEvents(keyId, keyHex, "L1_HIT", l1Hits);
+            insertHitEvents(keyId, keyHex, "L2_HIT", l2Hits);
+        }
+
+        private void insertHitEvents(UUID keyId, String keyHex, String level, int hits) {
+            for (int i = 0; i < hits; i++) {
+                jdbc.update("""
+                        INSERT INTO cache_hit_event
+                            (id, tenant_id, cache_key, virtual_key_id, project_id, provider_product_id, level,
+                             occurred_at, gateway_request_id, created_at)
+                        VALUES (:id, :tenantId, decode(:keyHex, 'hex'), :keyId, :projectId, :productId, :level,
+                                now() - make_interval(secs => :offset), :greq, now())
+                        """,
+                        new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                                .addValue("keyHex", keyHex).addValue("keyId", keyId).addValue("projectId", projectId)
+                                .addValue("productId", productId).addValue("level", level).addValue("offset", 2 + i)
+                                .addValue("greq", UUID.randomUUID().toString()));
+            }
+        }
     }
 
     @Test
@@ -891,5 +931,72 @@ class AdminUsageApiIntegrationTest {
         mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "DAY").param("tzOffsetMinutes", "1081")
                 .param("from", from).param("to", to).cookie(adminSession)).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("TZ_OFFSET_INVALID"));
+    }
+
+    @Test
+    @DisplayName("#1200: groupBy=cache_level is served — each hit lands in its own L1/L2 group")
+    void cacheLevelGroupingValuesEachHitOnce() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertPrices();
+        // Two cached responses, one hit each: L1 on the first (1000/500 tokens),
+        // L2 on the second (2000/1000). Before #1200 this request died on the hits
+        // SQL: the GROUP BY carried a bare 'HIT' literal, which PostgreSQL rejects.
+        fx.insertCacheHits(ownKey, 1_000L, 500L, 1, 0);
+        fx.insertCacheHits(ownKey, 2_000L, 1_000L, 0, 1);
+
+        MvcResult r = mockMvc
+                .perform(get("/api/v1/admin/usage/summary").param("groupBy", "cache_level").cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.groupBy").value("cache_level"))
+                .andExpect(jsonPath("$.groups.length()").value(2))
+                .andExpect(jsonPath("$.groups[*].label", containsInAnyOrder("L1_HIT", "L2_HIT")))
+                .andExpect(jsonPath("$.groups[?(@.label=='L1_HIT')].requests.l1Hit").value(contains(1)))
+                .andExpect(jsonPath("$.groups[?(@.label=='L1_HIT')].requests.l2Hit").value(contains(0)))
+                .andExpect(jsonPath("$.groups[?(@.label=='L2_HIT')].requests.l1Hit").value(contains(0)))
+                .andExpect(jsonPath("$.groups[?(@.label=='L2_HIT')].requests.l2Hit").value(contains(1))).andReturn();
+        JsonNode groups = objectMapper.readTree(r.getResponse().getContentAsString()).path("groups");
+        // Exact, not approximate: 1000×1.00/1e6 + 500×2.00/1e6 and
+        // 2000×1.00/1e6 + 1000×2.00/1e6.
+        Assertions.assertThat(savedByGatewayCache(groups, "L1_HIT")).isEqualByComparingTo("0.002");
+        Assertions.assertThat(savedByGatewayCache(groups, "L2_HIT")).isEqualByComparingTo("0.004");
+
+        // The issue's own acceptance bar: the same fixture cut by PROJECT carries
+        // the same totals — same source, differently cut.
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "PROJECT").cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totals.requests.l1Hit").value(1))
+                .andExpect(jsonPath("$.totals.requests.l2Hit").value(1))
+                .andExpect(jsonPath("$.totals.cost.savedByGatewayCache").value(0.006));
+    }
+
+    @Test
+    @DisplayName("#1200: the usage-event half of cache_level keeps grouping by the real cache_level column")
+    void cacheLevelGroupingKeepsTheEventsSideUnchanged() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertPrices();
+        // Forwarded call plus a cache hit: one request fills both halves of the
+        // dimension. The usage_event half groups by ue.cache_level (the real
+        // column, untouched by #1200); the cache-hit half folds L1/L2 in Java.
+        fx.insertUsage(ownKey, "chatcmpl-up-1", 1_000L, 500L);
+        fx.insertCacheHits(ownKey, 1_000L, 500L, 1, 0);
+
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "cache_level").cookie(adminSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups[*].label", containsInAnyOrder("UPSTREAM", "L1_HIT")))
+                .andExpect(jsonPath("$.groups[?(@.label=='UPSTREAM')].requests.upstream").value(contains(1)))
+                .andExpect(jsonPath("$.groups[?(@.label=='UPSTREAM')].tokens.input").value(contains(1_000)))
+                .andExpect(jsonPath("$.groups[?(@.label=='L1_HIT')].requests.l1Hit").value(contains(1)));
+    }
+
+    /**
+     * The cache-saving figure of the group with {@code label}, exact-comparable.
+     */
+    private static BigDecimal savedByGatewayCache(JsonNode groups, String label) {
+        for (JsonNode group : groups) {
+            if (label.equals(group.path("label").asText())) {
+                return group.path("cost").path("savedByGatewayCache").decimalValue();
+            }
+        }
+        throw new AssertionError("no group labelled " + label + " in " + groups);
     }
 }

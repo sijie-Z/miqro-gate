@@ -23,12 +23,15 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -210,6 +213,44 @@ class MeUsageApiIntegrationTest {
                 .andExpect(jsonPath("$.code").value("TIME_RANGE_TOO_WIDE"));
     }
 
+    @Test
+    @DisplayName("#1200: the self-service cache_level dimension is served (the console's cache-level dropdown)")
+    void myUsageCacheLevelGroupingIsServed() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID keyId = fx.createOwnKey();
+        fx.insertPrices();
+        // The exact request the front-end's 缓存级别 dropdown sends (lower-case
+        // value): one L1 hit on a 1000/500 response, one L2 hit on a 2000/1000
+        // one. Before #1200 this was a 500 INTERNAL_ERROR.
+        fx.insertCacheHits(keyId, 1_000L, 500L, 1, 0);
+        fx.insertCacheHits(keyId, 2_000L, 1_000L, 0, 1);
+
+        MvcResult r = mockMvc
+                .perform(get("/api/v1/me/usage/summary").param("groupBy", "cache_level").cookie(sessionCookie))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.groupBy").value("cache_level"))
+                .andExpect(jsonPath("$.groups.length()").value(2))
+                .andExpect(jsonPath("$.groups[*].label", containsInAnyOrder("L1_HIT", "L2_HIT")))
+                .andExpect(jsonPath("$.groups[?(@.label=='L1_HIT')].requests.l1Hit").value(contains(1)))
+                .andExpect(jsonPath("$.groups[?(@.label=='L1_HIT')].requests.l2Hit").value(contains(0)))
+                .andExpect(jsonPath("$.groups[?(@.label=='L2_HIT')].requests.l1Hit").value(contains(0)))
+                .andExpect(jsonPath("$.groups[?(@.label=='L2_HIT')].requests.l2Hit").value(contains(1))).andReturn();
+        JsonNode groups = objectMapper.readTree(r.getResponse().getContentAsString()).path("groups");
+        Assertions.assertThat(savedByGatewayCache(groups, "L1_HIT")).isEqualByComparingTo("0.002");
+        Assertions.assertThat(savedByGatewayCache(groups, "L2_HIT")).isEqualByComparingTo("0.004");
+    }
+
+    /**
+     * The cache-saving figure of the group with {@code label}, exact-comparable.
+     */
+    private static BigDecimal savedByGatewayCache(JsonNode groups, String label) {
+        for (JsonNode group : groups) {
+            if (label.equals(group.path("label").asText())) {
+                return group.path("cost").path("savedByGatewayCache").decimalValue();
+            }
+        }
+        throw new AssertionError("no group labelled " + label + " in " + groups);
+    }
+
     // ------------------------------------------------------------------
     // helpers
     // ------------------------------------------------------------------
@@ -235,12 +276,12 @@ class MeUsageApiIntegrationTest {
         final UUID otherKeyId = UUID.randomUUID();
 
         void reset() {
-            for (String table : List.of("usage_event", "cache_hit_event", "price_snapshot", "virtual_key_models",
-                    "key_project_binding", "model_approval", "virtual_keys", "project_provider_grant_models",
-                    "project_provider_grants", "unattributed_policy", "upstream_credential_versions",
-                    "upstream_credentials", "plan_seats", "upstream_subscriptions", "project_memberships",
-                    "project_repositories", "projects", "provider_products", "providers", "admin_audit_events",
-                    "user_sessions", "users")) {
+            for (String table : List.of("usage_event", "cache_hit_event", "cache_entry", "price_snapshot",
+                    "virtual_key_models", "key_project_binding", "model_approval", "virtual_keys",
+                    "project_provider_grant_models", "project_provider_grants", "unattributed_policy",
+                    "upstream_credential_versions", "upstream_credentials", "plan_seats", "upstream_subscriptions",
+                    "project_memberships", "project_repositories", "projects", "provider_products", "providers",
+                    "admin_audit_events", "user_sessions", "users")) {
                 try {
                     jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
                 } catch (Exception ignored) {
@@ -385,6 +426,46 @@ class MeUsageApiIntegrationTest {
                     .addValue("output", output).addValue("total", input + output)
                     .addValue("occurredAt", Timestamp.from(occurredAt)).addValue("resolutionStatus", resolutionStatus)
                     .addValue("claimSource", claimSource).addValue("claimConfidence", claimConfidence));
+        }
+
+        /**
+         * One cached response plus its hit events (#1200) — the hits half of
+         * {@code groupBy=cache_level}. {@code meta_json} carries the cached response's
+         * token usage, which is what each hit is valued against; the level lives on the
+         * events, never on the entry.
+         */
+        void insertCacheHits(UUID keyId, long inputTokens, long outputTokens, int l1Hits, int l2Hits) {
+            String keyHex = (UUID.randomUUID().toString() + UUID.randomUUID().toString()).replace("-", "");
+            String meta = "{\"usage\":{\"inputTokens\":" + inputTokens + ",\"outputTokens\":" + outputTokens + "}}";
+            jdbc.update("""
+                    INSERT INTO cache_entry
+                        (id, tenant_id, cache_key, virtual_key_id, project_id, provider_product_id, model_id,
+                         status_code, body, meta_json, hit_count_l1, hit_count_l2, created_at, updated_at)
+                    VALUES (:id, :tenantId, decode(:keyHex, 'hex'), :keyId, :projectId, :productId, :model, 200,
+                            decode('', 'hex'), CAST(:meta AS jsonb), :l1, :l2, now(), now())
+                    """,
+                    new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                            .addValue("keyHex", keyHex).addValue("keyId", keyId).addValue("projectId", projectId)
+                            .addValue("productId", productId).addValue("model", MODEL).addValue("meta", meta)
+                            .addValue("l1", l1Hits).addValue("l2", l2Hits));
+            insertHitEvents(keyId, keyHex, "L1_HIT", l1Hits);
+            insertHitEvents(keyId, keyHex, "L2_HIT", l2Hits);
+        }
+
+        private void insertHitEvents(UUID keyId, String keyHex, String level, int hits) {
+            for (int i = 0; i < hits; i++) {
+                jdbc.update("""
+                        INSERT INTO cache_hit_event
+                            (id, tenant_id, cache_key, virtual_key_id, project_id, provider_product_id, level,
+                             occurred_at, gateway_request_id, created_at)
+                        VALUES (:id, :tenantId, decode(:keyHex, 'hex'), :keyId, :projectId, :productId, :level,
+                                now() - make_interval(secs => :offset), :greq, now())
+                        """,
+                        new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                                .addValue("keyHex", keyHex).addValue("keyId", keyId).addValue("projectId", projectId)
+                                .addValue("productId", productId).addValue("level", level).addValue("offset", 2 + i)
+                                .addValue("greq", UUID.randomUUID().toString()));
+            }
         }
     }
 
