@@ -105,7 +105,7 @@ class QuotaSnapshotServiceTest {
     void setUp() {
         service = new QuotaSnapshotService(subscriptionRepository, productRepository, credentialRepository,
                 versionRepository, snapshotRepository, adapterRegistry, clientFactory, keyEncryptionProvider, jdbc,
-                new com.fasterxml.jackson.databind.ObjectMapper(), meterRegistry, transactions);
+                new tools.jackson.databind.ObjectMapper(), meterRegistry, transactions);
         lenient().when(snapshotRepository.insert(any())).thenAnswer(inv -> {
             stored.add(inv.getArgument(0));
             return inv.getArgument(0);

@@ -1,7 +1,8 @@
 package com.miqroera.miqrokey.controlplane.client;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
 import com.miqroera.miqrokey.controlplane.config.PriceSyncProperties;
 
 import java.io.ByteArrayOutputStream;
@@ -82,7 +83,7 @@ public class OpenRouterPriceSourceClient implements PriceSourceClient {
         JsonNode root;
         try {
             root = objectMapper.readTree(payload);
-        } catch (IOException e) {
+        } catch (JacksonException e) {
             throw new PriceSourceException("PRICE_SOURCE_UNPARSEABLE", "价格源响应不是合法 JSON");
         }
         JsonNode data = root.path("data");

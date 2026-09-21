@@ -1,7 +1,7 @@
 package com.miqroera.miqrokey.controlplane.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.domain.model.Project;
 import com.miqroera.miqrokey.domain.repository.ProjectRepository;
 import com.miqroera.miqrokey.domain.repository.QuotaRuleRepository;

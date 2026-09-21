@@ -1,6 +1,6 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
-import com.fasterxml.jackson.databind.exc.InvalidFormatException;
+import tools.jackson.databind.exc.InvalidFormatException;
 import com.miqroera.miqrokey.controlplane.security.AuthenticationException;
 import com.miqroera.miqrokey.controlplane.security.ResourceOwnershipException;
 import com.miqroera.miqrokey.controlplane.service.ApiException;
@@ -161,7 +161,7 @@ public class GlobalExceptionHandler {
 
     private static String fieldOf(HttpMessageNotReadableException e) {
         if (e.getCause() instanceof InvalidFormatException ife && ife.getPath() != null && !ife.getPath().isEmpty()) {
-            return ife.getPath().get(ife.getPath().size() - 1).getFieldName();
+            return ife.getPath().get(ife.getPath().size() - 1).getPropertyName();
         }
         return null;
     }
