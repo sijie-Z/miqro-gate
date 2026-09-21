@@ -282,14 +282,17 @@ class AdminMcpRouteRuleApiIntegrationTest {
     @Test
     @DisplayName("a type-mismatched field is a 400 that names the offending field (parse-error path)")
     void parseErrorNamesTheOffendingField() throws Exception {
-        // #1088 Stage B guard: the body is read by the Jackson 3 converter, which throws
-        // tools.jackson InvalidFormatException — the only shape GlobalExceptionHandler#fieldOf
-        // extracts the field name from (with the Jackson 2 pin the exception was a J2 type,
-        // was not matched, and the parse-error 400 lost the name). The existing fieldErrors
+        // #1088 Stage B guard: the body is read by the Jackson 3 converter, which
+        // throws
+        // tools.jackson InvalidFormatException — the only shape
+        // GlobalExceptionHandler#fieldOf
+        // extracts the field name from (with the Jackson 2 pin the exception was a J2
+        // type,
+        // was not matched, and the parse-error 400 lost the name). The existing
+        // fieldErrors
         // assertions only ever exercise the Bean Validation branch.
         mockMvc.perform(post(rulesUrl()).cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(rule("type-probe", "\"priority\":\"not-a-number\"")))
+                .contentType(MediaType.APPLICATION_JSON).content(rule("type-probe", "\"priority\":\"not-a-number\"")))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("PARAM_INVALID"))
                 .andExpect(jsonPath("$.detail")
                         .value(org.hamcrest.Matchers.containsString("Field 'priority' has an invalid value.")));

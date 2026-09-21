@@ -67,10 +67,11 @@ class UserSerializationLeakIntegrationTest {
     private static final String KEY = "passwordHash";
 
     /**
-     * Hash-value detector, calibrated against this repo's hasher: {@code PasswordHasher}
-     * emits Argon2id ({@code $argon2id$v=19$m=...$salt$hash}), so a leaked value carries
-     * that prefix — the bcrypt shape stays in the pattern because that is what a
-     * "key renamed but value kept" leak looks like if a legacy row or another hasher
+     * Hash-value detector, calibrated against this repo's hasher:
+     * {@code PasswordHasher} emits Argon2id
+     * ({@code $argon2id$v=19$m=...$salt$hash}), so a leaked value carries that
+     * prefix — the bcrypt shape stays in the pattern because that is what a "key
+     * renamed but value kept" leak looks like if a legacy row or another hasher
      * ever produced one.
      */
     private static final Pattern HASH_VALUE = Pattern.compile("\\$2[aby]\\$|\\$argon2id\\$");
@@ -107,9 +108,9 @@ class UserSerializationLeakIntegrationTest {
         resetTenantData();
         MvcResult boot = mockMvc
                 .perform(post("/api/v1/auth/bootstrap").contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new BootstrapRequest(
-                                AdminOrgApiIntegrationTest.BootstrapHelper.secret(),
-                                "adm_" + UUID.randomUUID().toString().substring(0, 8), "Admin"))))
+                        .content(objectMapper.writeValueAsString(
+                                new BootstrapRequest(AdminOrgApiIntegrationTest.BootstrapHelper.secret(),
+                                        "adm_" + UUID.randomUUID().toString().substring(0, 8), "Admin"))))
                 .andExpect(status().isCreated()).andReturn();
         sessionCookie = cookie(boot, "MIQROKEY_SESSION");
         csrfCookie = cookie(boot, "MIQROKEY_CSRF");
@@ -117,9 +118,8 @@ class UserSerializationLeakIntegrationTest {
         Map<?, ?> bootBody = objectMapper.readValue(boot.getResponse().getContentAsString(), Map.class);
         mockMvc.perform(post("/api/v1/auth/password").contentType(MediaType.APPLICATION_JSON)
                 .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                .content(objectMapper
-                        .writeValueAsString(new PasswordChangeRequest((String) bootBody.get("temporaryPassword"),
-                                "NewSecurePass1!"))))
+                .content(objectMapper.writeValueAsString(
+                        new PasswordChangeRequest((String) bootBody.get("temporaryPassword"), "NewSecurePass1!"))))
                 .andExpect(status().isOk());
     }
 
@@ -128,8 +128,9 @@ class UserSerializationLeakIntegrationTest {
     void httpResponsesNeverCarryThePasswordHash() throws Exception {
         String temporaryPassword = createProbeUserAndOrg();
 
-        String login = mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(new LoginRequest("leakhash", temporaryPassword))))
+        String login = mockMvc
+                .perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginRequest("leakhash", temporaryPassword))))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertNoLeak("login", login);
 
@@ -168,8 +169,7 @@ class UserSerializationLeakIntegrationTest {
                 .orElseThrow(() -> new AssertionError("probe user not found"));
         String storedHash = new String(probe.passwordHash(), StandardCharsets.UTF_8);
         assertThat(HASH_VALUE.matcher(storedHash).find())
-                .as("positive control: the row really carries a hash the value detector matches")
-                .isTrue();
+                .as("positive control: the row really carries a hash the value detector matches").isTrue();
 
         String json = objectMapper.writeValueAsString(probe);
         assertThat(json).as("the serialized user must really be the probe user").contains("\"username\":\"leakhash\"");
@@ -183,12 +183,14 @@ class UserSerializationLeakIntegrationTest {
                 .isInstanceOf(AssertionError.class);
         assertThatThrownBy(() -> assertNoLeak("planted-bcrypt", "{\"secret\":\"$2a$10$abcdefghijklmnopqrstuv\"}"))
                 .isInstanceOf(AssertionError.class);
-        assertThatThrownBy(() -> assertNoLeak("planted-argon2id",
-                "{\"secret\":\"$argon2id$v=19$m=65536,t=4,p=1$c2FsdA$aGFzaA\"}"))
+        assertThatThrownBy(
+                () -> assertNoLeak("planted-argon2id", "{\"secret\":\"$argon2id$v=19$m=65536,t=4,p=1$c2FsdA$aGFzaA\"}"))
                 .isInstanceOf(AssertionError.class);
     }
 
-    /** Probe user + a team and a project holding it; returns the temporary password. */
+    /**
+     * Probe user + a team and a project holding it; returns the temporary password.
+     */
     private String createProbeUserAndOrg() throws Exception {
         MvcResult created = mockMvc
                 .perform(post("/api/v1/admin/users").contentType(MediaType.APPLICATION_JSON)
@@ -199,18 +201,20 @@ class UserSerializationLeakIntegrationTest {
         Map<?, ?> createdBody = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class);
         String userId = ((Map<?, ?>) createdBody.get("user")).get("id").toString();
 
-        MvcResult team = mockMvc.perform(post("/api/v1/admin/teams").contentType(MediaType.APPLICATION_JSON)
-                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                .content(objectMapper.writeValueAsString(Map.of("name", "Leak Team")))).andExpect(status().isOk())
-                .andReturn();
+        MvcResult team = mockMvc
+                .perform(post("/api/v1/admin/teams").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("name", "Leak Team"))))
+                .andExpect(status().isOk()).andReturn();
         teamId = objectMapper.readValue(team.getResponse().getContentAsString(), Map.class).get("id").toString();
         mockMvc.perform(post("/api/v1/admin/teams/" + teamId + "/members").contentType(MediaType.APPLICATION_JSON)
                 .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
                 .content(objectMapper.writeValueAsString(Map.of("userId", userId)))).andExpect(status().isOk());
 
-        MvcResult project = mockMvc.perform(post("/api/v1/admin/projects").contentType(MediaType.APPLICATION_JSON)
-                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                .content(objectMapper.writeValueAsString(Map.of("code", "LEAK", "name", "Leak Project"))))
+        MvcResult project = mockMvc
+                .perform(post("/api/v1/admin/projects").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("code", "LEAK", "name", "Leak Project"))))
                 .andExpect(status().isOk()).andReturn();
         projectId = objectMapper.readValue(project.getResponse().getContentAsString(), Map.class).get("id").toString();
         mockMvc.perform(post("/api/v1/admin/projects/" + projectId + "/members").contentType(MediaType.APPLICATION_JSON)
@@ -228,7 +232,10 @@ class UserSerializationLeakIntegrationTest {
         resetTenantData();
     }
 
-    /** Same child-first reset list as {@code AdminOrgApiIntegrationTest.Fixture#reset}. */
+    /**
+     * Same child-first reset list as
+     * {@code AdminOrgApiIntegrationTest.Fixture#reset}.
+     */
     private void resetTenantData() {
         for (String table : java.util.List.of("quota_snapshots", "cost_allocations", "usage_event", "cache_hit_event",
                 "price_snapshot", "virtual_key_models", "key_project_binding", "model_approval", "virtual_keys",
