@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.controlplane.service;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import com.miqroera.miqrokey.controlplane.client.TimeBoundedCall;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -66,7 +67,11 @@ public class McpToolsListClient {
             if (bearer != null) {
                 builder.header("Authorization", bearer);
             }
-            HttpResponse<byte[]> response = http.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
+            // PH57: one budget for the whole call — the body (up to 2MB, or an
+            // SSE frame) is read here, so the request timeout must not stop at
+            // the response headers the way send() does.
+            HttpResponse<byte[]> response = TimeBoundedCall.send(http, builder.build(), requestTimeout,
+                    HttpResponse.BodyHandlers.ofByteArray());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw upstream("上游返回 HTTP " + response.statusCode());
             }

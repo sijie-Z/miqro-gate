@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.controlplane.service;
 
+import com.miqroera.miqrokey.controlplane.client.TimeBoundedCall;
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider;
 import com.miqroera.miqrokey.domain.model.McpService;
@@ -136,9 +137,14 @@ public class McpHealthChecker {
     /** GET {@code endpoint + checkPath}; 2xx counts as healthy. */
     private ProbeResult healthPathProbe(McpService service) {
         try {
+            // PH57 (see TimeBoundedCall): the configured timeout bounds the whole
+            // call, body included — a peer stalling mid-response used to hold the
+            // probe (and, on the checker cycle, its scheduler thread) forever.
+            Duration budget = Duration.ofSeconds(service.checkTimeoutSeconds());
             HttpRequest request = HttpRequest.newBuilder().uri(URI.create(service.endpoint() + service.checkPath()))
-                    .timeout(Duration.ofSeconds(service.checkTimeoutSeconds())).GET().build();
-            HttpResponse<Void> response = http.send(request, HttpResponse.BodyHandlers.discarding());
+                    .timeout(budget).GET().build();
+            HttpResponse<Void> response = TimeBoundedCall.send(http, request, budget,
+                    HttpResponse.BodyHandlers.discarding());
             int code = response.statusCode();
             return new ProbeResult(code >= 200 && code < 300, "HTTP " + code);
         } catch (java.net.http.HttpTimeoutException e) {
@@ -157,8 +163,10 @@ public class McpHealthChecker {
      */
     private ProbeResult jsonRpcProbe(McpService service) {
         try {
-            HttpRequest.Builder builder = HttpRequest.newBuilder().uri(URI.create(service.endpoint()))
-                    .timeout(Duration.ofSeconds(service.checkTimeoutSeconds()))
+            // PH57: whole-call budget — the probe reads the body (SSE framing
+            // included), so the timeout must not stop at the response headers.
+            Duration budget = Duration.ofSeconds(service.checkTimeoutSeconds());
+            HttpRequest.Builder builder = HttpRequest.newBuilder().uri(URI.create(service.endpoint())).timeout(budget)
                     .header("Content-Type", "application/json").header("Accept", "application/json, text/event-stream")
                     .POST(HttpRequest.BodyPublishers.ofString(INITIALIZE_BODY, StandardCharsets.UTF_8));
             if ("API_KEY".equals(service.backendAuthMode())) {
@@ -168,7 +176,8 @@ public class McpHealthChecker {
                 }
                 builder.header("Authorization", "Bearer " + bearer);
             }
-            HttpResponse<String> response = http.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = TimeBoundedCall.send(http, builder.build(), budget,
+                    HttpResponse.BodyHandlers.ofString());
             int code = response.statusCode();
             if (code < 200 || code >= 300) {
                 return new ProbeResult(false, "HTTP " + code);

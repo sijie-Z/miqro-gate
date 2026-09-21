@@ -43,6 +43,23 @@ public class OpenRouterPriceSourceClient implements PriceSourceClient {
 
     @Override
     public List<SourceModelPrice> fetch() {
+        // PH57: `requestTimeout` is documented as the whole-request deadline
+        // (docs/configuration-reference.md) but used to stop at the response
+        // headers — readBounded() below then read the body with no bound at all,
+        // so a source stalling mid-payload held the calling sync thread until it
+        // gave up. One budget now covers headers + body + parse; the body still
+        // streams through readBounded(), so the maxBytes cap is unchanged.
+        try {
+            return TimeBoundedCall.run(requestTimeout, "price source request", this::fetchOnce,
+                    budget -> new PriceSourceException("PRICE_SOURCE_UNREACHABLE",
+                            "价格源请求超时（" + budget.toMillis() + " ms）"));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new PriceSourceException("PRICE_SOURCE_UNREACHABLE", "价格源请求被中断");
+        }
+    }
+
+    private List<SourceModelPrice> fetchOnce() {
         HttpRequest request = HttpRequest.newBuilder(url).timeout(requestTimeout).GET().build();
         HttpResponse<InputStream> response;
         try {
