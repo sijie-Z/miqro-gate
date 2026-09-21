@@ -164,6 +164,57 @@ class AdminUsageApiIntegrationTest {
         Assertions.assertThat(cost.path("upstreamPaidParts").path("input").decimalValue()).isEqualByComparingTo("1");
     }
 
+    @Test
+    @DisplayName("#PH54: one cache key's hits are valued once — grouping by cache level must not charge them twice")
+    void cacheLevelGroupingValuesEachHitOnce() throws Exception {
+        fx.insertCatalogAndGrant();
+        fx.insertPrices(); // INPUT 1.00 / OUTPUT 2.00 per 1M tokens
+        UUID key = fx.createOwnKey();
+        String cacheKeyHex = "0102030405060708";
+        Instant t = Instant.now().minusSeconds(60);
+        // One cached response (1000 in / 500 out) hit three times: twice served from L1,
+        // once from L2. That is the ordinary shape — an L2 hit seeds L1 on the way out
+        // (CaffeineCacheProvider fills itself from the L2 row it just read), so the same
+        // cache key legitimately appears at both levels inside one reporting window.
+        fx.insertCacheEntry(key, cacheKeyHex, 1_000L, 500L);
+        fx.insertCacheHit(key, cacheKeyHex, "L1_HIT", t, "greq-l1-1");
+        fx.insertCacheHit(key, cacheKeyHex, "L1_HIT", t.plusSeconds(1), "greq-l1-2");
+        fx.insertCacheHit(key, cacheKeyHex, "L2_HIT", t, "greq-l2-1");
+
+        String projectBody = summaryBody("PROJECT");
+        String cacheLevelBody = summaryBody("CACHE_LEVEL");
+        JsonNode projectTotals = objectMapper.readTree(projectBody).path("totals");
+        JsonNode cacheLevelTotals = objectMapper.readTree(cacheLevelBody).path("totals");
+
+        // 3 hits x (1000 x 1.00 + 500 x 2.00) / 1e6 = 0.006. The same three facts, asked
+        // two ways, cannot be worth 0.012 one way and 0.006 the other.
+        Assertions.assertThat(projectTotals.path("cost").path("savedByGatewayCache").decimalValue())
+                .as("the PROJECT grouping is the reference reading of the same three hits")
+                .isEqualByComparingTo("0.006");
+        Assertions.assertThat(cacheLevelTotals.path("cost").path("savedByGatewayCache").decimalValue())
+                .as("CACHE_LEVEL totals disagree with PROJECT totals for the same hits.\nPROJECT=%s\nCACHE_LEVEL=%s",
+                        projectBody, cacheLevelBody)
+                .isEqualByComparingTo(projectTotals.path("cost").path("savedByGatewayCache").decimalValue());
+    }
+
+    @Test
+    @DisplayName("#PH54: 我的用量「缓存级别」下拉框发出的原样请求（groupBy=cache_level）必须可用")
+    void myUsageCacheLevelGroupingIsServed() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID key = fx.createOwnKey();
+        Instant t = Instant.now().minusSeconds(60);
+        fx.insertCacheEntry(key, "0a0b0c0d0e0f1011", 1_000L, 500L);
+        fx.insertCacheHit(key, "0a0b0c0d0e0f1011", "L1_HIT", t, "greq-me-l1");
+
+        mockMvc.perform(get("/api/v1/me/usage/summary").param("groupBy", "cache_level").cookie(userSession))
+                .andExpect(status().isOk());
+    }
+
+    private String summaryBody(String groupBy) throws Exception {
+        return mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", groupBy).cookie(adminSession))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+    }
+
     private static BigDecimal sumParts(JsonNode parts) {
         return parts.path("input").decimalValue().add(parts.path("output").decimalValue())
                 .add(parts.path("cacheRead").decimalValue()).add(parts.path("cacheCreation").decimalValue());
@@ -427,8 +478,8 @@ class AdminUsageApiIntegrationTest {
         final UUID secondProjectId = UUID.randomUUID();
 
         void reset() {
-            for (String table : List.of("usage_event", "cache_hit_event", "request_usage_records", "price_snapshot",
-                    "virtual_key_models", "key_project_binding", "model_approval", "virtual_keys",
+            for (String table : List.of("usage_event", "cache_hit_event", "cache_entry", "request_usage_records",
+                    "price_snapshot", "virtual_key_models", "key_project_binding", "model_approval", "virtual_keys",
                     "project_provider_grant_models", "project_provider_grants", "unattributed_policy",
                     "upstream_credential_versions", "upstream_credentials", "plan_seats", "upstream_subscriptions",
                     "project_memberships", "project_repositories", "projects", "provider_products", "providers",
@@ -594,6 +645,39 @@ class AdminUsageApiIntegrationTest {
                             .addValue("credentialId", credentialId).addValue("model", model).addValue("input", input)
                             .addValue("output", output).addValue("total", input + output)
                             .addValue("cacheLevel", cacheLevel).addValue("occurredAt", Timestamp.from(occurredAt)));
+        }
+
+        /**
+         * The cached response a hit replays, with the token usage the gateway stored
+         * beside it ({@code meta_json.usage}) — the only place a hit's token counts
+         * live (#PH54).
+         */
+        void insertCacheEntry(UUID keyId, String cacheKeyHex, long input, long output) {
+            jdbc.update("""
+                    INSERT INTO cache_entry
+                        (id, tenant_id, cache_key, virtual_key_id, project_id, provider_product_id, model_id,
+                         status_code, body, meta_json)
+                    VALUES (:id, :tenantId, decode(:cacheKeyHex, 'hex'), :keyId, :projectId, :productId, :model,
+                            200, decode('00', 'hex'), :meta::jsonb)
+                    """, new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                    .addValue("cacheKeyHex", cacheKeyHex).addValue("keyId", keyId).addValue("projectId", projectId)
+                    .addValue("productId", productId).addValue("model", MODEL)
+                    .addValue("meta", "{\"usage\":{\"inputTokens\":" + input + ",\"outputTokens\":" + output + "}}"));
+        }
+
+        /** One served-from-cache event, deduplicated per (key, level, second) by the schema. */
+        void insertCacheHit(UUID keyId, String cacheKeyHex, String level, Instant occurredAt,
+                String gatewayRequestId) {
+            jdbc.update("""
+                    INSERT INTO cache_hit_event
+                        (id, tenant_id, cache_key, virtual_key_id, project_id, provider_product_id, level,
+                         occurred_at, gateway_request_id)
+                    VALUES (:id, :tenantId, decode(:cacheKeyHex, 'hex'), :keyId, :projectId, :productId, :level,
+                            :occurredAt, :greq)
+                    """, new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                    .addValue("cacheKeyHex", cacheKeyHex).addValue("keyId", keyId).addValue("projectId", projectId)
+                    .addValue("productId", productId).addValue("level", level)
+                    .addValue("occurredAt", Timestamp.from(occurredAt)).addValue("greq", gatewayRequestId));
         }
 
         /** A second project so the hour x project grouping is observable (#634). */

@@ -187,8 +187,10 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
 
     /**
      * Group spec over {@code cache_hit_event h} joined to {@code cache_entry e}.
-     * The CACHE_LEVEL split (L1_HIT / L2_HIT) is done in Java, so the SQL groups
-     * everything under a constant key.
+     * The CACHE_LEVEL split (L1_HIT / L2_HIT) is done in Java, so the SQL labels
+     * everything under a constant key and carries no group-by fragment of its
+     * own: the caller's trailing columns (product, model, cache key, meta) are
+     * the whole grouping.
      */
     private GroupSpec hitsSpec(GroupBy groupBy, int tzOffsetMinutes) {
         return switch (groupBy) {
@@ -197,7 +199,7 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
             case VIRTUAL_KEY -> new GroupSpec("h.virtual_key_id AS group_key, COALESCE(vk.name, vk.last_four) AS label",
                     "JOIN virtual_keys vk ON vk.id = h.virtual_key_id AND vk.tenant_id = h.tenant_id",
                     "h.virtual_key_id, COALESCE(vk.name, vk.last_four)");
-            case CACHE_LEVEL -> new GroupSpec("'HIT' AS group_key, 'HIT' AS label", "", "'HIT'");
+            case CACHE_LEVEL -> new GroupSpec("'HIT' AS group_key, 'HIT' AS label", "", "");
             case DAY -> daySpec("h.occurred_at", tzOffsetMinutes);
             case USER -> new GroupSpec("vk.user_id AS group_key, u.username AS label",
                     "JOIN virtual_keys vk ON vk.id = h.virtual_key_id AND vk.tenant_id = h.tenant_id"
@@ -545,6 +547,12 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                 "x.price_at");
         String priceCacheCreation = PriceSnapshotSql.asOfUnitPrice(PriceTokenType.CACHE_CREATION, "x.product_id",
                 "x.model_id", "x.price_at");
+        // A dimension that contributes no group-by fragment (CACHE_LEVEL) still has
+        // to group by the trailing columns, and `GROUP BY , e.…` does not parse —
+        // so the comma is emitted only when the spec brings its own column.
+        String groupBySql = spec.groupBy().isBlank()
+                ? "e.provider_product_id, e.model_id, e.cache_key, e.meta_json"
+                : spec.groupBy() + ", e.provider_product_id, e.model_id, e.cache_key, e.meta_json";
         String sql = """
                 SELECT x.*,
                        %s AS price_input,
@@ -560,10 +568,10 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                     JOIN cache_entry e ON e.tenant_id = h.tenant_id AND e.cache_key = h.cache_key
                     %s%s
                     %s
-                    GROUP BY %s, e.provider_product_id, e.model_id, e.cache_key, e.meta_json
+                    GROUP BY %s
                   ) x
                 """.formatted(priceInput, priceOutput, priceCacheRead, priceCacheCreation, spec.select(), spec.join(),
-                wb.joins(), wb.where(), spec.groupBy());
+                wb.joins(), wb.where(), groupBySql);
         MapSqlParameterSource params = wb.params();
 
         // Fold per-cache-key rows into per (group, product, model) rows.
@@ -583,15 +591,20 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
             BigDecimal rowPriceCacheCreation = rs.getBigDecimal("price_cache_creation");
 
             if (groupBy == GroupBy.CACHE_LEVEL) {
+                // One row covers one cache key; its hits are split by level here. Only
+                // the hits of the level being accumulated replay the cached tokens —
+                // handing both levels the row's total would value every cached token
+                // twice (L1 row + L2 row), and the level rows no longer add up to the
+                // same facts grouped any other way.
                 if (l1 > 0) {
                     acc.computeIfAbsent(key("L1_HIT", productId, modelId),
-                            k -> new HitAccumulator("L1_HIT", "L1_HIT", productId, modelId)).add(l1, 0, cached, hits,
+                            k -> new HitAccumulator("L1_HIT", "L1_HIT", productId, modelId)).add(l1, 0, cached, l1,
                                     rs.getBigDecimal("price_input"), rs.getBigDecimal("price_output"),
                                     rs.getBigDecimal("price_cache_read"), rs.getBigDecimal("price_cache_creation"));
                 }
                 if (l2 > 0) {
                     acc.computeIfAbsent(key("L2_HIT", productId, modelId),
-                            k -> new HitAccumulator("L2_HIT", "L2_HIT", productId, modelId)).add(0, l2, cached, hits,
+                            k -> new HitAccumulator("L2_HIT", "L2_HIT", productId, modelId)).add(0, l2, cached, l2,
                                     rs.getBigDecimal("price_input"), rs.getBigDecimal("price_output"),
                                     rs.getBigDecimal("price_cache_read"), rs.getBigDecimal("price_cache_creation"));
                 }
