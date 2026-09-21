@@ -262,7 +262,7 @@ Key × 项目绑定（标签路由的鉴权权威），与 `virtual_keys.project
 - 预留列 `amount_delta numeric(24,10)` + `currency_code`——**COST 维度表结构已备但不开放写入**，避免以后为纯价格差异 / 汇率 / 折扣 / 阶梯价再改一次表
 - `reason`（必填）、`reason_code`
 - `reconciliation_row_id`——溯源到对账发现。**刻意不建外键**：对账报告按窗口幂等替换，硬外键会挡住替换
-- `reversal_of_id`——纠错靠**反向行**，不设可变 `status`；服务层禁止"反向的反向"，让本表自身也保持 append-only
+- `reversal_of_id`——纠错靠**反向行**，不设可变 `status`；服务层禁止"反向的反向"（`ADJUSTMENT_ALREADY_REVERSED`），**V70** 另加数据库级部分唯一索引 `uq_usage_adjustments_reversal_of` `(tenant_id, reversal_of_id) WHERE reversal_of_id IS NOT NULL`——绕过服务层直接写账本的路径也不会让同一笔原始行被冲销两次（否则净额会高过观测值）。升级前检查与冲突处置见 operations-runbook §9b
 - `created_by`、`created_at`（录入时间）。事件发生时间取被引用行的 `occurred_at`，故无需 `effective_at`；**入账期间**属财务政策问题，本期不落列
 - `idempotency_key`——可空自然键，部分唯一索引 `(tenant_id, idempotency_key) WHERE idempotency_key IS NOT NULL`，重试不双记
 
