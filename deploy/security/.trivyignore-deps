@@ -46,13 +46,15 @@ CVE-2026-13506
 # vulnerable 42.7.5 and the rows were deleted rather than left to rot.)
 #
 # (org.apache.kafka:kafka-clients and spring-boot-starter-actuator had three rows
-# here until 2026-09-20. Their trackers landed together: #980 -> PR #1017 moved
+# here until 2026-09-20. Their trackers diverged: #980 -> PR #1017 moved
 # spring-boot.version 3.4.5 -> 3.5.16, whose BOM resolves kafka-clients 3.9.2 (the
-# fix for CVE-2026-35554) and an actuator past the 3.5.12 fix line for
-# CVE-2026-22731/-22733 — so develop no longer resolves the vulnerable versions.
-# PR #1027 deleted CVE-2026-35554 but not the two actuator rows, which kept
-# suppressing both advisories under a mangled copy of their rationale; PR #1088
-# (spring-boot.version 3.5.16 -> 4.1.1, backend/pom.xml:33) has since met those
-# rows' own DROP condition (>= 3.5.12 / 4.0.4) and the Security gate's suppressed
-# list reports no actuator entry, so they are removed here rather than left to rot.
-# A row that outlives its tracker is a silently disabled gate for that CVE.)
+# fix for CVE-2026-35554), while the actuator rows' named tracker (dependabot
+# PR #87, 3.4.5 -> 4.1.1) was instead closed unmerged on 2026-09-20. The rows'
+# own DROP condition — "the resulting Boot line is >= 3.5.12 / 4.0.4" — was
+# already met by PR #1017 (3.5.16) and met again by PR #1088 (4.1.1,
+# backend/pom.xml:33), so develop no longer resolves either vulnerable version.
+# PR #1027 deleted CVE-2026-35554 but not the two actuator rows, which by then
+# suppressed nothing (no actuator entry appears in the Security gate's suppressed
+# list) yet still withheld the blocking power for a future regression, under a
+# mangled copy of their rationale. They are removed here rather than left to rot:
+# a row that outlives its rationale is a silently disabled gate for that CVE.)
