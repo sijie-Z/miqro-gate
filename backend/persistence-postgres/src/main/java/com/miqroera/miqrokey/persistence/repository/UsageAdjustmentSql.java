@@ -42,12 +42,25 @@ public final class UsageAdjustmentSql {
      * Deliberately <b>not</b> a correlated {@code LATERAL} either, which is what
      * this used to be. Correlating on {@code ue} forces the planner into a Nested
      * Loop with one inner subplan per outer row, and the per-row estimate
-     * multiplied out lands the plan cost at 1.5M–1.8M — past
+     * multiplied out lands the plan cost at 1.55M–1.85M — past
      * {@code jit_inline_above_cost} and {@code jit_optimize_above_cost} (both
      * default 500000). PostgreSQL then runs the full LLVM optimization and inlining
-     * passes on <b>every</b> execution, costing 2.3–5.8 s of compile time per
-     * query. Uncorrelated, the same SQL plans at 55k–190k and only the cheap
+     * passes on <b>every</b> execution, costing 1.4–5.8 s of compile time per
+     * query. Uncorrelated, the same SQL plans at 132k–189k and only the cheap
      * codegen runs (#1322).
+     * </p>
+     *
+     * <p>
+     * The uncorrelated shape is a trade, not a free win: it cannot see the outer
+     * query's filter or {@code LIMIT}, so it folds the whole ledger even when the
+     * caller asked for one page, where the lazy correlated form evaluated only the
+     * handful of surviving rows. Measured on 380,000 usage events and 4,018
+     * adjustments, the report aggregates and the deep-page list gain 2.2x-3.7x (for
+     * example 3.3 s to 1.2 s), while the already-fast shallow paths pay the whole
+     * aggregate: {@code find_records} 2 ms to 38 ms, {@code agg_usage_PROJECT_FULL}
+     * 1 ms to 14 ms, {@code find_records_FULL} 1 ms to 13 ms. Every result is
+     * unchanged, and the correlated alternative costs 1.5 s more than it saves, so
+     * the trade is kept — but the shallow-page cost is real, not hidden.
      * </p>
      *
      * <p>

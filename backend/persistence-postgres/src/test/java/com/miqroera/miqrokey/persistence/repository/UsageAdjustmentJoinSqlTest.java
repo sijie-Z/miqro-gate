@@ -27,12 +27,21 @@ import tools.jackson.databind.ObjectMapper;
  * The join used to be a correlated {@code LEFT JOIN LATERAL}, re-deriving the
  * per-event totals for each {@code usage_event} row. Correlation forces a
  * Nested Loop with one inner subplan per outer row, and the multiplied-out
- * estimate lands the plan cost at 1.5M–1.8M — past
+ * estimate lands the plan cost at 1.55M–1.85M — past
  * {@code jit_inline_above_cost} and {@code jit_optimize_above_cost} (both
  * default 500000). PostgreSQL then runs the full LLVM optimization and inlining
- * passes on every execution, which measured 2.3–5.8 s of compile time on top of
- * the scan. The uncorrelated derived table plans at 55k–190k and skips both
- * passes; the reported queries went from 2.4–4.0 s to 0.8–1.4 s.
+ * passes on every execution, which measured 1.4–5.8 s of compile time on top of
+ * the scan. The uncorrelated derived table plans at 132k–189k and skips both
+ * passes; on interleaved A/B medians every heavy statement improved by
+ * 2.2x-3.7x (for example {@code agg_usage_USER} 3.3 s to 1.2 s).
+ * </p>
+ *
+ * <p>
+ * The uncorrelated shape also makes the shallow first-page list *slower*, since
+ * it folds the whole ledger regardless of the outer {@code LIMIT} — 2 ms to 38
+ * ms in the same run. These assertions pin the winning shape, not a claim that
+ * nothing regressed; the full trade-off is on
+ * {@link UsageAdjustmentSql#ADJUSTMENT_TOTALS}.
  * </p>
  *
  * <p>
