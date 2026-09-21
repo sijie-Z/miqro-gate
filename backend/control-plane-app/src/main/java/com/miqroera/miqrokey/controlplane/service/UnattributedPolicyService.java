@@ -158,7 +158,8 @@ public class UnattributedPolicyService {
                 // report the conflict and leave the row untouched instead.
                 throw new ApiException(HttpStatus.CONFLICT, "BUCKET_PROJECT_CONFLICT",
                         "已存在一个占用未归属桶保留 code「" + BUCKET_CODE + "」的普通项目（id=" + existing.id() + "，名称「" + existing.name()
-                                + "」）。未归属桶必须是系统项目，不能静默收养该行；" + "请先将该项目改名或删除，再配置未归属策略。");
+                                + "」）。未归属桶必须是系统项目，不能静默收养该行；该占用行需先由平台运维在数据库将其改名或删除"
+                                + "（产品面暂不支持修改项目 code 或删除项目），之后才能配置未归属策略。");
             }
             return existing.id();
         }
