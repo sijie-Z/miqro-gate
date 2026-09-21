@@ -25,6 +25,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.nio.charset.StandardCharsets;
+import java.sql.Timestamp;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -796,6 +797,71 @@ class AdminOrgApiIntegrationTest {
         Integer bucketRows = jdbc.queryForObject("SELECT count(*) FROM projects WHERE id = :id AND system",
                 new MapSqlParameterSource("id", UUID.fromString(bucketId)), Integer.class);
         assertThat(bucketRows).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("#1166 t1: creating a project with the reserved bucket code UNATTRIBUTED is rejected")
+    void createProjectRejectsReservedBucketCode() throws Exception {
+        mockMvc.perform(post("/api/v1/admin/projects").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("code", "UNATTRIBUTED", "name", "Squatter"))))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("PROJECT_CODE_RESERVED"));
+
+        // The rejected attempt left no row behind.
+        Integer rows = jdbc.queryForObject("SELECT count(*) FROM projects WHERE tenant_id = :tenantId AND code = :code",
+                new MapSqlParameterSource("tenantId", fx.tenantId).addValue("code", "UNATTRIBUTED"), Integer.class);
+        assertThat(rows).isZero();
+    }
+
+    @Test
+    @DisplayName("#1166 t2: policy over a non-system UNATTRIBUTED row fails loudly and leaves the row untouched")
+    void bucketAdoptionConflictIsExplicit() throws Exception {
+        fx.insertProviderAndProductAndCredential();
+        // The squatting path from the issue, up to the moment policy configuration
+        // happens: a regular (system=false) project already owns the code.
+        UUID squatterId = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO projects (id, tenant_id, code, name, status, project_tag, system, version)
+                VALUES (:id, :tenantId, 'UNATTRIBUTED', 'Squatter', 'ACTIVE', 'unattributed', FALSE, 0)
+                """, new MapSqlParameterSource("id", squatterId).addValue("tenantId", fx.tenantId));
+        Timestamp updatedAtBefore = jdbc.queryForObject("SELECT updated_at FROM projects WHERE id = :id",
+                new MapSqlParameterSource("id", squatterId), Timestamp.class);
+
+        mockMvc.perform(put("/api/v1/admin/unattributed-policy").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("credentialId", fx.credentialId.toString(),
+                        "providerProductId", fx.productId.toString(), "models", List.of("model-a")))))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("BUCKET_PROJECT_CONFLICT"));
+
+        // The conflicting row was neither adopted nor mutated — name/system/version
+        // catch an adopt-or-rewrite, project_tag/updated_at catch any bare UPDATE.
+        Map<String, Object> row = jdbc.queryForMap(
+                "SELECT name, system, version, project_tag, updated_at FROM projects WHERE id = :id",
+                new MapSqlParameterSource("id", squatterId));
+        assertThat(row.get("name")).isEqualTo("Squatter");
+        assertThat(row.get("system")).isEqualTo(false);
+        assertThat(((Number) row.get("version")).longValue()).isZero();
+        assertThat(row.get("project_tag")).isEqualTo("unattributed");
+        assertThat(row.get("updated_at")).isEqualTo(updatedAtBefore);
+        // …and no policy was written by the failed attempt.
+        Integer policies = jdbc.queryForObject("SELECT count(*) FROM unattributed_policy WHERE tenant_id = :tenantId",
+                new MapSqlParameterSource("tenantId", fx.tenantId), Integer.class);
+        assertThat(policies).isZero();
+    }
+
+    @Test
+    @DisplayName("#1166 t3 (invariant): the bucket project's system flag is true regardless of setup order")
+    void bucketProjectSystemInvariant() throws Exception {
+        fx.insertProviderAndProductAndCredential();
+        mockMvc.perform(put("/api/v1/admin/unattributed-policy").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("credentialId", fx.credentialId.toString(),
+                        "providerProductId", fx.productId.toString(), "models", List.of("model-a")))))
+                .andExpect(status().isOk());
+        Boolean system = jdbc.queryForObject(
+                "SELECT system FROM projects WHERE tenant_id = :tenantId AND code = 'UNATTRIBUTED'",
+                new MapSqlParameterSource("tenantId", fx.tenantId), Boolean.class);
+        assertThat(system).isTrue();
     }
 
     @Test
