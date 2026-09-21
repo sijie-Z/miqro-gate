@@ -108,9 +108,7 @@ public final class SkillZipValidator {
         String yamlText = yamlEnd > 0 ? body.substring(3, yamlEnd) : body.substring(3);
         Map<String, Object> meta;
         try {
-            // Untrusted input: pin the safe constructor explicitly so the guard does not
-            // depend on the YAML library's version default (global tags instantiate classes).
-            Object loaded = new Yaml(new SafeConstructor(new LoaderOptions())).load(yamlText);
+            Object loaded = yamlReader().load(yamlText);
             if (!(loaded instanceof Map)) {
                 throw invalid("SKILL_FRONTMATTER_INVALID", "SKILL.md frontmatter 必须是 YAML 映射。");
             }
@@ -167,6 +165,11 @@ public final class SkillZipValidator {
 
     private static String str(Object value) {
         return value == null ? null : String.valueOf(value).trim();
+    }
+
+    /** YAML reader for untrusted uploads: refuses class-instantiation tags. */
+    private static Yaml yamlReader() {
+        return new Yaml(new SafeConstructor(new LoaderOptions()));
     }
 
     private static SkillValidationException invalid(String code, String detail) {
