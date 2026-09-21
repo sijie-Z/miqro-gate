@@ -1,7 +1,8 @@
 package com.miqroera.miqrokey.persistence.repository;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.domain.model.AdminApiKey;
 import com.miqroera.miqrokey.domain.repository.AdminApiKeyRepository;
 import org.springframework.jdbc.core.RowMapper;
@@ -10,7 +11,6 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.io.IOException;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -54,7 +54,7 @@ public class AdminApiKeyRepositoryImpl implements AdminApiKeyRepository {
         try {
             return objectMapper.readValue(text, new TypeReference<List<String>>() {
             });
-        } catch (IOException e) {
+        } catch (JacksonException e) {
             throw new IllegalStateException("Unreadable admin_api_keys.scope json for key row", e);
         }
     }
@@ -143,7 +143,7 @@ public class AdminApiKeyRepositoryImpl implements AdminApiKeyRepository {
         }
         try {
             return objectMapper.writeValueAsString(capabilities);
-        } catch (IOException e) {
+        } catch (JacksonException e) {
             throw new IllegalStateException("Unserializable admin api key scope", e);
         }
     }
