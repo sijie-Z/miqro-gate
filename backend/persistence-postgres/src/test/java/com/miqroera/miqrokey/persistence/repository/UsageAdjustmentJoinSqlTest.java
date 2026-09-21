@@ -32,15 +32,19 @@ import tools.jackson.databind.ObjectMapper;
  * default 500000). PostgreSQL then runs the full LLVM optimization and inlining
  * passes on every execution, which measured 1.4–5.8 s of compile time on top of
  * the scan. The uncorrelated derived table plans at 132k–189k and skips both
- * passes; on interleaved A/B medians every heavy statement improved by
- * 2.2x-3.7x (for example {@code agg_usage_USER} 3.3 s to 1.2 s).
+ * passes; on interleaved A/B runs (arithmetic mean of three runs per arm) every
+ * heavy statement improved by 2.2x-3.7x (for example {@code agg_usage_USER} 3.3
+ * s to 1.2 s).
  * </p>
  *
  * <p>
  * The uncorrelated shape also makes the shallow first-page list *slower*, since
  * it folds the whole ledger regardless of the outer {@code LIMIT} — 2 ms to 38
- * ms in the same run. These assertions pin the winning shape, not a claim that
- * nothing regressed; the full trade-off is on
+ * ms in the same run. That bound belongs to this fixture: the ledger held 4,018
+ * rows and the fold reads all of it, so the cost tracks a table that is
+ * append-only by design (a 200,077-row shadow measured ~1.0 s for the same
+ * statement). These assertions pin the winning shape, not a claim that nothing
+ * regressed; the full trade-off is on
  * {@link UsageAdjustmentSql#ADJUSTMENT_TOTALS}.
  * </p>
  *
@@ -61,6 +65,7 @@ class UsageAdjustmentJoinSqlTest {
     private static final Instant FROM = Instant.parse("2026-09-01T00:00:00Z");
     private static final Instant TO = Instant.parse("2026-09-21T00:00:00Z");
     private static final UsageFilter FILTER = new UsageFilter(TENANT, null, FROM, TO);
+    private static final String LEDGER = "usage_adjustments";
 
     @Test
     @DisplayName("the aggregate is composed as a LATERAL-free derived table")
@@ -76,7 +81,24 @@ class UsageAdjustmentJoinSqlTest {
     void adjustmentAggregateDoesNotReferenceTheOuterRow() {
         // A single `ue.` inside the subquery re-correlates it: the planner cannot
         // evaluate the aggregate once and reuse it, which is the whole defect.
+        // Scoped to the derived table on purpose — the companion test
+        // ledgerIsReadOnlyThroughTheDerivedTable covers the rest of the statement.
         assertThat(adjustmentSubquery(adjustmentSql())).doesNotContain("ue.");
+    }
+
+    @Test
+    @DisplayName("the ledger is read exactly once, only through the joined derived table — in the aggregate and the detail list alike")
+    void ledgerIsReadOnlyThroughTheDerivedTable() {
+        // Both checks above are satisfied by a correlated scalar subquery parked
+        // in the select list: it sits outside the derived table's slice, so the
+        // `ue.` check never sees it, and it is not a LATERAL, so that check never
+        // fires either — yet it re-correlates the aggregate with every outer row,
+        // which is the entire defect. Counting reads is the invariant that cannot
+        // be routed around: the pre-aggregated join is the only sanctioned way to
+        // touch the ledger. Asserted on both composed statements, because a
+        // regression only has to reach one call site to cost the JIT passes.
+        assertLedgerIsReadOnce(adjustmentSql());
+        assertLedgerIsReadOnce(captureSql(repository -> repository.findRecords(FILTER, 0, 50)));
     }
 
     @Test
@@ -115,6 +137,32 @@ class UsageAdjustmentJoinSqlTest {
     }
 
     // ------------------------------------------------------------------
+
+    /**
+     * The composed statement must read the adjustment ledger exactly once, and that
+     * one read must be the joined derived table.
+     *
+     * <p>
+     * {@link #adjustmentSubquery(String)} inspects only the slice it can bound, so
+     * a correlated reference introduced anywhere else in the statement — a scalar
+     * subquery in the select list being the obvious route back to the old per-row
+     * evaluation — is invisible to it. Counting ledger reads is the invariant that
+     * cannot be routed around. The detail list is asserted here alongside the
+     * aggregate because both are composed in this module. The CSV export lives in
+     * control-plane-app and is not exercised by this test, but it composes its
+     * statement from the same constant instead of a local copy, so a second read
+     * cannot enter there without also entering the constant this test pins.
+     * </p>
+     */
+    private static void assertLedgerIsReadOnce(String sql) {
+        int first = sql.indexOf(LEDGER);
+        assertThat(first).as("the composed SQL reads the adjustment ledger").isNotNegative();
+        assertThat(sql.substring(first + LEDGER.length()))
+                .as("the ledger is read exactly once, and only from the joined derived table — a "
+                        + "second read re-correlates the aggregate with the outer row")
+                .doesNotContain(LEDGER);
+        assertThat(adjustmentSubquery(sql)).as("the single ledger read is the joined derived table").contains(LEDGER);
+    }
 
     /** The adjustment join as the summary report composes it (ADJUSTED basis). */
     private static String adjustmentSql() {
