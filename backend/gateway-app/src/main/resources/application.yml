@@ -98,6 +98,14 @@ miqrokey:
       slow-enabled: ${MIQROKEY_GATEWAY_CIRCUIT_BREAKER_SLOW_ENABLED:false}
       slow-call-ms: ${MIQROKEY_GATEWAY_CIRCUIT_BREAKER_SLOW_CALL_MS:3000}
       slow-ratio: ${MIQROKEY_GATEWAY_CIRCUIT_BREAKER_SLOW_RATIO:80}
+    # #740 内容过滤 shadow v1（ADR-0027，默认关）：网关进程内用本地词表对输入/输出
+    # 只观察——评估/命中计数器 + 一行无正文日志；零阻断、零改写，转发与回放字节不变；
+    # 关闭时不评估、不注册指标、无日志（热路径零行为变化）。词表语法：
+    # 类别=词1|词2;类别2=词3（类别=有界 metric tag；词=大小写不敏感子串；同类别每次
+    # 评估最多记 1 次命中）。正文/词绝不进日志与指标。
+    content-filter:
+      enabled: ${MIQROKEY_GATEWAY_CONTENT_FILTER_ENABLED:false}
+      vocabulary: ${MIQROKEY_GATEWAY_CONTENT_FILTER_VOCABULARY:}
 
   cache:
     # Response cache (L1 Caffeine + L2 PostgreSQL): DISABLED by default.
