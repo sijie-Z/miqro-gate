@@ -45,7 +45,7 @@ MiQroGate 现有告警链只认识一种事件：「某个租户的事实行，�
 
 ### 1.3 对三类信号的逐一归类（必要的澄清）
 
-- **队列饱和 → Platform Event。** 唯一无租户语义的样本：队列容量是整个进程的（`QueueConfig.QueueProperties @DefaultValue("50000")`、`backend/gateway-app/src/main/resources/application.yml:53`），丢弃发生在没有租户上下文的 `offer()`（`PostgresUsageEventBus.java:141-143`）。V60 迁移的注释里对这三类做过同样的核对：「Queue saturation is the only one with NO queryable fact」（`V60:4-9`）。
+- **队列饱和 → Platform Event。** 唯一无租户语义的样本：队列容量是整个进程的（`QueueConfig.QueueProperties @DefaultValue("50000")`、`backend/gateway-app/src/main/resources/application.yml:62`），丢弃发生在没有租户上下文的 `offer()`（`PostgresUsageEventBus.java:141-143`）。V60 迁移的注释里对这三类做过同样的核对：「Queue saturation is the only one with NO queryable fact」（`V60:4-9`）。
 - **解析失败 → Tenant Alert Event。** 判定点 `ProxyController.java:590-591`：`usageMissing = successful && tokens.isEmpty()`——上游 2xx 但解析不出 usage 块。这条事实落在该请求自己的 `usage_event` 行上（`usage_missing` 列，`PostgresUsageEventWriter.java:132,139`），行带 `tenant_id`。解析器本身是纯函数、失败只返回空 Optional、绝不影响被代理请求（`TokenUsageParser.java:27-31,113-116`）。告警早就有：`USAGE_MISSING_RATE`（`AlertEvaluator.java:196-200`）。
 - **供应商错误 → 拆成两层，都不是平台事件。** 第一层是行级事实：上游对某租户请求返回的非 2xx/429 写进该租户 `usage_event` 行的 `upstream_status_code`（`ProxyController.java:590` → `PostgresUsageEventWriter.java:132`），由 `UPSTREAM_ERROR_RATE`（`AlertEvaluator.java:201-206`）与 `UPSTREAM_RATE_LIMITED`（:225-229，ADR-0026 选项 D/#706）消费。第二层是网关进程内的错误体分类器 `UpstreamErrorClassifier.java:43-103`（ADR-0024 选项 B/#770）：它只做 Counter + 日志（:65-74），指标**无租户标签**（:67-69），今天既没有投递通道也不是告警输入。本稿的立场：**它保持观测工具身份，不建议升格为告警**；如果未来要告警「上游供应商整体在批量拒绝」（对全部租户），那是另一条新的平台事件候选，不在本轮范围。
 - **顺带记录的候选清单（都不是本轮内容）**：F07 剩余的无数据源类目标（Plan 同步、磁盘等，`docs/feature-backlog.md:27`）以及各类系统计划任务失败（如 `PriceSyncScheduler.java:52`、`UsagePriceReconcileScheduler.java:56` 等带 seed 租户的系统任务）——它们形状上都符合平台事件判据，但数据源尚未存在；本模型的意义之一就是让它们以后接入时不再需要发明第二套形状。
@@ -89,7 +89,7 @@ MiQroGate 现有告警链只认识一种事件：「某个租户的事实行，�
   - 退避 `2^attempt × 60s`、封顶 3 次尝试（:34 `MAX_ATTEMPTS`、:213-215）；
   - **耗尽后 `next_retry_at = NULL`，静默终止**：没有 dead-letter 状态、没有门户提示、没有重放接口（生产主代码 `src/main` 零命中：`UPDATE alert_events` / `DELETE FROM alert_events` / `DELETE FROM webhook_delivery_attempts`——测试夹具用拼接 SQL 清表，如 `UsageQueueSaturationAlertIntegrationTest.java:402`，不计入清理语义；投递状态不写回 `alert_events.status`，那张表的 status 只有 FIRED/DEDUPED 两种值，`V12:48-49`）；
   - 规则或端点被禁用会同时停掉首投和已 arm 的重试（:240-241、:260 双重门），重新启用后按既有退避继续（:223-228 注释）。
-  - 注意一处**文档与代码的漂移**：`docs/operations-runbook.md:137` 与 `docs/release-checklist.md:94` 提到「超过窗口转 dead-letter 并在门户告警」「dead-letter 和人工重放测试通过」，但代码里找不到 dead-letter 状态转换、门户告警或重放接口。本稿如实记录代码事实；措辞修正已随 2026-09-20 拍板后的文档轮落地（见 `operations-runbook.md` §8 与 `release-checklist.md`）。
+  - 注意一处**文档与代码的漂移**：修正前的 `docs/operations-runbook.md:137` 与 `docs/release-checklist.md:94` 曾提到「超过窗口转 dead-letter 并在门户告警」「dead-letter 和人工重放测试通过」，但代码里找不到 dead-letter 状态转换、门户告警或重放接口。本稿如实记录代码事实；措辞修正已随 2026-09-20 拍板后的文档轮落地（见 `operations-runbook.md` §8 与 `release-checklist.md`）。
 - **重试**：见上，最多 3 次尝试、指数退避、开关可随时打断。
 - **幂等键**：投递尝试表 `(event_id, endpoint_id, attempt)` 唯一（`V12:65`）；webhook 信封带 `eventId`（:168）与签名（`WebhookEndpointService.java:37,279`，HMAC-SHA256，`X-MiQroKey-Signature: sha256=…`）。**投递语义是 at-least-once**：接收方若在回 5xx 前实际已收到（例如回执丢失），会再收到同 `eventId` 的重试——**建议把「按 eventId 幂等」写成 webhook 接入方的契约**（这是建议，现状没有强制）。
 
@@ -144,7 +144,7 @@ MiQroGate 现有告警链只认识一种事件：「某个租户的事实行，�
 1. 网关侧事实产生与上报（§2.1–2.2 形状）；
 2. 新事实表迁移 + `(tenant_id, occurred_at DESC)` 索引（V60:63-66 形状）；
 3. `AlertEvaluator` 的评估分支（返回计数或占比要显式区分，:213-221 的注释与分支是范本）；
-4. **类型注册面——至少 8 处**（本轮逐一定位）：`AlertRuleService.java:146-149`（服务层校验，连同 open-admin 面一起覆盖）、`AlertEvaluator.java:195-240`、迁移 CHECK（模式样本 V60:39-46；现行最新一次为 V71:33-41）、`frontend/src/types/api.ts:75`、`NextAdminAlertRulesView.vue:45` 与 `:77`、`frontend/src/i18n/dict.ts:973`、`docs/api-contract.md:738` 与 `docs/database-schema.md:330,338`。这是目前接一个新信号的真实成本，也是 §8 Q2 的决策背景。
+4. **类型注册面——至少 8 处**（本轮逐一定位）：`AlertRuleService.java:146-149`（服务层校验，连同 open-admin 面一起覆盖）、`AlertEvaluator.java:195-240`、迁移 CHECK（模式样本 V60:39-46；现行最新一次为 V71:33-41）、`frontend/src/types/api.ts:75`、`NextAdminAlertRulesView.vue:47` 与 `:79`、`frontend/src/i18n/dict.ts:973`、`docs/api-contract.md:750` 与 `docs/database-schema.md:330,338`。这是目前接一个新信号的真实成本，也是 §8 Q2 的决策背景。
 5. 测试：至少覆盖「命中并签名投递」「阈值是计数不是比例」「非 seed 租户不触发」「跨窗去重」四类（样本：`UsageQueueSaturationAlertIntegrationTest.java:138-290`）。
 
 **与 `AlertEvaluator` 的对齐要求**：新分支必须保持 (i) 按 `:tenantId` 过滤（不变量，:186-190）；(ii) 阈值语义在注释和文档里说清「计数还是占比」（:213-221 是正面样本）；(iii) 去重沿用默认小时桶即可，不需要自定义。
@@ -268,8 +268,8 @@ MiQroGate 现有告警链只认识一种事件：「某个租户的事实行，�
 | 平台承载租户硬编码 | 同上 `:79`（`SIGNAL_TENANT_ID`）、`:261`（写信号） |
 | 上报任务 / writer | 同上 `:236-254`、`:259-268`；`PostgresQueueSignalWriter.java:38-54`（幂等单元 javadoc :14-18） |
 | 事实表 | `backend/persistence-postgres/src/main/resources/db/migration/V60__usage_queue_saturation_alert.sql:52-61`（CHECK :56；索引 :65-66；承载口径论证 :19-30；三类核对 :4-9） |
-| 队列配置 | `backend/gateway-app/src/main/resources/application.yml:52-56`（capacity 50000 :53）；`QueueConfig.java`（`QueueProperties` 默认值） |
-| 进程内指标 | `backend/gateway-app/src/main/java/com/miqroera/miqrokey/gateway/config/QueueMetricsBinder.java:19-30`；暴露面 `application.yml:104-108` 仅 health,info |
+| 队列配置 | `backend/gateway-app/src/main/resources/application.yml:61-65`（capacity 50000 :62）；`QueueConfig.java`（`QueueProperties` 默认值） |
+| 进程内指标 | `backend/gateway-app/src/main/java/com/miqroera/miqrokey/gateway/config/QueueMetricsBinder.java:19-30`；暴露面 `application.yml:113-117` 仅 health,info |
 | 解析失败判定 | `backend/gateway-app/src/main/java/com/miqroera/miqrokey/gateway/proxy/ProxyController.java:590-591`；非流式解析 :573-578；SSE 观测 :562 |
 | 解析器 | `backend/provider-adapters/src/main/java/com/miqroera/miqrokey/adapters/common/TokenUsageParser.java:27-31,56-124,113-116` |
 | 供应商错误（行级） | `ProxyController.java:541-542,590`；`PostgresUsageEventWriter.java:132,139` |
@@ -279,9 +279,9 @@ MiQroGate 现有告警链只认识一种事件：「某个租户的事实行，�
 | 投递器 | `backend/control-plane-app/src/main/java/com/miqroera/miqrokey/controlplane/service/AlertEventDispatcher.java:34,54-93,163-180,182-215,231-285,299-315` |
 | 规则服务 | `backend/control-plane-app/src/main/java/com/miqroera/miqrokey/controlplane/service/AlertRuleService.java:72-78,106-111,132-140,146-149,165-173` |
 | 签名/测试/投递列表 | `WebhookEndpointService.java:37,225,279`；`AdminWebhookController.java:79-81,85-89` |
-| 运营口径 | `docs/operations-runbook.md:121`（队列饱和）、`:137`（dead-letter 漂移）；`docs/api-contract.md:738`；`docs/database-schema.md:330,338`；`docs/feature-backlog.md:27`（F07） |
+| 运营口径 | `docs/operations-runbook.md:121`（队列饱和）、`:137`（dead-letter 漂移）；`docs/api-contract.md:750`；`docs/database-schema.md:330,338`；`docs/feature-backlog.md:27`（F07） |
 | 平台模式先例（seed 租户 × 8 处服务） | `AuthenticationService.java:104`、`McpHealthChecker.java:213`、`ModelCatalogReprobeScheduler.java:31`、`PlatformOidcAuthService.java:49`、`PriceSyncScheduler.java:52`、`QuotaSnapshotService.java:163`、`ServiceHealthChecker.java:103`、`UsagePriceReconcileScheduler.java:56`；种子租户 `V1__core_tables.sql:35` |
 | 测试样本 | `UsageQueueSaturationAlertIntegrationTest.java:138-290`（跨租户 :202-249、零阈值 :229-249） |
-| 任务书框架澄清依据 | 网关不写 alert_events（grep `gateway-app/src/main`、`queue-spi/src/main` 零命中）；网关不跑 Flyway `backend/gateway-app/src/main/resources/application.yml:12-15`；无 dead-letter/重放/清理（生产代码 `src/main` 的 grep 零命中；测试夹具拼接 SQL 清表不计） |
+| 任务书框架澄清依据 | 网关不写 alert_events（grep `gateway-app/src/main`、`queue-spi/src/main` 零命中）；网关不跑 Flyway `backend/gateway-app/src/main/resources/application.yml:21-24`；无 dead-letter/重放/清理（生产代码 `src/main` 的 grep 零命中；测试夹具拼接 SQL 清表不计） |
 
 > 附录核查提示：上表行号可能随后续提交漂移；核对时以 `git show origin/develop:<path>` 为准。
