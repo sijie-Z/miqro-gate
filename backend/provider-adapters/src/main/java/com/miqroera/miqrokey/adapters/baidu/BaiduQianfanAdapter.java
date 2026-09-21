@@ -1,7 +1,7 @@
 package com.miqroera.miqrokey.adapters.baidu;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.adapters.common.TransparentResolve;
 import com.miqroera.miqrokey.spi.AdapterCapabilities;
 import com.miqroera.miqrokey.spi.CredentialCheck;
