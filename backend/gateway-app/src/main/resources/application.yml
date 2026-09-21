@@ -9,15 +9,6 @@ spring:
     name: miqrokey-gateway
   main:
     web-application-type: reactive
-  # Boot 4 分期（#1088 Stage A）：Jackson 2 过渡期接线（Stage B 摘除）。
-  # UserMixin（排除 passwordHash）挂在 Jackson 2 的定制器上；不固定 mapper 时
-  # HTTP 层默认走 Jackson 3，密码哈希可能被序列化出去——安全底线，勿删。
-  # MVC/命令式 HTTP 客户端读 converters；WebFlux/响应式客户端读 codecs。
-  http:
-    converters:
-      preferred-json-mapper: jackson2
-    codecs:
-      preferred-json-mapper: jackson2
   # The gateway never runs Flyway migrations (the control plane owns schema
   # evolution); flyway-core is on the classpath via persistence-postgres.
   flyway:
