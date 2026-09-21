@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -35,6 +36,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -243,11 +245,24 @@ class AlertEvaluationIsolationIntegrationTest {
      */
     private void insertPoisonRule() {
         insertSignal(SEED_TENANT, 1_000_000_000L, Instant.now());
+        UUID ruleId = UUID.randomUUID();
         jdbc.update("""
                 INSERT INTO alert_rules
                     (id, tenant_id, name, type, threshold, dedupe_minutes, enabled, version)
                 VALUES (:id, :tenantId, 'poison-queue-saturation', 'USAGE_QUEUE_SATURATION', 1, 60, TRUE, 0)
-                """, new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", SEED_TENANT));
+                """, new MapSqlParameterSource("id", ruleId).addValue("tenantId", SEED_TENANT));
+        // The poison's teeth are the column constraint itself: pin it so a future
+        // migration that widens alert_events.value fails loudly here instead of
+        // silently disarming both isolation tests (their red calibration depends
+        // on this rule throwing).
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO alert_events (id, tenant_id, rule_id, dedupe_key, occurred_at, value, status, created_at)
+                VALUES (:id, :tenantId, :ruleId, 'overflow-probe', now(), 1000000000, 'FIRED', now())
+                """,
+                new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", SEED_TENANT).addValue("ruleId",
+                        ruleId)))
+                .as("the poison's 10^9 metric must be un-storable in alert_events.value")
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     /**
