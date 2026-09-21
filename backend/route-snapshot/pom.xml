@@ -17,11 +17,6 @@
 
     <dependencies>
 
-        <!-- Jackson for jsonb product catalog columns -->
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-        </dependency>
         <dependency>
             <groupId>com.miqroera.miqrokey</groupId>
             <artifactId>domain</artifactId>
@@ -35,6 +30,12 @@
         <dependency>
             <groupId>com.miqroera.miqrokey</groupId>
             <artifactId>persistence-postgres</artifactId>
+        </dependency>
+
+        <!-- Jackson for jsonb product catalog columns -->
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
         </dependency>
 
         <!-- Testing -->

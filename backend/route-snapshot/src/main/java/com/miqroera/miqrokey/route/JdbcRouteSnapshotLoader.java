@@ -1,7 +1,7 @@
 package com.miqroera.miqrokey.route;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.model.McpResiliencePolicy;
 import com.miqroera.miqrokey.domain.model.RetentionConfig;

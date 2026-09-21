@@ -16,12 +16,6 @@
     <description>Two-level response cache (L1 Caffeine, L2 PostgreSQL) — DISABLED by default, explicit opt-in per virtual key</description>
 
     <dependencies>
-        <!-- Jackson for jsonb meta/header serialization -->
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-        </dependency>
-
         <!-- Caffeine L1 cache (version managed by Spring Boot BOM) -->
         <dependency>
             <groupId>com.github.ben-manes.caffeine</groupId>
@@ -37,6 +31,12 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+
+        <!-- Jackson for jsonb meta/header serialization -->
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
         </dependency>
 
         <!-- Tests: PostgreSQL roundtrip IT for the L2 provider (#508) -->

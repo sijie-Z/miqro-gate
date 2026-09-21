@@ -15,7 +15,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class BaseUrlTemplatesParsingTest {
 
     private final JdbcRouteSnapshotLoader loader = new JdbcRouteSnapshotLoader(null,
-            new com.fasterxml.jackson.databind.ObjectMapper());
+            new tools.jackson.databind.ObjectMapper());
 
     @Test
     @DisplayName("protocol-tagged entries map to per-protocol bases with a fallback")
