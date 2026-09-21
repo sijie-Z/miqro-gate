@@ -239,13 +239,16 @@ public class PlatformOidcAuthService {
      * it open ≈45.5 s past the budget, until the JVM exited.
      *
      * <p>
-     * The socket is the whole of the leak, measured rather than inferred: a
-     * {@code jcmd Thread.dump_to_file} dump (which lists virtual threads) taken
-     * after eight abandoned calls in the previous shape shows eight connections
-     * still open on the peer and <em>no</em> {@code oidc-outbound-*} reader thread
-     * left — {@code cancel(true)} had interrupted every reader. What accumulates
-     * is the connection, and one peer-side handler thread pinned per leaked
-     * connection. With this transport the same eight abandons leave none open; see
+     * The connection, not a reader thread, is what accumulates. After eight
+     * abandoned calls in the previous shape the peer's own accounting shows eight
+     * connections still open, one per abandoned call, and a
+     * {@code jcmd Thread.dump_to_file} dump — a format that does list virtual
+     * threads, so an absence in it is meaningful — holds <em>no</em> surviving
+     * {@code oidc-outbound-*} reader. That absence is consistent with the
+     * {@code cancel(true)} on both paths having interrupted each reader; the dump
+     * shows none outlived its call, though the interrupt itself was not observed.
+     * What stays behind is the socket, each one pinning a handler thread on the
+     * IdP side. With this transport the same eight abandons leave none open; see
      * {@code PlatformOidcAbandonedConnectionAccumulationTest}.
      *
      * <p>
