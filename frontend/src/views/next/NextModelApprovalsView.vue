@@ -5,11 +5,14 @@
  * models per Virtual Key, list own applications with statuses.
  */
 import { computed, onMounted, ref } from 'vue';
+import { useRoute } from 'vue-router';
 import * as api from '@/api';
 import { UiButton, UiInput, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
 import type { UiSelectOption } from '@/ui';
 import type { ModelApprovalStatus } from '@/types/api';
 import type { VirtualKeyView, ModelApprovalView } from '@/types/generated-api';
+
+const route = useRoute();
 
 const keys = ref<VirtualKeyView[]>([]);
 const approvals = ref<ModelApprovalView[]>([]);
@@ -112,7 +115,19 @@ function formatDate(iso?: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-onMounted(load);
+onMounted(async () => {
+  await load();
+  // #1201: the plaza's「去申请」deep-links here with model+key prefilled.
+  const qModel = typeof route.query.model === 'string' ? route.query.model : '';
+  const qKey = typeof route.query.keyId === 'string' ? route.query.keyId : '';
+  if (qModel) {
+    openCreate();
+    form.value.modelId = qModel;
+    if (qKey && keys.value.some((k) => k.id === qKey)) {
+      form.value.virtualKeyId = qKey;
+    }
+  }
+});
 </script>
 
 <template>

@@ -16,7 +16,17 @@ import { useAuthStore } from '@/stores/auth';
 const StubView = defineComponent({ name: 'StubView', template: '<div />' });
 
 /** Regular-nav route names, in the order the shell renders them. */
-const NAV = ['overview', 'keys', 'usage', 'skills', 'model-approvals', 'profile', 'help'] as const;
+const NAV = [
+  'overview',
+  'keys',
+  'plaza',
+  'playground',
+  'usage',
+  'skills',
+  'model-approvals',
+  'profile',
+  'help',
+] as const;
 type NavName = (typeof NAV)[number];
 
 function makeLoaders(): Record<NavName, ReturnType<typeof vi.fn>> {

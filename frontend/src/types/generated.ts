@@ -1828,6 +1828,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/me/plaza/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["models_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me/grants": {
         parameters: {
             query?: never;
@@ -4443,6 +4459,52 @@ export interface components {
             resolutionCandidates?: number;
             claimSource?: string;
             claimConfidence?: string;
+        };
+        MePlazaView: {
+            models?: components["schemas"]["PlazaModel"][];
+            requestable?: components["schemas"]["RequestableModel"][];
+        };
+        PlazaKeyRef: {
+            /** Format: uuid */
+            id?: string;
+            name?: string;
+            display?: string;
+        };
+        PlazaModel: {
+            modelId?: string;
+            displayName?: string;
+            /** Format: int32 */
+            contextWindow?: number;
+            /** Format: int32 */
+            maxOutputTokens?: number;
+            /** Format: uuid */
+            providerProductId?: string;
+            providerProductCode?: string;
+            providerProductName?: string;
+            price?: components["schemas"]["PlazaPrice"];
+            keys?: components["schemas"]["PlazaKeyRef"][];
+        };
+        PlazaPrice: {
+            inputPerMillion?: number;
+            outputPerMillion?: number;
+            cacheReadPerMillion?: number;
+            cacheCreationPerMillion?: number;
+            currency?: string;
+        };
+        RequestableModel: {
+            modelId?: string;
+            displayName?: string;
+            /** Format: int32 */
+            contextWindow?: number;
+            /** Format: int32 */
+            maxOutputTokens?: number;
+            /** Format: uuid */
+            providerProductId?: string;
+            providerProductCode?: string;
+            providerProductName?: string;
+            /** Format: uuid */
+            keyId?: string;
+            keyName?: string;
         };
         GrantOption: {
             /** Format: uuid */
@@ -8900,6 +8962,26 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["QuotaRuleView"][];
+                };
+            };
+        };
+    };
+    models_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["MePlazaView"];
                 };
             };
         };
