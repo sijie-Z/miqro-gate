@@ -185,11 +185,12 @@ jobs:
   # report green over a tree nothing had actually inspected. Without it the step
   # fails loudly, which is what a broken format check should do.
   #
-  # The verdict is therefore `git diff`, not a command exit code (-fn always
-  # returns 0) and not the log text (a wording change in spotless would rot the
-  # gate into a silent pass). Applying to a clean checkout changes nothing;
-  # applying to a violating one changes exactly the offending files, and this job
-  # names them instead of making the author re-run Maven to find the next module.
+  # The verdict is therefore `git diff`, not the step's exit code (apply returns
+  # 0 whether or not the tree had violations — it rewrites rather than fails) and
+  # not the log text (a wording change in spotless would rot the gate into a
+  # silent pass). Applying to a clean checkout changes nothing; applying to a
+  # violating one changes exactly the offending files, and this job names them
+  # instead of making the author re-run Maven to find the next module.
   #
   # `verify` still runs `spotless:check` with a real exit code in the unit and
   # integration jobs, so this job breaking degrades to the previous behaviour
