@@ -5,6 +5,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { defineComponent } from 'vue';
 import NextAdminMcpServicesView from '@/views/next/NextAdminMcpServicesView.vue';
 import * as api from '@/api';
+import { ApiError } from '@/api/http';
 import type { McpAccessView, McpServiceView, McpToolView } from '@/types/generated-api';
 import { toastState } from '@/ui/toast';
 
@@ -899,6 +900,102 @@ describe('NextAdminMcpServicesView', () => {
 
     expect(mockApi.adminActivateToolRevision).toHaveBeenCalledWith('m1', 't1', 2);
     expect(toastState.items.some((item) => item.message?.includes('已回滚到修订 #2'))).toBe(true);
+  });
+
+  it('F16: reports a failed rollback instead of closing the dialog silently', async () => {
+    mockApi.adminListMcpServices.mockResolvedValue([service()]);
+    mockApi.adminListMcpTools.mockResolvedValue([tool()]);
+    const rev2 = {
+      id: 'r2',
+      revision: 2,
+      description: '查询订单 v2',
+      method: 'POST',
+      path: '/orders/v2/{id}',
+      createdAt: '2026-09-02T00:00:00Z',
+      activatedAt: null as unknown as string,
+    };
+    mockApi.adminListToolRevisions.mockResolvedValue([rev2]);
+    mockApi.adminActivateToolRevision.mockRejectedValue(
+      new ApiError({
+        type: 'about:blank',
+        title: 'revision conflict',
+        status: 409,
+        code: 'TOOL_REVISION_CONFLICT',
+        detail: '该修订已被上游重新发布，回滚未执行，请刷新后重试。',
+        requestId: 'rq-9',
+      }),
+    );
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="mcp-tools"]').trigger('click');
+    await flushPromises();
+    (
+      document.querySelector('[data-testid="mcp-tool-revisions-open"]') as HTMLButtonElement
+    ).click();
+    await flushPromises();
+
+    (document.querySelector('[data-testid="mcp-rev-rollback-2"]') as HTMLButtonElement).click();
+    await flushPromises();
+    const buttons = Array.from(document.body.querySelectorAll('button')).filter(
+      (b) => b.textContent?.trim() === '回滚',
+    );
+    expect(buttons.length).toBeGreaterThan(0);
+    buttons[buttons.length - 1]!.click();
+    await flushPromises();
+
+    expect(mockApi.adminActivateToolRevision).toHaveBeenCalledWith('m1', 't1', 2);
+    // The failure must reach the operator — the dialog closing is not a result.
+    expect(toastState.items.some((item) => item.message?.includes('回滚未执行'))).toBe(true);
+  });
+
+  it('F16: keeps a successful rollback successful when only the refresh fails', async () => {
+    mockApi.adminListMcpServices.mockResolvedValue([service()]);
+    mockApi.adminListMcpTools.mockResolvedValue([tool()]);
+    const rev2 = {
+      id: 'r2',
+      revision: 2,
+      description: '查询订单 v2',
+      method: 'POST',
+      path: '/orders/v2/{id}',
+      createdAt: '2026-09-02T00:00:00Z',
+      activatedAt: null as unknown as string,
+    };
+    // 打开修订弹窗时列表是好的，回滚后的刷新才失败。
+    mockApi.adminListToolRevisions.mockResolvedValueOnce([rev2]).mockRejectedValue(
+      new ApiError({
+        type: 'about:blank',
+        title: 'gateway timeout',
+        status: 504,
+        code: 'UPSTREAM_TIMEOUT',
+        detail: '读取修订列表超时，请重试。',
+        requestId: 'rq-10',
+      }),
+    );
+    mockApi.adminActivateToolRevision.mockResolvedValue(rev2);
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="mcp-tools"]').trigger('click');
+    await flushPromises();
+    (
+      document.querySelector('[data-testid="mcp-tool-revisions-open"]') as HTMLButtonElement
+    ).click();
+    await flushPromises();
+
+    (document.querySelector('[data-testid="mcp-rev-rollback-2"]') as HTMLButtonElement).click();
+    await flushPromises();
+    const buttons = Array.from(document.body.querySelectorAll('button')).filter(
+      (b) => b.textContent?.trim() === '回滚',
+    );
+    expect(buttons.length).toBeGreaterThan(0);
+    buttons[buttons.length - 1]!.click();
+    await flushPromises();
+
+    // 回滚本身成功：成功提示必须在，刷新失败也不能被讲成回滚失败。
+    expect(toastState.items.some((item) => item.message?.includes('已回滚到修订 #2'))).toBe(true);
+    expect(toastState.items.some((item) => item.message?.includes('读取修订列表超时'))).toBe(true);
+    expect(toastState.items.some((item) => item.message?.includes('回滚失败'))).toBe(false);
   });
 
   it('F16: publishes an edited revision from the tool row', async () => {
