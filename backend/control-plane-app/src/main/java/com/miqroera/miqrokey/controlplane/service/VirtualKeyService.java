@@ -430,7 +430,27 @@ public class VirtualKeyService {
         return view(ownedKey(user, keyId), user.tenantId());
     }
 
-    /** What the user may pick when creating a key (projects, grants, purposes). */
+    /**
+     * What the user may pick when creating a key (projects, grants, purposes).
+     *
+     * <h2>What this deliberately does not filter</h2>
+     *
+     * <p>
+     * Admission happens in {@code requireBindableProject}; this list is not a copy
+     * of its conditions, on purpose. A project that creation would refuse is still
+     * listed when the refusal <em>tells the user what to do</em> — a project with
+     * no routing tag is the case in point, because {@code ROUTING_TAG_MISSING}
+     * names the administrator action that fixes it and the client labels the option
+     * (#1149). Do not "tidy this up" by filtering on every condition admission
+     * checks: that would trade an actionable message for a project the user cannot
+     * see and cannot explain.
+     * </p>
+     *
+     * <p>
+     * The unattributed bucket is the opposite case and <em>is</em> excluded below
+     * (#1145): it is a permanent dead end whose rejection carries no information.
+     * </p>
+     */
     public MeGrantsResponse grantOptions(User user) {
         List<MeGrantsResponse.ProjectOption> projects = new ArrayList<>();
         List<MeGrantsResponse.GrantOption> grants = new ArrayList<>();
