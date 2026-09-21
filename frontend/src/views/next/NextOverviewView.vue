@@ -823,7 +823,7 @@ onMounted(load);
               </div>
             </div>
             <p v-else class="next-overview__empty">
-              还没有订阅。到「订阅」录入套餐后，这里会显示每套方案的滚动额度。
+              还没有订阅。到「订阅」录入套餐后，这里会显示每套方案的窗口用量。
             </p>
           </section>
         </div>
