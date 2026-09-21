@@ -262,6 +262,13 @@ async function probeModels() {
     probeError.value = error instanceof ApiError ? error.message : '探测失败，请稍后重试。';
   } finally {
     probing.value = false;
+    // #1347 (#440 family): the probe re-lists the catalogue, so it also
+    // supersedes an in-flight catalogue load — which can no longer clear its
+    // own spinner. Guarded: a newer dialog target owns its own loader and must
+    // keep it.
+    if (seq === modelsRequestSeq) {
+      modelsLoading.value = false;
+    }
   }
   try {
     const status = await api.adminModelProbeStatus(target.id);

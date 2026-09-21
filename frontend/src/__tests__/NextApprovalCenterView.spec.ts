@@ -14,6 +14,8 @@ vi.mock('@/api', () => ({
 
 const mockApi = vi.mocked(api);
 
+type ApprovalPage = Awaited<ReturnType<typeof api.listModelApprovals>>;
+
 const approval = (overrides: Partial<ModelApprovalView> = {}): ModelApprovalView => ({
   id: 'a1',
   virtualKeyId: 'k1',
@@ -130,5 +132,100 @@ describe('NextApprovalCenterView', () => {
       before: 'cursor-1',
     });
     expect(wrapper.text()).toContain('mqk_live_…8f2a');
+  });
+
+  /** The toolbar 刷新 button — no testid, so address it by its label. */
+  function refreshButton(wrapper: ReturnType<typeof mountView>): HTMLButtonElement {
+    const button = wrapper.findAll('button').find((b) => b.text().trim() === '刷新');
+    expect(button, '刷新 button should render').toBeTruthy();
+    return button!.element as HTMLButtonElement;
+  }
+
+  it('#PH69R2B: 放弃一次「加载更多」后，加载更多不会变成永远点不动的按钮', async () => {
+    // Page 2 never comes back while the admin is still on the page.
+    let releaseStale!: (page: ApprovalPage) => void;
+    mockApi.listModelApprovals
+      .mockResolvedValueOnce({ items: [approval()], nextCursor: 'cursor-1' })
+      .mockImplementationOnce(
+        () =>
+          new Promise<ApprovalPage>((resolve) => {
+            releaseStale = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({
+        items: [approval({ id: 'a2', modelId: 'fresh-model' })],
+        nextCursor: 'cursor-2',
+      })
+      .mockResolvedValueOnce({
+        items: [approval({ id: 'a9', modelId: 'paged-model' })],
+        nextCursor: undefined,
+      });
+    const wrapper = mountView();
+    await flushPromises();
+
+    // The admin asks for page 2 and gives up waiting for it.
+    await wrapper.find('[data-testid="approvals-load-more"]').trigger('click');
+    await flushPromises();
+    expect(mockApi.listModelApprovals).toHaveBeenCalledTimes(2);
+
+    // …and hits 刷新 instead. That reload supersedes the page request above.
+    refreshButton(wrapper).click();
+    await flushPromises();
+    expect(mockApi.listModelApprovals).toHaveBeenCalledTimes(3);
+    expect(wrapper.text()).toContain('fresh-model');
+
+    // The abandoned page finally lands — #440 says it must not touch this list.
+    releaseStale({ items: [approval({ id: 'stale', modelId: 'stale-model' })], nextCursor: 'x' });
+    await flushPromises();
+    expect(wrapper.text()).not.toContain('stale-model');
+    expect(wrapper.text()).toContain('fresh-model');
+
+    // The fresh page still has a cursor, so 加载更多 is on screen and must work.
+    const more = wrapper.find('[data-testid="approvals-load-more"]');
+    expect(more.exists(), '加载更多 should still be offered').toBe(true);
+    await more.trigger('click');
+    await flushPromises();
+    expect(mockApi.listModelApprovals).toHaveBeenCalledTimes(4);
+    expect(wrapper.text()).toContain('paged-model');
+  });
+
+  it('#PH69R2B: 刷新在途时点「加载更多」，刷新按钮不会一直转圈', async () => {
+    // The reload never comes back while the admin is still on the page.
+    let releaseReload!: (page: ApprovalPage) => void;
+    mockApi.listModelApprovals
+      .mockResolvedValueOnce({ items: [approval()], nextCursor: 'cursor-1' })
+      .mockImplementationOnce(
+        () =>
+          new Promise<ApprovalPage>((resolve) => {
+            releaseReload = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({
+        items: [approval({ id: 'a9', modelId: 'paged-model' })],
+        nextCursor: undefined,
+      });
+    const wrapper = mountView();
+    await flushPromises();
+
+    // The reload is in flight: 刷新 (and the table) are meant to be busy.
+    refreshButton(wrapper).click();
+    await flushPromises();
+    expect(mockApi.listModelApprovals).toHaveBeenCalledTimes(2);
+    expect(refreshButton(wrapper).disabled, '刷新 should be busy while reloading').toBe(true);
+
+    // The admin gives up on the reload and asks for the next page instead. The
+    // cursor from the first page is still on screen, so 加载更多 is still there.
+    await wrapper.find('[data-testid="approvals-load-more"]').trigger('click');
+    await flushPromises();
+    expect(mockApi.listModelApprovals).toHaveBeenCalledTimes(3);
+
+    // The abandoned reload lands — dropped by the guard, as #440 requires…
+    releaseReload({ items: [approval({ id: 'stale', modelId: 'stale-model' })], nextCursor: 'x' });
+    await flushPromises();
+    expect(wrapper.text()).not.toContain('stale-model');
+
+    // …but 刷新 must not be left spinning: nothing is in flight for it anymore.
+    expect(refreshButton(wrapper).disabled).toBe(false);
+    expect(refreshButton(wrapper).getAttribute('aria-busy')).toBeNull();
   });
 });

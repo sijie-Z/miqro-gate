@@ -61,6 +61,10 @@ const moreLoading = ref(false);
 async function load() {
   const seq = ++listRequestSeq;
   loading.value = true;
+  // #1347 (#440 family): this request now owns both list flags. An in-flight
+  // "load more" can no longer clear its own flag (its guarded finally is
+  // stale), so the reload it superseded must release it here.
+  moreLoading.value = false;
   loadError.value = '';
   try {
     const page = await api.listModelApprovals(
@@ -89,6 +93,9 @@ async function loadMore() {
   const seq = ++listRequestSeq;
   const before = nextCursor.value;
   moreLoading.value = true;
+  // #1347 (#440 family): same takeover — the refresh this page load supersedes
+  // can no longer clear its own spinner, so release it here.
+  loading.value = false;
   try {
     const page = await api.listModelApprovals({
       ...(filter.value === 'ALL' ? {} : { status: filter.value }),
