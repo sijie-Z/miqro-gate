@@ -642,6 +642,63 @@ describe('NextAdminUsageView', () => {
     expect(chart).toContain('09-15');
   });
 
+  it('#PH69R2: a failed 按日/按月 switch never re-labels the previous bucket', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    // Baseline: the default 按日 trend labels its buckets by day-of-month.
+    expect(wrapper.find('[data-testid="usage-trend-chart"]').text()).toContain('09-15');
+
+    // The user asks for 按月. Its buckets are months (2026-09), not the days
+    // the 按日 series is keyed by.
+    const monthSeries = {
+      groupBy: 'month',
+      groups: [group('2026-09', '2026-09', 14, 20_000, 5_000, 0.03)],
+      totals: group('__totals__', '合计', 14, 20_000, 5_000, 0.03),
+    } as UsageSummary;
+    let monthFails = true;
+    mockApi.adminUsageSummary.mockImplementation(async (query) => {
+      if (query?.groupBy === 'month') {
+        if (monthFails) {
+          throw new ApiError({
+            type: 'about:blank',
+            title: 'Server error',
+            status: 500,
+            code: 'INTERNAL_ERROR',
+            requestId: 'req-trend-1',
+          });
+        }
+        return monthSeries;
+      }
+      return summaryFor(String(query?.groupBy ?? 'project'));
+    });
+
+    await wrapper.find('[data-testid="trend-dim-month"]').trigger('click');
+    await flushPromises();
+
+    // trendSeries() labels each point from seriesDim, so the untouched 按日
+    // series is re-drawn through the month formatter: the day bucket
+    // 2026-09-15 now reads as a month under the 按月 tab that the user just
+    // selected — the switch looks like it worked and the granularity is wrong.
+    const chart = wrapper.find('[data-testid="usage-trend-chart"]').text();
+    expect(chart).not.toContain('2026-09-15');
+    // …and the failure has to be visible, with a way back, not swallowed.
+    const failure = wrapper.find('[data-testid="usage-trend-error"]');
+    expect(failure.exists()).toBe(true);
+    // The backend's own words reach the user rather than a generic shrug.
+    expect(failure.text()).toContain('Server error');
+
+    // The way back: 重试 re-runs just the trend, and a success clears the error
+    // and draws the bucket the tab actually names.
+    monthFails = false;
+    await wrapper.find('[data-testid="usage-trend-retry"]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="usage-trend-error"]').exists()).toBe(false);
+    const recovered = wrapper.find('[data-testid="usage-trend-chart"]').text();
+    expect(recovered).toContain('2026-09');
+    expect(recovered).not.toContain('2026-09-15');
+  });
+
   it('a 按日/按月 click supersedes only the trend, not an in-flight 查询', async () => {
     // The trap a shared sequence would set: loadSeries() bumping loadRequestSeq
     // would make the bucket click abandon the 查询's own summary + records, and

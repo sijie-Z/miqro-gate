@@ -100,6 +100,9 @@ async function loadPickers() {
 // ---- server time series for the trend chart (Token + cost, day|month) ----
 const seriesDim = ref<'day' | 'month'>('day');
 const series = ref<UsageSummary | null>(null);
+// #1337: the trend is the one block the user can re-bucket on its own, so a
+// failed re-bucket needs a state of its own — see loadSeries().
+const seriesError = ref('');
 
 const seriesOptions: Array<{ value: 'day' | 'month'; label: string }> = [
   { value: 'day', label: '按日' },
@@ -679,6 +682,8 @@ async function load() {
   summaryLoading.value = true;
   recordsLoading.value = true;
   summaryError.value = '';
+  // A 查询 re-fetches the trend too, so it also clears the trend's own failure.
+  seriesError.value = '';
   const summaryFiltersNow = summaryFilters();
   const range = rangeParams();
   try {
@@ -723,6 +728,7 @@ async function load() {
 
 async function loadSeries() {
   const seq = ++seriesRequestSeq;
+  seriesError.value = '';
   try {
     const result = await api.adminUsageSummary({
       groupBy: seriesDim.value,
@@ -733,8 +739,18 @@ async function loadSeries() {
     if (seq === seriesRequestSeq) {
       series.value = result;
     }
-  } catch {
-    // the trend chart keeps its previous data on failure
+  } catch (error) {
+    if (seq === seriesRequestSeq) {
+      // #1337: keeping the previous data was worse than an empty chart here.
+      // trendSeries() labels every point from `seriesDim`, not from the bucket
+      // the data actually came from, so a stale series is not merely out of
+      // date — it is re-labelled as the granularity the user just picked: the
+      // 按日 bucket 2026-09-15 redraws as a "month" under the 按月 tab, and the
+      // 查询 that failed is the only thing the tab ever says about it. Drop it
+      // and say so; leaving a bare 重试-less chart would strand the user.
+      series.value = null;
+      seriesError.value = error instanceof ApiError ? error.message : '趋势加载失败，请稍后重试。';
+    }
   }
 }
 
@@ -1213,9 +1229,26 @@ onMounted(() => {
       <div class="ui-panel-body">
         <UiTrendChart
           :series="trendSeries"
-          :empty-text="summaryError ? '趋势加载失败' : undefined"
+          :empty-text="seriesError || summaryError ? '趋势加载失败' : undefined"
           data-testid="usage-trend-chart"
         />
+        <!-- #1337: a failed 按日/按月 switch used to leave the old bucket on
+             screen with no message and no way back. -->
+        <div
+          v-if="seriesError"
+          class="ui-alert ui-alert--error next-usage__trend-error"
+          data-testid="usage-trend-error"
+        >
+          <span>{{ seriesError }}</span>
+          <UiButton
+            variant="secondary"
+            size="sm"
+            data-testid="usage-trend-retry"
+            @click="loadSeries"
+          >
+            重试
+          </UiButton>
+        </div>
       </div>
     </section>
 
@@ -2186,6 +2219,16 @@ onMounted(() => {
   background: var(--ui-card);
   color: var(--ui-primary-text);
   box-shadow: var(--ui-shadow-card);
+}
+
+/* #1337: the trend's own failure row sits inside the panel it belongs to,
+   under the chart — not with the page-level alerts above it. */
+.next-usage__trend-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-3);
+  margin: var(--ui-space-3) 0 0;
 }
 
 /* ---- #707 per-call timeline drawer (three information tiers) ---- */
