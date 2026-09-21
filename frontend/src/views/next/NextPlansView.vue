@@ -7,6 +7,11 @@
 import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { countWhenLoaded } from '@/utils/load-state';
+import {
+  usedInputOutputTokens,
+  windowRanges,
+  type QuotaWindowRange,
+} from '@/lib/quota-window-usage';
 import { ApiError } from '@/api/http';
 import {
   UiButton,
@@ -45,7 +50,7 @@ const columns = [
   },
   { key: 'planScope', title: '套餐形态', width: '110px' },
   { key: 'price', title: '价格', width: '130px', align: 'right' as const },
-  { key: 'quota', title: '滚动额度', minWidth: '260px' },
+  { key: 'quota', title: '窗口用量', minWidth: '260px' },
   { key: 'status', title: '状态', width: '100px' },
   { key: 'actions', title: '操作', width: '90px', align: 'center' as const },
 ];
@@ -129,14 +134,99 @@ function planLabel(scope?: string): string {
   }
 }
 
-function quotaSegments(): { label: string; ratio: number }[] {
-  // Demo fill ratios: official usage API pending (WAITING_FOR_CREDENTIAL).
-  const base = 34;
-  return [
-    { label: '5 小时', ratio: base },
-    { label: '本周', ratio: Math.round(base * 0.8) },
-    { label: '本月', ratio: Math.round(base * 0.6) },
-  ];
+// ---- #1234: 配额列接真实窗口用量 ----
+//
+// 每订阅 × 三窗口（5 小时滚动 / 本周 / 本月，UTC 日历，口径见 @/lib/quota-window-usage）
+// = 3 次 adminUsageSummary 读取，只读 totals，已用量 = 输入+输出 Token（网关侧统计）。
+// 每窗口的额度在当前数据模型里不存在（订阅只有单一 quota_total），所以不画比例：
+// 行尾的 quota_total 以「方案总额度」如实相称，不做任何分母。
+
+interface QuotaWindowUsage {
+  key: QuotaWindowRange['key'];
+  label: string;
+  used: number;
+}
+
+interface QuotaUsageState {
+  windows: QuotaWindowUsage[];
+  /** Row-level read failure (#943/#1160 家族)：读不到就不画数字。 */
+  error: string;
+  loading: boolean;
+}
+
+/** Per-subscription usage state, keyed by subscription id. */
+const quotaUsage = ref<Record<string, QuotaUsageState>>({});
+
+/** One subscription's three window reads; a failure lands on this row only. */
+async function loadQuotaUsageRow(subscriptionId: string, ranges: QuotaWindowRange[]) {
+  const state = quotaUsage.value[subscriptionId];
+  if (!state) return;
+  state.loading = true;
+  state.error = '';
+  try {
+    const summaries = await Promise.all(
+      ranges.map((range) =>
+        api.adminUsageSummary({ subscriptionId, from: range.from, to: range.to }),
+      ),
+    );
+    state.windows = ranges.map((range, i) => {
+      const used = usedInputOutputTokens(summaries[i]?.totals?.tokens);
+      if (used === null) {
+        // 2xx 但形状读不出来（totals / tokens 缺字段）同样是读取失败——
+        // 画 0 会把「没读到」说成「没用量」。
+        throw new Error('窗口用量响应缺少 totals.tokens');
+      }
+      return { key: range.key, label: range.label, used };
+    });
+  } catch (error) {
+    state.windows = [];
+    state.error = error instanceof ApiError ? error.message : '读取窗口用量失败，请稍后重试。';
+  } finally {
+    state.loading = false;
+  }
+}
+
+/**
+ * All subscriptions' three-window reads. Called by `load()`, not awaited there:
+ * each row draws its own loading placeholder while its reads are in flight.
+ */
+async function loadQuotaUsage() {
+  const ranges = windowRanges(new Date());
+  const states: Record<string, QuotaUsageState> = {};
+  for (const s of subscriptions.value) {
+    if (s.id) states[s.id] = { windows: [], error: '', loading: true };
+  }
+  quotaUsage.value = states;
+  await Promise.all(Object.keys(states).map((id) => loadQuotaUsageRow(id, ranges)));
+}
+
+/** #1234: 重试只重发该订阅的 3 次窗口读取——其它行不动、表格不重跑。 */
+function retryQuotaUsage(subscriptionId: string) {
+  return loadQuotaUsageRow(subscriptionId, windowRanges(new Date()));
+}
+
+/** The row's usage state; an unknown row reads as "still loading", never as 0. */
+function quotaUsageOf(row: unknown): QuotaUsageState {
+  const id = (row as SubscriptionView).id ?? '';
+  return quotaUsage.value[id] ?? { windows: [], error: '', loading: true };
+}
+
+function formatCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+/** 与总览账本同一套单位称呼（quotaUnit 是自由字符串，未知值原样显示）。 */
+const QUOTA_UNIT_LABELS: Record<string, string> = {
+  POINTS: '积分',
+  TOKENS: 'Token',
+  REQUESTS: '请求次数',
+  CURRENCY: '金额',
+};
+
+function quotaUnitLabel(unit?: string): string {
+  return unit ? (QUOTA_UNIT_LABELS[unit] ?? unit) : '—';
 }
 
 async function load() {
@@ -145,6 +235,8 @@ async function load() {
     const [subs, prods] = await Promise.all([api.listSubscriptions(), api.listProviderProducts()]);
     subscriptions.value = subs;
     products.value = prods;
+    // #1234: 窗口用量读取与表格渲染并行；每行自画加载占位，失败只坏自己的行。
+    void loadQuotaUsage();
   } catch (error) {
     if (error instanceof ApiError) {
       loadError.value = error.message;
@@ -444,23 +536,46 @@ onMounted(load);
           }}</span>
         </template>
         <template #quota="{ row }">
-          <div v-if="(row as SubscriptionView).quotaTotal" class="next-plans__band">
-            <div v-for="seg in quotaSegments()" :key="seg.label" class="next-plans__band-row">
-              <span class="next-plans__band-label">{{ seg.label }}</span>
-              <div class="next-plans__band-track">
-                <div
-                  class="next-plans__band-fill"
-                  :class="{
-                    'next-plans__band-fill--danger': seg.ratio >= 80,
-                    'next-plans__band-fill--warning': seg.ratio >= 60 && seg.ratio < 80,
-                  }"
-                  :style="{ width: seg.ratio + '%' }"
-                />
+          <div class="next-plans__usage">
+            <template v-if="quotaUsageOf(row).error">
+              <p class="ui-form-error" data-testid="plans-quota-row-error">
+                {{ quotaUsageOf(row).error }}
+              </p>
+              <UiButton
+                variant="ghost"
+                size="sm"
+                data-testid="plans-quota-retry"
+                @click="retryQuotaUsage((row as SubscriptionView).id!)"
+                >重试</UiButton
+              >
+            </template>
+            <p
+              v-else-if="quotaUsageOf(row).loading"
+              class="next-plans__usage-empty"
+              data-testid="plans-quota-loading"
+            >
+              加载中…
+            </p>
+            <template v-else>
+              <div
+                v-for="seg in quotaUsageOf(row).windows"
+                :key="seg.key"
+                class="next-plans__usage-row"
+                data-testid="plans-quota-seg"
+              >
+                <span class="next-plans__usage-label">{{ seg.label }}</span>
+                <span class="next-plans__usage-value ui-num">{{ formatCount(seg.used) }}</span>
               </div>
-              <span class="next-plans__band-pct ui-num">{{ seg.ratio }}%</span>
-            </div>
+            </template>
+            <span class="next-plans__usage-total"
+              ><span class="next-plans__usage-total-label">方案总额度：</span
+              ><span class="ui-num">{{
+                (row as SubscriptionView).quotaTotal
+                  ? `${formatCount((row as SubscriptionView).quotaTotal!)} ${quotaUnitLabel((row as SubscriptionView).quotaUnit)}`
+                  : '未配置'
+              }}</span></span
+            >
           </div>
-          <span v-else class="ui-panel-sub">未配置配额</span>
         </template>
         <template #status="{ row }">
           <UiStatusBadge
@@ -620,48 +735,41 @@ onMounted(load);
   color: var(--ui-danger-fg);
 }
 
-.next-plans__band {
+.next-plans__usage {
   display: flex;
   flex-direction: column;
   gap: var(--ui-space-1);
 }
 
-.next-plans__band-row {
-  display: grid;
-  grid-template-columns: 56px 1fr 40px;
-  align-items: center;
+.next-plans__usage-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
   gap: var(--ui-space-2);
 }
 
-.next-plans__band-label {
+.next-plans__usage-label {
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-secondary);
 }
 
-.next-plans__band-track {
-  height: 6px;
-  border-radius: var(--ui-radius-pill);
-  background: var(--ui-muted);
-  overflow: hidden;
+.next-plans__usage-value {
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground);
 }
 
-.next-plans__band-fill {
-  height: 100%;
-  border-radius: var(--ui-radius-pill);
-  background: var(--ui-primary);
-}
-
-.next-plans__band-fill--warning {
-  background: var(--ui-warning-fg);
-}
-
-.next-plans__band-fill--danger {
-  background: var(--ui-danger-fg);
-}
-
-.next-plans__band-pct {
+.next-plans__usage-empty {
+  margin: 0;
   font-size: var(--ui-font-size-xs);
-  text-align: right;
+  color: var(--ui-foreground-secondary);
+}
+
+.next-plans__usage-total {
+  margin-top: var(--ui-space-1);
+  font-size: var(--ui-font-size-xs);
+}
+
+.next-plans__usage-total-label {
   color: var(--ui-foreground-secondary);
 }
 </style>

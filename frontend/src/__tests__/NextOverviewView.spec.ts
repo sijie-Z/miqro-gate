@@ -1,11 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { flushPromises, mount } from '@vue/test-utils';
+import { flushPromises, mount, type DOMWrapper } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextOverviewView from '@/views/next/NextOverviewView.vue';
 import { ApiError } from '@/api/http';
 import { CHART_PALETTE } from '@/lib/chart-palette';
 import * as api from '@/api';
-import type { UsageCost, UsageSummary, VirtualKeyView } from '@/types/generated-api';
+import type {
+  SubscriptionView,
+  UsageCost,
+  UsageSummary,
+  VirtualKeyView,
+} from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   listVirtualKeys: vi.fn(),
@@ -74,6 +79,71 @@ const summary: UsageSummary = {
     cost: { upstreamPaid: '3.600000', gatewayObserved: '0.012000' } as unknown as UsageCost,
   },
 };
+
+/**
+ * #1234: 额度账本的窗口读取。系统时间在用到它的用例里冻在同一个周一
+ * 2026-09-21T13:47:00Z（窗口口径的手算冻结在 quota-window-usage.spec.ts），
+ * mock 按「订阅 × from」返回不同的输入/输出对——页面上的数字必须来自这张表，
+ * 断言不许从渲染结果自证。
+ */
+const LEDGER_PAIRS: Record<string, Record<string, [number, number]>> = {
+  'sub-a': {
+    '2026-09-21T08:47:00Z': [1_200, 34], // → 1.2k
+    '2026-09-21T00:00:00Z': [22_000, 222], // → 22.2k
+    '2026-09-01T00:00:00Z': [333_000, 333], // → 333.3k
+  },
+  'sub-b': {
+    '2026-09-21T08:47:00Z': [600, 66], // → 666
+    '2026-09-21T00:00:00Z': [0, 0], // a genuine zero
+    '2026-09-01T00:00:00Z': [5_000, 500], // → 5.5k
+  },
+};
+
+/** The frozen Monday all ledger tests read their windows at. */
+const FROZEN_MONDAY = new Date('2026-09-21T13:47:00Z');
+
+/** The admin summary read the page makes for itself (no subscription filter). */
+function pageSummary() {
+  return { groupBy: 'project', groups: [], totals: summary.totals } as unknown as UsageSummary;
+}
+
+/**
+ * The ledger's per-window reads, keyed on the call's own parameters: an unexpected
+ * (subscriptionId, from) pair rejects, so a view that asks for the wrong window
+ * cannot silently pass.
+ */
+function mockLedgerUsage() {
+  mockApi.adminUsageSummary.mockImplementation(async (q) => {
+    if (!q.subscriptionId) return pageSummary();
+    const pair = LEDGER_PAIRS[q.subscriptionId]?.[q.from ?? ''];
+    if (!pair) throw new Error(`unexpected ledger window call: ${q.subscriptionId} ${q.from}`);
+    return {
+      groupBy: q.groupBy,
+      groups: [],
+      totals: {
+        groupKey: '__totals__',
+        label: '合计',
+        tokens: { input: pair[0], output: pair[1] },
+      },
+    } as unknown as UsageSummary;
+  });
+}
+
+const subscription = (overrides: Partial<SubscriptionView> = {}): SubscriptionView => ({
+  id: 'sub-a',
+  providerProductId: '0190-0000-0000-0021',
+  productName: 'DeepSeek PAYG',
+  name: 'Main Plan',
+  billingMode: 'FIXED_SUBSCRIPTION',
+  planScope: 'TEAM',
+  subscriptionPrice: 100,
+  currency: 'USD',
+  quotaTotal: 5_000_000,
+  quotaUnit: 'TOKENS',
+  status: 'ACTIVE',
+  createdAt: '2026-08-01T00:00:00Z',
+  ...overrides,
+});
 
 describe('NextOverviewView', () => {
   beforeEach(() => {
@@ -449,5 +519,217 @@ describe('NextOverviewView', () => {
 
     expect(feed.text()).not.toContain('还没有动态记录');
     expect(feed.text()).toContain('加载中');
+  });
+
+  // ---- #1234: 额度账本接真实用量（不再是 0.34 比例的演示填充） ----
+
+  /** A ledger row's window segments as [label, value] pairs (structure, not text). */
+  function ledgerSegs(row: DOMWrapper<Element>): [string, string][] {
+    return row
+      .findAll('[data-testid="overview-ledger-seg"]')
+      .map((el): [string, string] => [
+        el.find('.next-overview__ledger-seg-label').text(),
+        el.find('.next-overview__ledger-seg-value').text(),
+      ]);
+  }
+
+  function mountLedgerAdmin(subs: SubscriptionView[]) {
+    authState.role = 'SYSTEM_ADMIN';
+    mockApi.listSubscriptions.mockResolvedValue(subs);
+    mockLedgerUsage();
+    return mountView();
+  }
+
+  it('#1234: the ledger draws each subscription’s real per-window usage from the gateway’s own totals', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FROZEN_MONDAY);
+    try {
+      const wrapper = mountLedgerAdmin([
+        subscription(),
+        subscription({
+          id: 'sub-b',
+          name: 'Backup Plan',
+          quotaTotal: undefined,
+          quotaUnit: undefined,
+        }),
+      ]);
+      await flushPromises();
+
+      const panel = wrapper.find('[data-testid="overview-ledger"]');
+      // 副标题必须说清口径：这些是网关侧统计的输入+输出 Token。
+      expect(panel.text()).toContain('网关侧统计');
+      expect(panel.text()).toContain('输入+输出 Token');
+
+      const rows = wrapper.findAll('[data-testid="overview-ledger-row"]');
+      expect(rows).toHaveLength(2);
+      // 数字来自 mock 的 (订阅 × from) 表，不是渲染结果自证。
+      expect(ledgerSegs(rows[0]!)).toEqual([
+        ['5 小时', '1.2k'],
+        ['本周', '22.2k'],
+        ['本月', '333.3k'],
+      ]);
+      // 无 quotaTotal 的行同样画真实已用；本周是真 0。
+      expect(ledgerSegs(rows[1]!)).toEqual([
+        ['5 小时', '666'],
+        ['本周', '0'],
+        ['本月', '5.5k'],
+      ]);
+
+      // 行尾的 quota_total 如实相称「方案总额度」，不是三个窗口的分母。
+      expect(rows[0]!.text()).toContain('方案总额度：5.0M Token');
+      expect(rows[1]!.text()).toContain('方案总额度：未配置');
+      // 比例条、百分比、warn/danger 填充与「未配置滚动额度」一起退场。
+      expect(panel.text()).not.toContain('%');
+      expect(panel.text()).not.toContain('未配置滚动额度');
+      expect(panel.findAll('.next-overview__ledger-fill')).toHaveLength(0);
+
+      // 每订阅恰好 3 次读取，窗口 from/to 就是共享口径算出来的那三个。
+      const ledgerCalls = mockApi.adminUsageSummary.mock.calls
+        .map((c) => c[0])
+        .filter((q) => q.subscriptionId);
+      expect(ledgerCalls).toHaveLength(6);
+      expect(ledgerCalls).toContainEqual({
+        subscriptionId: 'sub-a',
+        from: '2026-09-21T08:47:00Z',
+        to: '2026-09-21T13:47:00Z',
+      });
+      expect(ledgerCalls).toContainEqual({
+        subscriptionId: 'sub-b',
+        from: '2026-09-01T00:00:00Z',
+        to: '2026-09-21T13:47:00Z',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('#1234: a window with a genuine zero is drawn as 0 with no error — not as a failed read', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FROZEN_MONDAY);
+    try {
+      const wrapper = mountLedgerAdmin([subscription({ id: 'sub-b', name: 'Backup Plan' })]);
+      await flushPromises();
+
+      const row = wrapper.find('[data-testid="overview-ledger-row"]');
+      expect(row.find('[data-testid="overview-ledger-row-error"]').exists()).toBe(false);
+      expect(ledgerSegs(row)).toEqual([
+        ['5 小时', '666'],
+        ['本周', '0'],
+        ['本月', '5.5k'],
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('#1234: one subscription’s failed window read breaks only its row; retry re-reads just that row', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FROZEN_MONDAY);
+    try {
+      authState.role = 'SYSTEM_ADMIN';
+      mockApi.listSubscriptions.mockResolvedValue([
+        subscription(),
+        subscription({ id: 'sub-b', name: 'Backup Plan' }),
+      ]);
+      mockLedgerUsage();
+      const healthy = mockApi.adminUsageSummary.getMockImplementation();
+      mockApi.adminUsageSummary.mockImplementation(async (q) => {
+        if (q.subscriptionId === 'sub-b') {
+          throw new ApiError({
+            type: 'about:blank',
+            status: 500,
+            code: 'INTERNAL',
+            detail: '窗口读取失败',
+            requestId: 'req-ledger',
+            title: 'Error',
+          });
+        }
+        return healthy!(q);
+      });
+
+      const wrapper = mountView();
+      await flushPromises();
+
+      const rows = wrapper.findAll('[data-testid="overview-ledger-row"]');
+      // The healthy row kept its numbers…
+      expect(ledgerSegs(rows[0]!)).toEqual([
+        ['5 小时', '1.2k'],
+        ['本周', '22.2k'],
+        ['本月', '333.3k'],
+      ]);
+      // …and the failing one reports the failure where its numbers would go.
+      const error = rows[1]!.find('[data-testid="overview-ledger-row-error"]');
+      expect(error.exists()).toBe(true);
+      expect(error.text()).toContain('窗口读取失败');
+      expect(rows[1]!.find('[data-testid="overview-ledger-retry"]').exists()).toBe(true);
+      expect(ledgerSegs(rows[1]!)).toEqual([]);
+
+      // The reads recover; the retry re-sends only this row's three windows.
+      mockApi.adminUsageSummary.mockImplementation(healthy!);
+      await rows[1]!.find('[data-testid="overview-ledger-retry"]').trigger('click');
+      await flushPromises();
+
+      const rowsAfter = wrapper.findAll('[data-testid="overview-ledger-row"]');
+      expect(rowsAfter[1]!.find('[data-testid="overview-ledger-row-error"]').exists()).toBe(false);
+      expect(ledgerSegs(rowsAfter[1]!)).toEqual([
+        ['5 小时', '666'],
+        ['本周', '0'],
+        ['本月', '5.5k'],
+      ]);
+      // Isolation, counted: sub-a was read once (3 windows), sub-b twice (3 + 3).
+      const callsTo = (id: string) =>
+        mockApi.adminUsageSummary.mock.calls.filter((c) => c[0].subscriptionId === id);
+      expect(callsTo('sub-a')).toHaveLength(3);
+      expect(callsTo('sub-b')).toHaveLength(6);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('#1234: a 200 whose totals carry no token pair is a failed read, never a 0', async () => {
+    // The shape can break without the request failing. Drawing "0" there would
+    // claim the window was empty when nothing readable came back at all.
+    vi.useFakeTimers();
+    vi.setSystemTime(FROZEN_MONDAY);
+    try {
+      authState.role = 'SYSTEM_ADMIN';
+      mockApi.listSubscriptions.mockResolvedValue([subscription()]);
+      mockApi.adminUsageSummary.mockImplementation(async (q) => {
+        if (!q.subscriptionId) return pageSummary();
+        return { groupBy: q.groupBy, groups: [], totals: {} } as unknown as UsageSummary;
+      });
+
+      const wrapper = mountView();
+      await flushPromises();
+
+      const row = wrapper.find('[data-testid="overview-ledger-row"]');
+      expect(row.find('[data-testid="overview-ledger-row-error"]').exists()).toBe(true);
+      expect(ledgerSegs(row)).toEqual([]);
+      expect(row.find('[data-testid="overview-ledger-retry"]').exists()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('#1234: while the window reads are in flight the row shows a loading placeholder, not a 0', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FROZEN_MONDAY);
+    try {
+      authState.role = 'SYSTEM_ADMIN';
+      mockApi.listSubscriptions.mockResolvedValue([subscription()]);
+      mockApi.adminUsageSummary.mockImplementation(async (q) => {
+        if (!q.subscriptionId) return pageSummary();
+        return new Promise<UsageSummary>(() => {}); // pinned in the air
+      });
+
+      const wrapper = mountView();
+      await flushPromises();
+
+      const row = wrapper.find('[data-testid="overview-ledger-row"]');
+      expect(row.text()).toContain('加载中');
+      expect(ledgerSegs(row)).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

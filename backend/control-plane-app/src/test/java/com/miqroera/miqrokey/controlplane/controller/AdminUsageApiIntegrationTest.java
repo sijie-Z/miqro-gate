@@ -207,6 +207,36 @@ class AdminUsageApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("#1234: subscriptionId narrows to one subscription through its keys' credentials — and the numbers differ per subscription")
+    void adminSummaryFiltersBySubscription() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertSecondSubscriptionWithKey();
+        fx.insertPrices();
+        // Two subscriptions, two keys, deliberately different figures: a filter that
+        // never narrows would return the same (summed) numbers for both calls.
+        fx.insertUsage(ownKey, "chatcmpl-sub-a", 1_000L, 500L);
+        fx.insertUsageForSecondSubscription("chatcmpl-sub-b", 9_000L, 9_000L);
+
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("subscriptionId", fx.subscriptionId.toString())
+                .cookie(adminSession)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.totals.requests.upstream").value(1))
+                .andExpect(jsonPath("$.totals.tokens.input").value(1_000))
+                .andExpect(jsonPath("$.totals.tokens.output").value(500));
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("subscriptionId", fx.secondSubscriptionId.toString())
+                .cookie(adminSession)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.totals.requests.upstream").value(1))
+                .andExpect(jsonPath("$.totals.tokens.input").value(9_000))
+                .andExpect(jsonPath("$.totals.tokens.output").value(9_000));
+        // The counter-check: without the filter the same events aggregate to their sum,
+        // so the two calls above are measuring the filter and not an empty window.
+        mockMvc.perform(get("/api/v1/admin/usage/summary").cookie(adminSession)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.totals.requests.upstream").value(2))
+                .andExpect(jsonPath("$.totals.tokens.input").value(10_000))
+                .andExpect(jsonPath("$.totals.tokens.output").value(9_500));
+    }
+
+    @Test
     @DisplayName("admin records filter and paginate over the whole tenant")
     void adminRecordsFilterAndPaginate() throws Exception {
         fx.insertCatalogAndGrant();
@@ -433,6 +463,10 @@ class AdminUsageApiIntegrationTest {
         final UUID otherUserId = UUID.randomUUID();
         final UUID otherKeyId = UUID.randomUUID();
         final UUID secondProjectId = UUID.randomUUID();
+        final UUID secondSubscriptionId = UUID.randomUUID();
+        final UUID secondCredentialId = UUID.randomUUID();
+        final UUID secondGrantId = UUID.randomUUID();
+        final UUID secondKeyId = UUID.randomUUID();
 
         void reset() {
             for (String table : List.of("usage_event", "cache_hit_event", "cache_entry", "request_usage_records",
@@ -602,6 +636,69 @@ class AdminUsageApiIntegrationTest {
                             .addValue("credentialId", credentialId).addValue("model", model).addValue("input", input)
                             .addValue("output", output).addValue("total", input + output)
                             .addValue("cacheLevel", cacheLevel).addValue("occurredAt", Timestamp.from(occurredAt)));
+        }
+
+        /**
+         * A second subscription on the same product, with its own credential, grant and
+         * a key bound to that credential — the #1234 shape: usage reaches a
+         * subscription through {@code virtual_keys.upstream_credential_id}, and the V1
+         * consistency trigger requires the key's grant to name the same credential.
+         */
+        void insertSecondSubscriptionWithKey() {
+            jdbc.update("""
+                    INSERT INTO upstream_subscriptions
+                        (id, tenant_id, provider_product_id, name, billing_mode, status, version)
+                    VALUES (:id, :tenantId, :productId, 'Sub B', 'PAYG', 'ACTIVE', 0)
+                    """, new MapSqlParameterSource("id", secondSubscriptionId).addValue("tenantId", tenantId)
+                    .addValue("productId", productId));
+            jdbc.update("""
+                    INSERT INTO upstream_credentials (id, tenant_id, subscription_id, credential_name, status, version)
+                    VALUES (:id, :tenantId, :subscriptionId, 'Cred B', 'ACTIVE', 0)
+                    """, new MapSqlParameterSource("id", secondCredentialId).addValue("tenantId", tenantId)
+                    .addValue("subscriptionId", secondSubscriptionId));
+            jdbc.update("""
+                    INSERT INTO project_provider_grants
+                        (id, tenant_id, project_id, provider_product_id, upstream_credential_id, status, created_by,
+                         version)
+                    VALUES (:grantId, :tenantId, :projectId, :productId, :credentialId, 'ACTIVE',
+                            '00000000-0000-0000-0000-000000000000', 0)
+                    """,
+                    new MapSqlParameterSource("grantId", secondGrantId).addValue("tenantId", tenantId)
+                            .addValue("projectId", projectId).addValue("productId", productId)
+                            .addValue("credentialId", secondCredentialId));
+            jdbc.update("""
+                    INSERT INTO project_provider_grant_models (tenant_id, grant_id, model_id)
+                    VALUES (:tenantId, :grantId, :model)
+                    """, new MapSqlParameterSource("tenantId", tenantId).addValue("grantId", secondGrantId)
+                    .addValue("model", MODEL));
+            jdbc.update("""
+                    INSERT INTO virtual_keys
+                        (id, tenant_id, public_key_id, secret_digest, display_prefix, last_four, user_id, project_id,
+                         grant_id, upstream_credential_id, purpose, name, cache_policy, status, version)
+                    VALUES (:keyId, :tenantId, 'pk-sub-b', decode('00', 'hex'), 'pre', '0002', :userId,
+                            :projectId, :grantId, :credentialId, 'CLAUDE_CODE', 'sub-b', 'DISABLED', 'ACTIVE', 0)
+                    """,
+                    new MapSqlParameterSource("keyId", secondKeyId).addValue("tenantId", tenantId)
+                            .addValue("userId", userId).addValue("projectId", projectId)
+                            .addValue("grantId", secondGrantId).addValue("credentialId", secondCredentialId));
+        }
+
+        /** A usage row from the second subscription's key — its key, its credential. */
+        void insertUsageForSecondSubscription(String providerRequestId, long input, long output) {
+            jdbc.update("""
+                    INSERT INTO usage_event
+                        (id, tenant_id, provider_request_id, virtual_key_id, project_id, provider_product_id,
+                         credential_id, model_id, cache_level, input_tokens, output_tokens, total_tokens, latency_ms,
+                         upstream_status_code, is_complete, usage_missing, gateway_request_id, occurred_at)
+                    VALUES (:id, :tenantId, :providerRequestId, :keyId, :projectId, :productId, :credentialId, :model,
+                            'UPSTREAM', :input, :output, :total, 42, 200, TRUE, FALSE, 'greq-sub-b', :occurredAt)
+                    """,
+                    new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                            .addValue("providerRequestId", providerRequestId).addValue("keyId", secondKeyId)
+                            .addValue("projectId", projectId).addValue("productId", productId)
+                            .addValue("credentialId", secondCredentialId).addValue("model", MODEL)
+                            .addValue("input", input).addValue("output", output).addValue("total", input + output)
+                            .addValue("occurredAt", Timestamp.from(Instant.now())));
         }
 
         /** A second project so the hour x project grouping is observable (#634). */

@@ -6,8 +6,10 @@ export const DICT: Record<string, string> = {
   '1000 条': '1,000 rows',
   '200 条': '200 rows',
   '5 小时': '5 hours',
-  '5 小时 / 周 / 月滚动窗口；配额数据来自订阅配置':
-    'Rolling 5-hour / weekly / monthly windows; quota data comes from the subscription configuration',
+  '5 小时 / 本周 / 本月窗口 · 网关侧统计（输入+输出 Token）':
+    '5-hour / this-week / this-month windows · gateway-side stats (input + output tokens)',
+  // 额度账本行尾：quota_total 的如实称呼（它没有窗口分母，见 #1234）。
+  '方案总额度：': 'Plan total: ',
   '500 条': '500 rows',
   '8080（管理 API）': '8080 (Management API)',
   '8081（推理流量）': '8081 (Inference traffic)',
@@ -844,8 +846,6 @@ export const DICT: Record<string, string> = {
   '未知原因': 'Unknown reason',
   '未调用上游': 'Upstream not called',
   '未配置': 'Not configured',
-  '未配置滚动额度': 'No rolling quota configured',
-  '未配置配额': 'No quota configured',
   '未配置；新建用户时自动复制快照': 'Not configured; new users receive a snapshot automatically',
   '本周': 'This week',
   '今天': 'Today',
@@ -928,7 +928,7 @@ export const DICT: Record<string, string> = {
   '消费者名': 'Consumer name',
   '消费者密钥 · 即将到期': 'Consumer key · expiring soon',
   '消费者已吊销': 'Consumer revoked',
-  '滚动额度': 'Rolling quota',
+  '窗口用量': 'Window usage',
   '点击「上传技能」发布第一个技能包。': 'Click "Upload skill" to publish the first skill package.',
   '点击右上角「创建虚拟密钥」，用已授权的项目与供应商开始调用。':
     'Click "Create Virtual Key" at the top right and start calling through your granted projects and providers.',
@@ -1267,8 +1267,8 @@ export const DICT: Record<string, string> = {
   '还没有用量记录。创建 Key 并开始调用后，这里会出现用量分布。':
     'No usage records yet. Create a key and start calling — usage distribution will appear here.',
   '还没有订阅': 'No subscriptions yet',
-  '还没有订阅。到「订阅」录入套餐后，这里会显示每套方案的滚动额度。':
-    "No subscriptions yet. Add plans under Subscriptions and each plan's rolling quota will show here.",
+  '还没有订阅。到「订阅」录入套餐后，这里会显示每套方案的窗口用量。':
+    "No subscriptions yet. Add plans under Subscriptions and each plan's window usage will show here.",
   '还没有配置项': 'No configuration entries yet',
   '还没有项目': 'No projects yet',
   '连接失败': 'Connection failed',
