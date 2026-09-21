@@ -54,9 +54,9 @@ class OutboundCallWallClockBoundTest {
     private static final int CONFIGURED_TIMEOUT_SECONDS = 3;
 
     /**
-     * How long a measurement is allowed to run before it is recorded as
-     * "still blocked". Kept well above the configured timeout so a working
-     * bound (which returns at ~3 s) is never mistaken for a hang.
+     * How long a measurement is allowed to run before it is recorded as "still
+     * blocked". Kept well above the configured timeout so a working bound (which
+     * returns at ~3 s) is never mistaken for a hang.
      */
     private static final long OBSERVATION_WINDOW_MS = 12_000;
 
@@ -111,11 +111,11 @@ class OutboundCallWallClockBoundTest {
     }
 
     /**
-     * Holds the exchange open until cleanup releases it. The peer runs handlers
-     * on the server's own dispatcher thread, and {@code HttpServer.stop()} joins
-     * that thread — a flat {@code Thread.sleep} here would make every test wait
-     * out the whole stall at cleanup instead of the few seconds the bound under
-     * test allows.
+     * Holds the exchange open until cleanup releases it. The peer runs handlers on
+     * the server's own dispatcher thread, and {@code HttpServer.stop()} joins that
+     * thread — a flat {@code Thread.sleep} here would make every test wait out the
+     * whole stall at cleanup instead of the few seconds the bound under test
+     * allows.
      */
     private void holdResponseOpen() {
         long deadline = System.nanoTime() + STALL_HOLD.toNanos();
@@ -163,11 +163,9 @@ class OutboundCallWallClockBoundTest {
     @DisplayName("C3 McpHealthChecker JSON-RPC probe is bounded by checkTimeoutSeconds end to end")
     void mcpJsonRpcProbeIsBounded() throws Exception {
         McpHealthChecker checker = new McpHealthChecker(null, null);
-        McpService service = mcpService(stalledBaseUrl + "/stall-body", "/stall-body",
-                McpService.CHECK_MODE_JSONRPC);
+        McpService service = mcpService(stalledBaseUrl + "/stall-body", "/stall-body", McpService.CHECK_MODE_JSONRPC);
 
-        long elapsed = measure("McpHealthChecker.probeOnce(JSONRPC_INITIALIZE)",
-                () -> checker.probeOnce(service));
+        long elapsed = measure("McpHealthChecker.probeOnce(JSONRPC_INITIALIZE)", () -> checker.probeOnce(service));
 
         assertBounded("McpHealthChecker.probeOnce(JSONRPC_INITIALIZE)", elapsed);
     }
@@ -228,8 +226,8 @@ class OutboundCallWallClockBoundTest {
             ServiceHealthChecker checker = new ServiceHealthChecker(null);
             InternalService stalled = internalService("/stall-body");
 
-            ScheduledFuture<?> healthCycle = scheduler.scheduleWithFixedDelay(
-                    () -> checker.isHealthy(stalled), Duration.ofMillis(200));
+            ScheduledFuture<?> healthCycle = scheduler.scheduleWithFixedDelay(() -> checker.isHealthy(stalled),
+                    Duration.ofMillis(200));
 
             // Let the probe reach the stalled body read and take the only thread.
             long queuedAt = System.nanoTime();
@@ -237,13 +235,11 @@ class OutboundCallWallClockBoundTest {
             boolean ran = awaitWithin(released, OBSERVATION_WINDOW_MS / 1000);
             long blockedMs = (System.nanoTime() - queuedAt) / 1_000_000;
 
-            System.out.printf("[ph57] %-42s unrelated scheduled job waited %6d ms%n",
-                    "scheduler amplification", blockedMs);
+            System.out.printf("[ph57] %-42s unrelated scheduled job waited %6d ms%n", "scheduler amplification",
+                    blockedMs);
 
-            assertThat(ran)
-                    .as("an unrelated job queued behind one stalled health probe on the shared "
-                            + "single-thread scheduler (waited %d ms)", blockedMs)
-                    .isTrue();
+            assertThat(ran).as("an unrelated job queued behind one stalled health probe on the shared "
+                    + "single-thread scheduler (waited %d ms)", blockedMs).isTrue();
         } finally {
             released.countDown();
             scheduler.shutdown();
@@ -254,22 +250,22 @@ class OutboundCallWallClockBoundTest {
 
     private InternalService internalService(String checkPath) {
         return new InternalService(UUID.randomUUID(), UUID.randomUUID(), "ph57-peer", "HTTP", null, stalledBaseUrl,
-                "ACTIVE", 0, UUID.randomUUID(), Instant.now(), Instant.now(), "UNKNOWN", null, 0, 0,
-                30, CONFIGURED_TIMEOUT_SECONDS, 3, 1, checkPath);
+                "ACTIVE", 0, UUID.randomUUID(), Instant.now(), Instant.now(), "UNKNOWN", null, 0, 0, 30,
+                CONFIGURED_TIMEOUT_SECONDS, 3, 1, checkPath);
     }
 
     private McpService mcpService(String endpoint, String checkPath, String checkMode) {
-        return new McpService(UUID.randomUUID(), UUID.randomUUID(), "ph57-peer", "PH57 stalled peer",
-                endpoint, "STREAMABLE_HTTP", "ONLINE", "UNKNOWN", null, 0, 0,
-                30, CONFIGURED_TIMEOUT_SECONDS, 3, 1, checkPath, 0, UUID.randomUUID(), Instant.now(), Instant.now(),
-                "VISITOR", null, McpService.DEFAULT_UPSTREAM_TIMEOUT_MS, checkMode);
+        return new McpService(UUID.randomUUID(), UUID.randomUUID(), "ph57-peer", "PH57 stalled peer", endpoint,
+                "STREAMABLE_HTTP", "ONLINE", "UNKNOWN", null, 0, 0, 30, CONFIGURED_TIMEOUT_SECONDS, 3, 1, checkPath, 0,
+                UUID.randomUUID(), Instant.now(), Instant.now(), "VISITOR", null,
+                McpService.DEFAULT_UPSTREAM_TIMEOUT_MS, checkMode);
     }
 
     /**
-     * Runs {@code call} on its own thread and reports the wall clock. A call
-     * still running when the observation window closes is reported as a
-     * negative value, which fails {@link #assertBounded} with the honest
-     * lower bound rather than a fabricated number.
+     * Runs {@code call} on its own thread and reports the wall clock. A call still
+     * running when the observation window closes is reported as a negative value,
+     * which fails {@link #assertBounded} with the honest lower bound rather than a
+     * fabricated number.
      */
     private static long measure(String label, Runnable call) throws Exception {
         ExecutorService executor = Executors.newSingleThreadExecutor(runnable -> {
@@ -290,8 +286,8 @@ class OutboundCallWallClockBoundTest {
             // is exactly what the bound under test promises. Name the failure so
             // the recorded number cannot be mistaken for a clean completion.
             long elapsed = (System.nanoTime() - start) / 1_000_000;
-            System.out.printf("[ph57] %-42s returned after %6d ms (configured %d s), failing with %s%n", label,
-                    elapsed, CONFIGURED_TIMEOUT_SECONDS, e.getCause().getClass().getSimpleName());
+            System.out.printf("[ph57] %-42s returned after %6d ms (configured %d s), failing with %s%n", label, elapsed,
+                    CONFIGURED_TIMEOUT_SECONDS, e.getCause().getClass().getSimpleName());
             return elapsed;
         } catch (java.util.concurrent.TimeoutException e) {
             long elapsed = (System.nanoTime() - start) / 1_000_000;
@@ -307,14 +303,12 @@ class OutboundCallWallClockBoundTest {
     private static void assertBounded(String label, long measured) {
         long limitMs = CONFIGURED_TIMEOUT_SECONDS * 1000L + 2_000;
         if (measured < 0) {
-            assertThat(-measured)
-                    .as("%s: configured timeout is %d s but the call was still blocked when the %d ms observation "
+            assertThat(-measured).as(
+                    "%s: configured timeout is %d s but the call was still blocked when the %d ms observation "
                             + "window closed — the configured value does not bound the whole call",
-                            label, CONFIGURED_TIMEOUT_SECONDS, OBSERVATION_WINDOW_MS)
-                    .isLessThan(limitMs);
+                    label, CONFIGURED_TIMEOUT_SECONDS, OBSERVATION_WINDOW_MS).isLessThan(limitMs);
         } else {
-            assertThat(measured)
-                    .as("%s: configured timeout is %d s", label, CONFIGURED_TIMEOUT_SECONDS)
+            assertThat(measured).as("%s: configured timeout is %d s", label, CONFIGURED_TIMEOUT_SECONDS)
                     .isLessThan(limitMs);
         }
     }
