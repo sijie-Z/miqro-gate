@@ -17,8 +17,10 @@ import java.util.zip.ZipInputStream;
  * the zip must hold exactly one skill directory whose name matches the
  * {@code SKILL.md} frontmatter {@code name} (kebab-case), with a non-blank
  * {@code description}. Optional frontmatter fields ({@code author},
- * {@code license}, {@code tags}) become catalog metadata. Bounds guard
- * oversized packages and zip bombs (we only read SKILL.md, never extract).
+ * {@code license}, {@code tags}) become catalog metadata. Entry names are
+ * normalized and must stay inside that directory: {@code ..} segments,
+ * absolute paths and drive letters are rejected (#1233, zip-slip). Bounds
+ * guard oversized packages and zip bombs (we only read SKILL.md, never extract).
  */
 public final class SkillZipValidator {
 
@@ -58,7 +60,7 @@ public final class SkillZipValidator {
                 if (++entries > MAX_ENTRIES) {
                     throw invalid("SKILL_TOO_MANY_ENTRIES", "技能包条目数超过上限。");
                 }
-                String path = entry.getName();
+                String path = normalizedEntryPath(entry.getName());
                 int slash = path.indexOf('/');
                 String top = slash > 0 ? path.substring(0, slash) : path;
                 if (rootDir == null) {
@@ -94,6 +96,47 @@ public final class SkillZipValidator {
             throw invalid("SKILL_MD_MISSING", "技能目录必须包含 SKILL.md。");
         }
         return parseFrontmatter(rootDir, skillMdText);
+    }
+
+    /**
+     * Normalizes a zip entry name to a '/'-separated relative path, rejecting
+     * anything that could escape the skill root when the package is extracted
+     * downstream (#1233, zip-slip): absolute paths, drive letters, and any
+     * {@code ..} segment — however the separator is spelled, since extractors
+     * on Windows split on '\' too. Empty and '.' segments are dropped; nothing
+     * else is rewritten, so accepted entries reach extractors unchanged.
+     */
+    private static String normalizedEntryPath(String name) {
+        if (name == null) {
+            throw invalidEntryPath();
+        }
+        String unified = name.replace('\\', '/');
+        boolean driveLetter = unified.length() > 1 && unified.charAt(1) == ':' && Character.isLetter(unified.charAt(0));
+        if (unified.startsWith("/") || driveLetter) {
+            throw invalidEntryPath();
+        }
+        StringBuilder normalized = new StringBuilder();
+        for (String segment : unified.split("/", -1)) {
+            if (segment.isEmpty() || segment.equals(".")) {
+                continue;
+            }
+            if (segment.equals("..")) {
+                throw invalidEntryPath();
+            }
+            if (normalized.length() > 0) {
+                normalized.append('/');
+            }
+            normalized.append(segment);
+        }
+        if (normalized.length() == 0) {
+            throw invalidEntryPath();
+        }
+        return normalized.toString();
+    }
+
+    private static SkillValidationException invalidEntryPath() {
+        return invalid("SKILL_ENTRY_PATH_INVALID",
+                "技能包内存在不安全的条目路径：条目名不允许 .. 段、绝对路径，或规范化后越出技能根目录。");
     }
 
     private static SkillMetadata parseFrontmatter(String rootDir, String skillMd) {
