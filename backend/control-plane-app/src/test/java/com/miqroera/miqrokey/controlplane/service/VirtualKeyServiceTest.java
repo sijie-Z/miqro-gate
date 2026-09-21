@@ -9,10 +9,12 @@ import com.miqroera.miqrokey.domain.crypto.VirtualKeyCrypto;
 import com.miqroera.miqrokey.domain.crypto.VirtualKeyMaterial;
 import com.miqroera.miqrokey.domain.model.GrantStatus;
 import com.miqroera.miqrokey.domain.model.KeyProjectBinding;
+import com.miqroera.miqrokey.domain.model.KeyProjectBindingStatus;
 import com.miqroera.miqrokey.domain.model.Project;
 import com.miqroera.miqrokey.domain.model.ProjectMembership;
 import com.miqroera.miqrokey.domain.model.ProjectProviderGrant;
 import com.miqroera.miqrokey.domain.model.ProjectStatus;
+import com.miqroera.miqrokey.domain.model.ProviderProduct;
 import com.miqroera.miqrokey.domain.model.User;
 import com.miqroera.miqrokey.domain.model.UserRole;
 import com.miqroera.miqrokey.domain.model.UserStatus;
@@ -23,6 +25,8 @@ import com.miqroera.miqrokey.domain.repository.KeyProjectBindingRepository;
 import com.miqroera.miqrokey.domain.repository.ProjectMembershipRepository;
 import com.miqroera.miqrokey.domain.repository.ProjectProviderGrantRepository;
 import com.miqroera.miqrokey.domain.repository.ProjectRepository;
+import com.miqroera.miqrokey.domain.repository.ProviderProductRepository;
+import com.miqroera.miqrokey.domain.repository.UserRepository;
 import com.miqroera.miqrokey.domain.repository.VirtualKeyRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,6 +49,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -75,7 +80,11 @@ class VirtualKeyServiceTest {
     @Mock
     private ProjectProviderGrantRepository grantRepository;
     @Mock
+    private ProviderProductRepository productRepository;
+    @Mock
     private ProjectMembershipRepository membershipRepository;
+    @Mock
+    private UserRepository userRepository;
     @Mock
     private VirtualKeyCrypto keyCrypto;
     @Mock
@@ -92,7 +101,8 @@ class VirtualKeyServiceTest {
         authProperties.setGatewayBaseUrl("https://gateway.example.internal");
         authProperties.setVirtualKeyRotateGrace(Duration.ZERO);
         service = new VirtualKeyService(keyRepository, bindingRepository, projectRepository, grantRepository,
-                membershipRepository, keyCrypto, auditService, authProperties, RouteRefreshPublisher.NONE);
+                productRepository, membershipRepository, userRepository, keyCrypto, auditService, authProperties,
+                RouteRefreshPublisher.NONE);
         user = user(UserRole.USER);
         admin = user(UserRole.SYSTEM_ADMIN);
     }
@@ -135,7 +145,10 @@ class VirtualKeyServiceTest {
         // string.
         assertThat(stored.secretDigest()).isNotEqualTo(material.rawSecret());
 
-        verify(bindingRepository).insert(any(KeyProjectBinding.class));
+        ArgumentCaptor<KeyProjectBinding> bindingCaptor = ArgumentCaptor.forClass(KeyProjectBinding.class);
+        verify(bindingRepository).insert(bindingCaptor.capture());
+        assertThat(bindingCaptor.getValue().projectId()).isEqualTo(PROJECT_ID);
+        assertThat(bindingCaptor.getValue().grantId()).isEqualTo(GRANT_ID);
         verify(keyRepository).replaceKeyModels(TENANT, stored.id(), Set.of("model-a"));
 
         // Audit summary must not leak the secret.
@@ -169,7 +182,25 @@ class VirtualKeyServiceTest {
         when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(project));
 
         assertThatThrownBy(() -> service.create(user, request("k", null), "req"))
-                .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getCode()).isEqualTo("PROJECT_INACTIVE"));
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo("PROJECT_INACTIVE");
+                    // #1154: the picker no longer offers a disabled project, but delegation,
+                    // a project disabled mid-form, and raw API callers still land here — for
+                    // them the detail is the only signal, so it has to name who can undo it,
+                    // the way this method's other rejections do.
+                    assertThat(e.getMessage()).contains("管理员");
+                });
+        verify(keyRepository, never()).insert(any());
+    }
+
+    @Test
+    void createRejectsSystemProject() {
+        Project bucket = new Project(PROJECT_ID, TENANT, "UNATTRIBUTED", "未归属（系统）", null, null, ProjectStatus.ACTIVE,
+                TAG, 0L, Instant.now(), Instant.now(), true);
+        when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(bucket));
+
+        assertThatThrownBy(() -> service.create(user, request("k", null), "req")).isInstanceOfSatisfying(
+                ApiException.class, e -> assertThat(e.getCode()).isEqualTo("PROJECT_NOT_SELECTABLE"));
         verify(keyRepository, never()).insert(any());
     }
 
@@ -275,6 +306,9 @@ class VirtualKeyServiceTest {
         when(keyRepository.findModelIds(oldKey.id())).thenReturn(Set.of("model-a"));
         when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(activeProject(TENANT, TAG)));
         when(keyCrypto.generate(TENANT, TAG)).thenReturn(newMaterial);
+        when(bindingRepository.findAllByVirtualKeyId(oldKey.id()))
+                .thenReturn(List.of(new KeyProjectBinding(UUID.randomUUID(), TENANT, oldKey.id(), PROJECT_ID, GRANT_ID,
+                        KeyProjectBindingStatus.ACTIVE, 0L, Instant.now(), Instant.now())));
 
         CreateVirtualKeyResponse resp = service.rotate(user, oldKey.id(), "req-2");
 
@@ -289,7 +323,10 @@ class VirtualKeyServiceTest {
         assertThat(replacement.cachePolicy()).isEqualTo("DISABLED");
         assertThat(replacement.userId()).isEqualTo(USER_ID);
         verify(keyRepository).replaceKeyModels(TENANT, replacement.id(), Set.of("model-a"));
-        verify(bindingRepository).insert(any(KeyProjectBinding.class));
+        ArgumentCaptor<KeyProjectBinding> mirroredCaptor = ArgumentCaptor.forClass(KeyProjectBinding.class);
+        verify(bindingRepository).insert(mirroredCaptor.capture());
+        assertThat(mirroredCaptor.getValue().projectId()).isEqualTo(PROJECT_ID);
+        assertThat(mirroredCaptor.getValue().grantId()).isEqualTo(GRANT_ID);
 
         ArgumentCaptor<VirtualKey> updated = ArgumentCaptor.forClass(VirtualKey.class);
         verify(keyRepository).update(updated.capture());
@@ -401,6 +438,7 @@ class VirtualKeyServiceTest {
         when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(activeProject(TENANT, TAG)));
         when(grantRepository.findAllByProjectIdAndStatus(PROJECT_ID, "ACTIVE")).thenReturn(List.of(activeGrant()));
         when(grantRepository.findModelIds(GRANT_ID)).thenReturn(Set.of("model-a"));
+        when(productRepository.findById(PRODUCT_ID)).thenReturn(Optional.of(product()));
 
         MeGrantsResponse resp = service.grantOptions(user);
 
@@ -408,7 +446,26 @@ class VirtualKeyServiceTest {
         assertThat(resp.projects().get(0).projectTag()).isEqualTo(TAG);
         assertThat(resp.grants()).hasSize(1);
         assertThat(resp.grants().get(0).models()).containsExactly("model-a");
+        // #528: display identity for the picker, not just a raw product UUID.
+        assertThat(resp.grants().get(0).providerProductCode()).isEqualTo("deepseek-payg-api");
+        assertThat(resp.grants().get(0).providerProductName()).isEqualTo("DeepSeek PAYG");
         assertThat(resp.purposes()).contains(VirtualKeyPurpose.CLAUDE_CODE.name());
+    }
+
+    @Test
+    void grantOptionsTolerateAMissingProductRow() {
+        ProjectMembership membership = new ProjectMembership(TENANT, PROJECT_ID, USER_ID, USER_ID, Instant.now());
+        when(membershipRepository.findAllByUserId(USER_ID)).thenReturn(List.of(membership));
+        when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(activeProject(TENANT, TAG)));
+        when(grantRepository.findAllByProjectIdAndStatus(PROJECT_ID, "ACTIVE")).thenReturn(List.of(activeGrant()));
+        when(grantRepository.findModelIds(GRANT_ID)).thenReturn(Set.of("model-a"));
+        when(productRepository.findById(PRODUCT_ID)).thenReturn(Optional.empty());
+
+        MeGrantsResponse resp = service.grantOptions(user);
+
+        assertThat(resp.grants()).hasSize(1);
+        assertThat(resp.grants().get(0).providerProductCode()).isNull();
+        assertThat(resp.grants().get(0).providerProductName()).isNull();
     }
 
     @Test
@@ -424,6 +481,60 @@ class VirtualKeyServiceTest {
         MeGrantsResponse resp = service.grantOptions(admin);
 
         assertThat(resp.projects()).hasSize(2);
+    }
+
+    @Test
+    void grantOptionsForRegularUserSkipsDisabledProjects() {
+        // #1154: membership rows and provider grants both outlive a project being
+        // disabled (AdminOrgService.updateProject rewrites the projects row and nothing
+        // else), so a member keeps reaching this branch with a project that
+        // requireBindableProject answers 409 PROJECT_INACTIVE for — and that the member
+        // cannot re-enable. The admin branch filtered on ACTIVE from the start; this
+        // one
+        // never did.
+        ProjectMembership membership = new ProjectMembership(TENANT, PROJECT_ID, USER_ID, USER_ID, Instant.now());
+        when(membershipRepository.findAllByUserId(USER_ID)).thenReturn(List.of(membership));
+        when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(disabledProject(TENANT, TAG)));
+
+        MeGrantsResponse resp = service.grantOptions(user);
+
+        assertThat(resp.projects()).isEmpty();
+        // Nothing can bind the disabled project, so offering its grants would advertise
+        // a
+        // choice that can only come back 409.
+        assertThat(resp.grants()).isEmpty();
+        verify(grantRepository, never()).findAllByProjectIdAndStatus(PROJECT_ID, "ACTIVE");
+    }
+
+    @Test
+    void grantOptionsForAdminSkipsDisabledProjects() {
+        // The ACTIVE check used to sit in the admin branch alone and now lives in the
+        // shared step both branches pass through; this pins that the move changed
+        // nothing
+        // for admins: the disabled project is skipped either way.
+        //
+        // The second findById is lenient on purpose. Where the check sits decides
+        // whether
+        // that lookup happens at all — up in the admin loop it never runs, down in the
+        // shared step it does. A strict stub would fail the version that skips the
+        // lookup,
+        // i.e. would be asserting the implementation rather than the behaviour.
+        // Stubbing it
+        // loosely is what gives this test teeth: with the ACTIVE filter gone the
+        // disabled
+        // project comes back from this stub and shows up in projects().
+        UUID disabledId = UUID.randomUUID();
+        Project active = activeProject(TENANT, TAG);
+        Project disabled = new Project(disabledId, TENANT, "D", "d", null, null, ProjectStatus.DISABLED, "other", 0L,
+                Instant.now(), Instant.now());
+        when(projectRepository.findAllByTenantId(TENANT)).thenReturn(List.of(active, disabled));
+        when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(active));
+        lenient().when(projectRepository.findById(disabledId)).thenReturn(Optional.of(disabled));
+
+        MeGrantsResponse resp = service.grantOptions(admin);
+
+        assertThat(resp.projects()).hasSize(1);
+        assertThat(resp.projects().get(0).id()).isEqualTo(PROJECT_ID);
     }
 
     // ------------------------------------------------------------------
@@ -442,13 +553,27 @@ class VirtualKeyServiceTest {
                 Instant.now());
     }
 
+    private static Project disabledProject(UUID tenant, String tag) {
+        return new Project(PROJECT_ID, tenant, "P", "p", null, null, ProjectStatus.DISABLED, tag, 0L, Instant.now(),
+                Instant.now());
+    }
+
     private static ProjectProviderGrant activeGrant() {
         return new ProjectProviderGrant(GRANT_ID, TENANT, PROJECT_ID, PRODUCT_ID, CREDENTIAL_ID, GrantStatus.ACTIVE,
                 USER_ID, 0L, Instant.now(), Instant.now());
     }
 
+    private static ProviderProduct product() {
+        return new ProviderProduct(PRODUCT_ID, UUID.randomUUID(), "deepseek-payg-api", "DeepSeek PAYG",
+                com.miqroera.miqrokey.domain.model.BillingMode.PAYG, com.miqroera.miqrokey.domain.model.PlanScope.NONE,
+                null, null, "[\"messages\"]", "[{\"url\":\"https://api.deepseek.com\"}]", "bearer", "OFFICIAL_API",
+                "OFFICIAL_API", com.miqroera.miqrokey.domain.model.BalanceAuthority.OFFICIAL_API,
+                com.miqroera.miqrokey.domain.model.ImplementationStatus.IMPLEMENTED, "1", 0, Instant.now(),
+                Instant.now());
+    }
+
     private static CreateVirtualKeyRequest request(String name, List<String> models) {
-        return new CreateVirtualKeyRequest(name, PROJECT_ID, PRODUCT_ID, GRANT_ID, VirtualKeyPurpose.CLAUDE_CODE,
+        return new CreateVirtualKeyRequest(name, PROJECT_ID, null, PRODUCT_ID, GRANT_ID, VirtualKeyPurpose.CLAUDE_CODE,
                 models, null);
     }
 

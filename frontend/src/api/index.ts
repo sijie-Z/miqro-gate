@@ -1,46 +1,125 @@
-/**
- * /api/v1/auth and /api/v1/me endpoint clients (api-contract.md §3–§4).
- */
-
-import { del, get, patch, post } from './http';
+/** * /api/v1/auth and /api/v1/me endpoint clients (api-contract.md §3–§4). */ import {
+  ApiError,
+  del,
+  downloadBlob,
+  get,
+  getList,
+  patch,
+  post,
+  put,
+  uploadBytes,
+} from './http';
 import type {
-  AdminUser,
-  AlertRule,
-  AuditEventView,
-  ExportTask,
-  UsageDeletionRequest,
-  WebhookDelivery,
-  WebhookEndpointView,
-  CredentialDetailView,
-  PriceSnapshotView,
-  CredentialView,
-  ValidateCredentialResponse,
-  CreateVirtualKeyRequest,
-  CreateVirtualKeyResponse,
-  Grant,
-  LoginResponse,
-  MeGrantsResponse,
-  MemberView,
-  Provider,
+  McpAclMode,
+  ModelApprovalStatus,
   ProviderProductView,
-  SeatView,
-  Project,
-  Team,
-  SubscriptionView,
+  UnattributedPolicyView,
   UsageGroupBy,
-  UsageRecordPage,
-  UsageSummary,
-  UserCreatedResponse,
-  UserResponse,
   UserRole,
   UserStatusValue,
-  VirtualKeyView,
 } from '@/types/api';
+import type {
+  AgentView,
+  AlertRule,
+  ApiConsumerView,
+  AuditEventView,
+  BudgetView,
+  ConfigEntryView,
+  CreateVirtualKeyResponse,
+  CredentialDetailView,
+  CredentialView,
+  ExportTask,
+  InternalServiceView,
+  McpAccessView,
+  McpRouteRule,
+  McpServiceView,
+  McpToolView,
+  MeGrantsResponse,
+  ModelApprovalPage,
+  MePlazaView,
+  ModelApprovalView,
+  PriceSnapshotView,
+  Project,
+  QuotaDefaultTemplateView,
+  QuotaRuleView,
+  RoiReportView,
+  SeatView,
+  SkillView,
+  SubscriptionView,
+  Team,
+  UpsertMcpRouteRuleRequest,
+  AdminUser,
+  CreateApiConsumerResponse,
+  Grant,
+  LoginResponse,
+  McpToolRevisionRow,
+  MemberView,
+  ToolImportResult,
+  UsageDeletionRequest,
+  ModelCatalogRow,
+  UsageRecordPage,
+  UserCreatedResponse,
+  UserProjectMembership,
+  UserResponse,
+  UsageSummary,
+  HourlyUsageReport,
+  ModelCallTimeline,
+  ValidateCredentialResponse,
+  VirtualKeyView,
+  WebhookDelivery,
+  WebhookEndpointView,
+  McpAccessLogEntry,
+  McpResiliencePolicy,
+  SkillRevisionView,
+  AdminRetentionLogView,
+  McpServiceAccessView,
+  McpServiceVerifyView,
+  RetentionConfigView,
+  RegistrationStatusResponse,
+} from '@/types/generated-api';
+import type { components } from '@/types/generated';
+
+// Stage-2 codegen migration (batch 1): request DTOs now alias the OpenAPI
+// schema types instead of handwritten duplicates.
+type ConfigureQuotaDefaultTemplateRequest =
+  components['schemas']['ConfigureQuotaDefaultTemplateRequest'];
+type SetMcpAccessGrantsRequest = components['schemas']['SetMcpAccessGrantsRequest'];
+type SubmitModelApprovalRequest = components['schemas']['SubmitModelApprovalRequest'];
+type UpsertQuotaRuleRequest = components['schemas']['UpsertQuotaRuleRequest'];
+// The spec leaves name optional here (server derives/validates); the schema is
+// the authority after this migration.
+type CreateVirtualKeyRequest = components['schemas']['CreateVirtualKeyRequest'];
 
 // ---- auth ----
 
+export interface OAuthProviderInfo {
+  code: string;
+  name: string;
+}
+
+/** #550: public read-only self-registration switch state, read before the
+ *  login page renders its register entry (single boolean, no session needed).
+ *  Aliases the generated schema rather than a handwritten duplicate, so the
+ *  contract cannot drift; `enabled` stays optional (springdoc omits `required`
+ *  for response records), hence callers compare against `false`. */
+export function registrationStatus(): Promise<RegistrationStatusResponse> {
+  return get<RegistrationStatusResponse>('/api/v1/auth/registration-status');
+}
+
+export function publicOauthProviders(): Promise<OAuthProviderInfo[]> {
+  return getList<OAuthProviderInfo>('/api/v1/auth/oauth/providers');
+}
+
 export function login(username: string, password: string): Promise<LoginResponse> {
   return post<LoginResponse>('/api/v1/auth/login', { username, password });
+}
+
+export function register(
+  username: string,
+  displayName: string | undefined,
+  password: string,
+): Promise<LoginResponse> {
+  return post<LoginResponse>('/api/v1/auth/register', { username, displayName, password });
 }
 
 export function logout(): Promise<void> {
@@ -55,14 +134,18 @@ export function changePassword(currentPassword: string, newPassword: string): Pr
   return post<void>('/api/v1/auth/password', { currentPassword, newPassword });
 }
 
+/**
+ * #597: self-service "sign out of other sessions" — revokes every session of
+ * the current user except the calling one. The current session stays valid.
+ */
+export function logoutOtherSessions(): Promise<{ message: string }> {
+  return post<{ message: string }>('/api/v1/auth/logout-others');
+}
+
 // ---- self-service Virtual Keys ----
 
 export function listVirtualKeys(): Promise<VirtualKeyView[]> {
-  return get<VirtualKeyView[]>('/api/v1/me/virtual-keys');
-}
-
-export function getVirtualKey(id: string): Promise<VirtualKeyView> {
-  return get<VirtualKeyView>(`/api/v1/me/virtual-keys/${id}`);
+  return getList<VirtualKeyView>('/api/v1/me/virtual-keys');
 }
 
 export function createVirtualKey(
@@ -79,8 +162,48 @@ export function revokeVirtualKey(id: string): Promise<{ message: string }> {
   return post<{ message: string }>(`/api/v1/me/virtual-keys/${id}/revoke`);
 }
 
+/** #582: rename (bindings, models and the secret itself are unchanged). */
+export function renameVirtualKey(id: string, name: string): Promise<VirtualKeyView> {
+  return patch<VirtualKeyView>(`/api/v1/me/virtual-keys/${id}`, { name });
+}
+
+/** #582: temporary soft stop — the gateway answers the uniform unknown-key 404. */
+export function disableVirtualKey(id: string): Promise<VirtualKeyView> {
+  return post<VirtualKeyView>(`/api/v1/me/virtual-keys/${id}/disable`);
+}
+
+/** #582: re-enable a disabled key; routing resumes at the next snapshot refresh. */
+export function enableVirtualKey(id: string): Promise<VirtualKeyView> {
+  return post<VirtualKeyView>(`/api/v1/me/virtual-keys/${id}/enable`);
+}
+
 export function myGrants(): Promise<MeGrantsResponse> {
   return get<MeGrantsResponse>('/api/v1/me/grants');
+}
+
+// ---- self-service model approvals (model-approval workflow) ----
+
+export function submitModelApproval(
+  request: SubmitModelApprovalRequest,
+): Promise<ModelApprovalView> {
+  return post<ModelApprovalView>('/api/v1/me/model-approvals', request);
+}
+
+export function listMyModelApprovals(): Promise<ModelApprovalView[]> {
+  return getList<ModelApprovalView>('/api/v1/me/model-approvals');
+}
+
+// ---- model plaza (#1201, 腾讯「AI 能力市场」对位) ----
+
+/** #1201: the caller's usable models (with prices) + catalog models still approvable. */
+export function getPlazaModels(): Promise<MePlazaView> {
+  return get<MePlazaView>('/api/v1/me/plaza/models');
+}
+
+// ---- self-service quota visibility (F04) ----
+
+export function listMyQuotaRules(): Promise<QuotaRuleView[]> {
+  return getList<QuotaRuleView>('/api/v1/me/quota-rules');
 }
 
 // ---- usage ----
@@ -89,8 +212,9 @@ export function usageSummary(
   groupBy?: UsageGroupBy,
   from?: string,
   to?: string,
+  tzOffsetMinutes?: number,
 ): Promise<UsageSummary> {
-  return get<UsageSummary>('/api/v1/me/usage/summary', { groupBy, from, to });
+  return get<UsageSummary>('/api/v1/me/usage/summary', { groupBy, from, to, tzOffsetMinutes });
 }
 
 export function usageRecords(
@@ -107,7 +231,7 @@ export function usageRecords(
 // ---- admin organization (G5.2) ----
 
 export function listUsers(): Promise<AdminUser[]> {
-  return get<AdminUser[]>('/api/v1/admin/users');
+  return getList<AdminUser>('/api/v1/admin/users');
 }
 
 export function createUser(body: {
@@ -118,8 +242,16 @@ export function createUser(body: {
   return post<UserCreatedResponse>('/api/v1/admin/users', body);
 }
 
+/** PATCH /admin/users/{id} — displayName and/or status (at least one, #614). */
+export function updateUser(
+  id: string,
+  body: { displayName?: string; status?: UserStatusValue },
+): Promise<AdminUser> {
+  return patch<AdminUser>(`/api/v1/admin/users/${id}`, body);
+}
+
 export function updateUserStatus(id: string, status: UserStatusValue): Promise<AdminUser> {
-  return patch<AdminUser>(`/api/v1/admin/users/${id}`, { status });
+  return updateUser(id, { status });
 }
 
 export function resetUserPassword(id: string): Promise<UserCreatedResponse> {
@@ -131,7 +263,7 @@ export function revokeUserSessions(id: string): Promise<void> {
 }
 
 export function listTeams(): Promise<Team[]> {
-  return get<Team[]>('/api/v1/admin/teams');
+  return getList<Team>('/api/v1/admin/teams');
 }
 
 export function createTeam(body: { name: string; description?: string }): Promise<Team> {
@@ -139,7 +271,7 @@ export function createTeam(body: { name: string; description?: string }): Promis
 }
 
 export function listTeamMembers(teamId: string): Promise<MemberView[]> {
-  return get<MemberView[]>(`/api/v1/admin/teams/${teamId}/members`);
+  return getList<MemberView>(`/api/v1/admin/teams/${teamId}/members`);
 }
 
 export function addTeamMember(teamId: string, userId: string): Promise<void> {
@@ -151,7 +283,7 @@ export function removeTeamMember(teamId: string, userId: string): Promise<void> 
 }
 
 export function listProjects(): Promise<Project[]> {
-  return get<Project[]>('/api/v1/admin/projects');
+  return getList<Project>('/api/v1/admin/projects');
 }
 
 export function createProject(body: {
@@ -162,8 +294,16 @@ export function createProject(body: {
   return post<Project>('/api/v1/admin/projects', body);
 }
 
+/** PATCH /admin/projects/{id} — name / projectTag / status (#617). */
+export function updateProject(
+  id: string,
+  body: { name?: string; projectTag?: string; status?: string },
+): Promise<Project> {
+  return patch<Project>(`/api/v1/admin/projects/${id}`, body);
+}
+
 export function listProjectMembers(projectId: string): Promise<MemberView[]> {
-  return get<MemberView[]>(`/api/v1/admin/projects/${projectId}/members`);
+  return getList<MemberView>(`/api/v1/admin/projects/${projectId}/members`);
 }
 
 export function addProjectMember(projectId: string, userId: string): Promise<void> {
@@ -174,8 +314,12 @@ export function removeProjectMember(projectId: string, userId: string): Promise<
   return del<void>(`/api/v1/admin/projects/${projectId}/members/${userId}`);
 }
 
+export function adminUserProjectMemberships(userId: string): Promise<UserProjectMembership[]> {
+  return getList<UserProjectMembership>(`/api/v1/admin/users/${userId}/project-memberships`);
+}
+
 export function listGrants(): Promise<Grant[]> {
-  return get<Grant[]>('/api/v1/admin/grants');
+  return getList<Grant>('/api/v1/admin/grants');
 }
 
 export function createGrant(body: {
@@ -188,7 +332,7 @@ export function createGrant(body: {
 }
 
 export function grantModels(grantId: string): Promise<string[]> {
-  return get<string[]>(`/api/v1/admin/grants/${grantId}/models`);
+  return getList<string>(`/api/v1/admin/grants/${grantId}/models`);
 }
 
 export function updateGrantModels(grantId: string, models: string[]): Promise<Grant> {
@@ -199,8 +343,133 @@ export function disableGrant(grantId: string): Promise<void> {
   return del<void>(`/api/v1/admin/grants/${grantId}`);
 }
 
+// ---- admin model-approval queue ----
+
+export function listModelApprovals(
+  params: {
+    status?: ModelApprovalStatus;
+    size?: number;
+    before?: string;
+  } = {},
+): Promise<ModelApprovalPage> {
+  return get<ModelApprovalPage>('/api/v1/admin/model-approvals', params);
+}
+
+export function approveModelApproval(id: string, reviewNote?: string): Promise<ModelApprovalView> {
+  return post<ModelApprovalView>(
+    `/api/v1/admin/model-approvals/${id}/approve`,
+    reviewNote ? { reviewNote } : {},
+  );
+}
+
+export function rejectModelApproval(id: string, reviewNote?: string): Promise<ModelApprovalView> {
+  return post<ModelApprovalView>(
+    `/api/v1/admin/model-approvals/${id}/reject`,
+    reviewNote ? { reviewNote } : {},
+  );
+}
+
+// ---- admin quota rules (usage quota plans, alerting-only) ----
+
+export function listQuotaRules(): Promise<QuotaRuleView[]> {
+  return getList<QuotaRuleView>('/api/v1/admin/quota-rules');
+}
+
+export function putQuotaRule(request: UpsertQuotaRuleRequest): Promise<QuotaRuleView> {
+  return put<QuotaRuleView>('/api/v1/admin/quota-rules', request);
+}
+
+export function deleteQuotaRule(id: string): Promise<void> {
+  return del<void>(`/api/v1/admin/quota-rules/${id}`);
+}
+
+// ---- admin default quota template (Tencent doc 135489) ----
+
+export function getQuotaDefaultTemplate(): Promise<QuotaDefaultTemplateView> {
+  return get<QuotaDefaultTemplateView>('/api/v1/admin/quota-default-template');
+}
+
+export function putQuotaDefaultTemplate(
+  request: ConfigureQuotaDefaultTemplateRequest,
+): Promise<QuotaDefaultTemplateView> {
+  return put<QuotaDefaultTemplateView>('/api/v1/admin/quota-default-template', request);
+}
+
+export function enableQuotaDefaultTemplate(): Promise<QuotaDefaultTemplateView> {
+  return post<QuotaDefaultTemplateView>('/api/v1/admin/quota-default-template/enable');
+}
+
+export function disableQuotaDefaultTemplate(): Promise<QuotaDefaultTemplateView> {
+  return post<QuotaDefaultTemplateView>('/api/v1/admin/quota-default-template/disable');
+}
+
+// ---- admin cache-ROI report (P5.4) ----
+
+export function getRoiReport(
+  from?: string,
+  to?: string,
+  tzOffsetMinutes?: number,
+): Promise<RoiReportView> {
+  return get<RoiReportView>('/api/v1/admin/usage/roi', { from, to, tzOffsetMinutes });
+}
+
+// ---- MCP two-level access control (Tencent doc 134890) ----
+
+export function listMcpAccessLogs(params?: {
+  service?: string;
+  consumer?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+}): Promise<McpAccessLogEntry[]> {
+  const query: Record<string, string> = {};
+  if (params?.service) query.service = params.service;
+  if (params?.consumer) query.consumer = params.consumer;
+  if (params?.from) query.from = params.from;
+  if (params?.to) query.to = params.to;
+  if (params?.limit != null) query.limit = String(params.limit);
+  return getList<McpAccessLogEntry>('/api/v1/admin/mcp-access-logs', query);
+}
+
+export function getMcpServiceAccess(serviceId: string): Promise<McpAccessView> {
+  return get<McpAccessView>(`/api/v1/admin/mcp-services/${serviceId}/access`);
+}
+
+export function setMcpAccessMode(serviceId: string, mode: McpAclMode): Promise<McpAccessView> {
+  return put<McpAccessView>(`/api/v1/admin/mcp-services/${serviceId}/access/mode`, { mode });
+}
+
+export function setMcpAccessGrants(
+  serviceId: string,
+  request: SetMcpAccessGrantsRequest,
+): Promise<McpAccessView> {
+  return put<McpAccessView>(`/api/v1/admin/mcp-services/${serviceId}/access/grants`, request);
+}
+
+export function clearMcpAccessGrants(serviceId: string, toolId?: string): Promise<McpAccessView> {
+  const query = toolId ? `?toolId=${encodeURIComponent(toolId)}` : '';
+  return del<McpAccessView>(`/api/v1/admin/mcp-services/${serviceId}/access/grants${query}`);
+}
+
 export function listCredentials(): Promise<CredentialView[]> {
-  return get<CredentialView[]>('/api/v1/admin/credentials');
+  return getList<CredentialView>('/api/v1/admin/credentials');
+}
+
+// #647: tenant unattributed-request policy (settings page).
+export function getUnattributedPolicy(): Promise<UnattributedPolicyView> {
+  return get<UnattributedPolicyView>('/api/v1/admin/unattributed-policy');
+}
+
+export function putUnattributedPolicy(body: {
+  credentialId: string;
+  providerProductId?: string;
+  models?: string[];
+}): Promise<UnattributedPolicyView> {
+  return put<UnattributedPolicyView>('/api/v1/admin/unattributed-policy', body);
+}
+
+export function deleteUnattributedPolicy(): Promise<void> {
+  return del('/api/v1/admin/unattributed-policy');
 }
 
 export function getCredential(id: string): Promise<CredentialDetailView> {
@@ -231,7 +500,7 @@ export function disableCredential(id: string): Promise<{ message: string }> {
 }
 
 export function listPrices(): Promise<PriceSnapshotView[]> {
-  return get<PriceSnapshotView[]>('/api/v1/admin/prices');
+  return getList<PriceSnapshotView>('/api/v1/admin/prices');
 }
 
 export function createPrice(body: {
@@ -245,18 +514,79 @@ export function createPrice(body: {
   return post<PriceSnapshotView>('/api/v1/admin/prices', body);
 }
 
+/** Price-catalog sync report (#585): source quotes → CNY snapshots. */
+export interface PriceSyncReport {
+  source: string;
+  usdCnyRate: string;
+  written: number;
+  unchanged: number;
+  unmatched: Array<{ productCode: string; modelId: string }>;
+  skippedProducts: string[];
+  syncedAt: string;
+}
+
+export function syncPrices(): Promise<PriceSyncReport> {
+  return post<PriceSyncReport>('/api/v1/admin/prices/sync', {});
+}
+
+export function listApiConsumers(): Promise<ApiConsumerView[]> {
+  return getList<ApiConsumerView>('/api/v1/admin/api-consumers');
+}
+
+export function createApiConsumer(
+  name: string,
+  expiresAt?: string,
+): Promise<CreateApiConsumerResponse> {
+  return post<CreateApiConsumerResponse>('/api/v1/admin/api-consumers', { name, expiresAt });
+}
+
+export function disableApiConsumer(id: string): Promise<ApiConsumerView> {
+  return post<ApiConsumerView>(`/api/v1/admin/api-consumers/${id}/disable`);
+}
+
+/** ADR-0011: set/rotate the consumer's RS256 JWT verification key (public PEM only). */
+export function setConsumerJwtKey(id: string, publicKeyPem: string): Promise<ApiConsumerView> {
+  return put<ApiConsumerView>(`/api/v1/admin/api-consumers/${id}/jwt-key`, { publicKeyPem });
+}
+
+/** ADR-0011: remove the JWT verification key — tokens signed by it stop verifying. */
+export function removeConsumerJwtKey(id: string): Promise<ApiConsumerView> {
+  return del<ApiConsumerView>(`/api/v1/admin/api-consumers/${id}/jwt-key`);
+}
+
+/** Issue #338 (I5): per-consumer MCP call overview from the access log. */
+export interface ApiConsumerActivity {
+  consumerId: string;
+  windowHours: number;
+  totalCalls: number;
+  forwarded: number;
+  denied: number;
+  failed: number;
+  lastCallAt: string | null;
+  topTools: Array<{ name: string; calls: number }>;
+  topServices: Array<{ name: string; calls: number }>;
+}
+
+export function adminConsumerActivity(id: string, hours = 24): Promise<ApiConsumerActivity> {
+  return get<ApiConsumerActivity>(`/api/v1/admin/api-consumers/${id}/activity`, { hours });
+}
+
+/** Replaces the channel scope: null = full access, empty array = no channels. */
+export function updateApiConsumerScope(
+  id: string,
+  capabilities: string[] | null,
+): Promise<ApiConsumerView> {
+  return patch<ApiConsumerView>(`/api/v1/admin/api-consumers/${id}/scope`, { capabilities });
+}
+
 // ---- admin provider/Plan (G5.3) ----
 
 export function listProviderProducts(): Promise<ProviderProductView[]> {
-  return get<ProviderProductView[]>('/api/v1/admin/provider-products');
-}
-
-export function listProviders(): Promise<Provider[]> {
-  return get<Provider[]>('/api/v1/admin/provider-products/providers');
+  return getList<ProviderProductView>('/api/v1/admin/provider-products');
 }
 
 export function listSubscriptions(): Promise<SubscriptionView[]> {
-  return get<SubscriptionView[]>('/api/v1/admin/subscriptions');
+  return getList<SubscriptionView>('/api/v1/admin/subscriptions');
 }
 
 export function createSubscription(body: {
@@ -273,7 +603,7 @@ export function createSubscription(body: {
 }
 
 export function listSeats(subscriptionId: string): Promise<SeatView[]> {
-  return get<SeatView[]>(`/api/v1/admin/subscriptions/${subscriptionId}/seats`);
+  return getList<SeatView>(`/api/v1/admin/subscriptions/${subscriptionId}/seats`);
 }
 
 export function createSeat(
@@ -286,12 +616,528 @@ export function createSeat(
 export function updateSeat(
   subscriptionId: string,
   seatId: string,
-  body: { assignedUserId?: string; status?: string; displayName?: string },
+  body: { assignedUserId?: string; status?: string; displayName?: string; version: number },
 ): Promise<SeatView> {
   return patch<SeatView>(`/api/v1/admin/subscriptions/${subscriptionId}/seats/${seatId}`, body);
 }
 
+// ---- SkillHub (P2.4) ----
+
+export function listSkills(q?: string, tags?: string[]): Promise<SkillView[]> {
+  return getList<SkillView>(`/api/v1/skills${skillQuery(q, tags)}`);
+}
+
+/** Keyword (name/description/ID) + tag filters shared by the market and admin lists. */
+function skillQuery(q?: string, tags?: string[]): string {
+  const params = new URLSearchParams();
+  const keyword = q?.trim();
+  if (keyword) params.set('q', keyword);
+  for (const tag of tags ?? []) params.append('tags', tag);
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
+}
+
+/** Downloads the skill package; throws ApiError (403 SKILL_DOWNLOAD_FORBIDDEN). */
+export async function downloadSkill(id: string, filename: string): Promise<void> {
+  const blob = await downloadBlob(`/api/v1/skills/${id}/download`);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${filename}.zip`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export function adminListSkills(q?: string, tags?: string[]): Promise<SkillView[]> {
+  return getList<SkillView>(`/api/v1/admin/skills${skillQuery(q, tags)}`);
+}
+
+export function adminUploadSkill(version: string, zip: Blob): Promise<SkillView> {
+  return uploadBytes<SkillView>(`/api/v1/admin/skills?version=${encodeURIComponent(version)}`, zip);
+}
+
+export function adminArchiveSkill(id: string): Promise<SkillView> {
+  return post<SkillView>(`/api/v1/admin/skills/${id}/archive`);
+}
+
+// ---- skill revisions (I14) ----
+
+export function adminListSkillRevisions(id: string, limit = 20): Promise<SkillRevisionView[]> {
+  return getList<SkillRevisionView>(`/api/v1/admin/skills/${id}/revisions?limit=${limit}`);
+}
+
+export function adminActivateSkillRevision(
+  id: string,
+  revision: number,
+): Promise<SkillRevisionView> {
+  return post<SkillRevisionView>(`/api/v1/admin/skills/${id}/revisions/${revision}/activate`);
+}
+
+export function adminSetSkillAccess(
+  id: string,
+  scopes: Array<{ scopeType: string; scopeId: string }>,
+): Promise<void> {
+  return put<void>(`/api/v1/admin/skills/${id}/access`, scopes);
+}
+
+// ---- agents (P3.1) ----
+
+export function adminListAgents(): Promise<AgentView[]> {
+  return getList<AgentView>('/api/v1/admin/agents');
+}
+
+export function adminCreateAgent(body: {
+  name: string;
+  description?: string;
+  credentialId: string;
+}): Promise<AgentView> {
+  return post<AgentView>('/api/v1/admin/agents', body);
+}
+
+export function adminDisableAgent(id: string): Promise<AgentView> {
+  return post<AgentView>(`/api/v1/admin/agents/${id}/disable`);
+}
+
+export function adminEnableAgent(id: string): Promise<AgentView> {
+  return post<AgentView>(`/api/v1/admin/agents/${id}/enable`);
+}
+
+/** Rename / edit the description; `version` is the row's optimistic-lock token. */
+export function adminUpdateAgent(
+  id: string,
+  body: { name: string; description?: string; version: number },
+): Promise<AgentView> {
+  return patch<AgentView>(`/api/v1/admin/agents/${id}`, body);
+}
+
+/** Hard delete (#824): frees the name and the one-agent-per-credential slot. */
+export function adminDeleteAgent(id: string): Promise<void> {
+  return del<void>(`/api/v1/admin/agents/${id}`);
+}
+
+export function adminAgentUsage(id: string): Promise<UsageSummary> {
+  return get<UsageSummary>(`/api/v1/admin/agents/${id}/usage`);
+}
+
+// ---- internal services (P3.2) ----
+
+export function adminListServices(): Promise<InternalServiceView[]> {
+  return getList<InternalServiceView>('/api/v1/admin/services');
+}
+
+export function adminCreateService(body: {
+  name: string;
+  kind?: string;
+  description?: string;
+  baseUrl: string;
+}): Promise<InternalServiceView> {
+  return post<InternalServiceView>('/api/v1/admin/services', body);
+}
+
+export function adminDisableService(id: string): Promise<InternalServiceView> {
+  return post<InternalServiceView>(`/api/v1/admin/services/${id}/disable`);
+}
+
+/** #326: re-enable a disabled registry service (mirror of disable). */
+export function adminEnableService(id: string): Promise<InternalServiceView> {
+  return post<InternalServiceView>(`/api/v1/admin/services/${id}/enable`);
+}
+
+/** #326: partial health-probe configuration update (mirror of the MCP endpoint). */
+export function adminUpdateServiceHealthConfig(
+  id: string,
+  body: {
+    checkIntervalSeconds?: number;
+    checkTimeoutSeconds?: number;
+    failThreshold?: number;
+    recoverThreshold?: number;
+    checkPath?: string;
+  },
+): Promise<InternalServiceView> {
+  return post<InternalServiceView>(`/api/v1/admin/services/${id}/health-config`, body);
+}
+
+// ---- global config (P3.3) ----
+
+export function adminListConfigs(group?: string): Promise<ConfigEntryView[]> {
+  const params = group ? `?group=${encodeURIComponent(group)}` : '';
+  return getList<ConfigEntryView>(`/api/v1/admin/configs${params}`);
+}
+
+export function adminPutConfig(body: {
+  group: string;
+  key: string;
+  value: string;
+  description?: string;
+}): Promise<ConfigEntryView> {
+  return put<ConfigEntryView>('/api/v1/admin/configs', body);
+}
+
+export function adminDeleteConfig(group: string, key: string): Promise<void> {
+  return del<void>(`/api/v1/admin/configs/${encodeURIComponent(group)}/${encodeURIComponent(key)}`);
+}
+
+// ---- MCP services (P3.4) ----
+
+export function adminListMcpServices(): Promise<McpServiceView[]> {
+  return getList<McpServiceView>('/api/v1/admin/mcp-services');
+}
+
+export function adminCreateMcpService(body: {
+  name: string;
+  description?: string;
+  endpoint: string;
+  transport?: string;
+  checkIntervalSeconds?: number;
+  checkTimeoutSeconds?: number;
+  failThreshold?: number;
+  recoverThreshold?: number;
+  checkPath?: string;
+  upstreamTimeoutMs?: number;
+}): Promise<McpServiceView> {
+  return post<McpServiceView>('/api/v1/admin/mcp-services', body);
+}
+
+/** I20 follow-up: per-service data-plane upstream budget (doc 135906). */
+export function adminSetMcpServiceUpstreamTimeout(
+  id: string,
+  upstreamTimeoutMs: number,
+): Promise<McpServiceView> {
+  return put<McpServiceView>(`/api/v1/admin/mcp-services/${id}/upstream-timeout`, {
+    upstreamTimeoutMs,
+  });
+}
+
+export function adminSetMcpStatus(id: string, status: string): Promise<McpServiceView> {
+  return post<McpServiceView>(`/api/v1/admin/mcp-services/${id}/status?status=${status}`);
+}
+
+/** #685: gateway access URLs (console counterpart of /mcpservers/{name}/mcp). */
+export function adminMcpServiceAccess(id: string): Promise<McpServiceAccessView> {
+  return get<McpServiceAccessView>(`/api/v1/admin/mcp-services/${id}/connection`);
+}
+
+/** #685「调用验证」: one immediate, read-only upstream probe. */
+export function adminMcpServiceVerify(id: string): Promise<McpServiceVerifyView> {
+  return post<McpServiceVerifyView>(`/api/v1/admin/mcp-services/${id}/verify`);
+}
+
+export interface McpResilienceDraft {
+  retryEnabled?: boolean;
+  retryMax?: number;
+  retryConditions?: string[];
+  idempotencyConfirmed?: boolean;
+  breakerEnabled?: boolean;
+  breakerWindowSeconds?: number;
+  breakerMinRequests?: number;
+  breakerErrorEnabled?: boolean;
+  breakerErrorRatio?: number;
+  breakerErrorStatusCodes?: number[];
+  breakerSlowEnabled?: boolean;
+  breakerSlowCallMs?: number;
+  breakerSlowRatio?: number;
+  breakerOpenSeconds?: number;
+  breakerProbeCount?: number;
+  breakerProbeSuccess?: number;
+  breakerSkipRetry?: boolean;
+}
+
+export function getMcpServiceResilience(id: string): Promise<McpResiliencePolicy> {
+  return get<McpResiliencePolicy>(`/api/v1/admin/mcp-services/${id}/resilience`);
+}
+
+export function putMcpServiceResilience(
+  id: string,
+  body: McpResilienceDraft,
+): Promise<McpResiliencePolicy> {
+  return put<McpResiliencePolicy>(`/api/v1/admin/mcp-services/${id}/resilience`, body);
+}
+
+export function adminUpdateMcpHealthConfig(
+  id: string,
+  body: {
+    checkIntervalSeconds?: number;
+    checkTimeoutSeconds?: number;
+    failThreshold?: number;
+    recoverThreshold?: number;
+    checkPath?: string;
+    /** #387: HEALTH_PATH (default) | JSONRPC_INITIALIZE. */
+    checkMode?: string;
+  },
+): Promise<McpServiceView> {
+  return post<McpServiceView>(`/api/v1/admin/mcp-services/${id}/health-config`, body);
+}
+
+/** #397 被动健康：服务窗口真实流量（分类口径与 #338 消费者活动一致）。 */
+export interface McpServiceTraffic {
+  serviceId: string;
+  serviceName?: string;
+  windowHours: number;
+  totalCalls: number;
+  forwarded: number;
+  denied: number;
+  failed: number;
+  /** failed / (forwarded + failed)；窗口内无健康相关流量时为 null。 */
+  failureRate: number | null;
+  lastCallAt?: string | null;
+  lastFailureAt?: string | null;
+  topFailingTools: Array<{ name: string; failures: number }>;
+}
+
+export function adminMcpServiceTraffic(id: string, hours = 24): Promise<McpServiceTraffic> {
+  return get<McpServiceTraffic>(`/api/v1/admin/mcp-services/${id}/traffic`, { hours });
+}
+
+/**
+ * #320 upstream backend auth: VISITOR clears any stored secret; API_KEY
+ * requires a non-blank write-only secret (never returned by any read surface).
+ */
+export function adminSetMcpBackendAuth(
+  id: string,
+  body: { mode: 'VISITOR' | 'API_KEY'; secret?: string },
+): Promise<McpServiceView> {
+  return put<McpServiceView>(`/api/v1/admin/mcp-services/${id}/backend-auth`, body);
+}
+
+export function adminListMcpTools(serviceId: string): Promise<McpToolView[]> {
+  return getList<McpToolView>(`/api/v1/admin/mcp-services/${serviceId}/tools`);
+}
+
+/** Tools/list sync report (#344, doc 03): per-item diff, previewed or applied. */
+export interface McpToolSyncReport {
+  dryRun: boolean;
+  upstreamToolCount: number;
+  added: string[];
+  updated: string[];
+  unchanged: number;
+  absentUpstream: string[];
+  skipped: Array<{ toolName: string; reason: string }>;
+}
+
+export function adminSyncMcpTools(serviceId: string, dryRun = false): Promise<McpToolSyncReport> {
+  return post<McpToolSyncReport>(
+    `/api/v1/admin/mcp-services/${serviceId}/tools/sync?dryRun=${dryRun}`,
+  );
+}
+
+/** Tool-level retry override (#360, I13): only the retry fields, breaker stays service-level. */
+export interface McpToolRetryPolicy {
+  retryEnabled: boolean;
+  retryMax: number;
+  retryConditions: string[];
+  idempotencyConfirmed: boolean;
+  version: number;
+}
+
+export function getMcpToolRetryPolicy(
+  serviceId: string,
+  toolId: string,
+): Promise<McpToolRetryPolicy> {
+  return get<McpToolRetryPolicy>(
+    `/api/v1/admin/mcp-services/${serviceId}/tools/${toolId}/retry-policy`,
+  );
+}
+
+export function putMcpToolRetryPolicy(
+  serviceId: string,
+  toolId: string,
+  body: {
+    retryEnabled: boolean;
+    retryMax: number;
+    retryConditions: string[];
+    idempotencyConfirmed: boolean;
+  },
+): Promise<McpToolRetryPolicy> {
+  return put<McpToolRetryPolicy>(
+    `/api/v1/admin/mcp-services/${serviceId}/tools/${toolId}/retry-policy`,
+    body,
+  );
+}
+
+export function adminCreateMcpTool(
+  serviceId: string,
+  body: { toolName: string; description?: string; method?: string; path: string },
+): Promise<McpToolView> {
+  return post<McpToolView>(`/api/v1/admin/mcp-services/${serviceId}/tools`, body);
+}
+
+export function adminSetMcpToolStatus(
+  serviceId: string,
+  toolId: string,
+  status: string,
+): Promise<McpToolView> {
+  return post<McpToolView>(
+    `/api/v1/admin/mcp-services/${serviceId}/tools/${toolId}/status?status=${status}`,
+  );
+}
+
+// ---- F16 tool definition versioning (V33) ----
+
+export function adminListToolRevisions(
+  serviceId: string,
+  toolId: string,
+): Promise<McpToolRevisionRow[]> {
+  return getList<McpToolRevisionRow>(
+    `/api/v1/admin/mcp-services/${serviceId}/tools/${toolId}/revisions`,
+  );
+}
+
+export function adminActivateToolRevision(
+  serviceId: string,
+  toolId: string,
+  revision: number,
+): Promise<McpToolRevisionRow> {
+  return post<McpToolRevisionRow>(
+    `/api/v1/admin/mcp-services/${serviceId}/tools/${toolId}/revisions/${revision}/activate`,
+  );
+}
+
+export function adminPublishToolRevision(
+  serviceId: string,
+  toolId: string,
+  body: { description?: string; method?: string; path?: string },
+): Promise<McpToolRevisionRow> {
+  return post<McpToolRevisionRow>(
+    `/api/v1/admin/mcp-services/${serviceId}/tools/${toolId}/revisions`,
+    body,
+  );
+}
+
+export function adminImportMcpTools(serviceId: string, spec: unknown): Promise<ToolImportResult> {
+  return post<ToolImportResult>(`/api/v1/admin/mcp-services/${serviceId}/tools/import`, spec);
+}
+
+// ---- F18 model catalog manual maintenance (V34) ----
+
+export function adminListModels(productId?: string, source?: string): Promise<ModelCatalogRow[]> {
+  const params = new URLSearchParams();
+  if (productId) params.set('providerProductId', productId);
+  if (source) params.set('source', source);
+  const qs = params.toString();
+  return getList<ModelCatalogRow>(`/api/v1/admin/models${qs ? `?${qs}` : ''}`);
+}
+
+export function adminCreateModel(
+  productId: string,
+  body: { modelId: string; displayName?: string; contextWindow?: number; maxOutputTokens?: number },
+): Promise<ModelCatalogRow> {
+  return post<ModelCatalogRow>('/api/v1/admin/models', { providerProductId: productId, ...body });
+}
+
+export function adminDeleteModel(rowId: string): Promise<void> {
+  return del<void>(`/api/v1/admin/models/${rowId}`);
+}
+
+/** Model probe (#346, I4, doc 05): admin-triggered official /models fetch. */
+export interface ModelProbeReport {
+  providerProductId: string;
+  productCode: string;
+  modelCount: number;
+  probedAt: string;
+  models: Array<{ modelId: string; displayName: string }>;
+}
+
+/** Last probe outcome for a product; all-null when never probed. */
+export interface ModelProbeStatus {
+  status: 'SUCCEEDED' | 'FAILED' | null;
+  error: string | null;
+  modelCount: number | null;
+  probedAt: string | null;
+}
+
+export function adminProbeModels(providerProductId: string): Promise<ModelProbeReport> {
+  return post<ModelProbeReport>('/api/v1/admin/models/probe', { providerProductId });
+}
+
+export function adminModelProbeStatus(providerProductId: string): Promise<ModelProbeStatus> {
+  return get<ModelProbeStatus>('/api/v1/admin/models/probe-status', { providerProductId });
+}
+
+// ---- Model test-run (#552, console 在线调试) ----
+
+export interface ModelTestRunResult {
+  providerProductId: string;
+  productCode?: string;
+  modelId: string;
+  httpStatus: number;
+  latencyMs: number;
+  content: string;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+}
+
+/**
+ * One real upstream chat call for a credential×model pair. The prompt and the
+ * reply stay transient (never persisted or logged server-side).
+ */
+export function adminTestRunModel(
+  providerProductId: string,
+  modelId: string,
+  prompt?: string,
+): Promise<ModelTestRunResult> {
+  return post<ModelTestRunResult>('/api/v1/admin/models/test-run', {
+    providerProductId,
+    modelId,
+    prompt,
+  });
+}
+
+// ---- MCP route rules (F11, Tencent doc 135482) ----
+
+export function adminListMcpRouteRules(serviceId: string): Promise<McpRouteRule[]> {
+  return getList<McpRouteRule>(`/api/v1/admin/mcp-services/${serviceId}/route-rules`);
+}
+
+export function adminCreateMcpRouteRule(
+  serviceId: string,
+  body: UpsertMcpRouteRuleRequest,
+): Promise<McpRouteRule> {
+  return post<McpRouteRule>(`/api/v1/admin/mcp-services/${serviceId}/route-rules`, body);
+}
+
+export function adminUpdateMcpRouteRule(
+  serviceId: string,
+  ruleId: string,
+  body: UpsertMcpRouteRuleRequest,
+): Promise<McpRouteRule> {
+  return patch<McpRouteRule>(`/api/v1/admin/mcp-services/${serviceId}/route-rules/${ruleId}`, body);
+}
+
+export function adminSetMcpRouteStatus(
+  serviceId: string,
+  ruleId: string,
+  status: 'ENABLED' | 'DISABLED',
+): Promise<McpRouteRule> {
+  return post<McpRouteRule>(
+    `/api/v1/admin/mcp-services/${serviceId}/route-rules/${ruleId}/status?status=${status}`,
+  );
+}
+
+export function adminDeleteMcpRouteRule(serviceId: string, ruleId: string): Promise<void> {
+  return del<void>(`/api/v1/admin/mcp-services/${serviceId}/route-rules/${ruleId}`);
+}
+
 // ---- admin usage / export / deletion / webhook / alert / audit (G5.4) ----
+
+// ---- admin budget (G8.2) ----
+
+export function adminBudgets(month?: string): Promise<BudgetView[]> {
+  const params = month ? `?month=${encodeURIComponent(month)}` : '';
+  return getList<BudgetView>(`/api/v1/admin/budgets${params}`);
+}
+
+export function putProjectBudget(
+  projectId: string,
+  body: { month: string; amount: number; currency?: string; alertThresholdPct?: number },
+): Promise<BudgetView> {
+  return put<BudgetView>(`/api/v1/admin/projects/${projectId}/budget`, body);
+}
+
+export function deleteProjectBudget(projectId: string, month?: string): Promise<void> {
+  const params = month ? `?month=${encodeURIComponent(month)}` : '';
+  return del(`/api/v1/admin/projects/${projectId}/budget${params}`);
+}
 
 export function adminUsageSummary(query: {
   groupBy?: string;
@@ -304,10 +1150,15 @@ export function adminUsageSummary(query: {
   subscriptionId?: string;
   providerProductId?: string;
   modelId?: string;
+  teamId?: string;
+  /** Local day/month buckets (#1050); omit for the UTC reading. */
+  tzOffsetMinutes?: number;
 }): Promise<UsageSummary> {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
-    if (value) params.set(key, value);
+    // A numeric 0 (tzOffsetMinutes = UTC) is dropped here on purpose: the
+    // parameter's default is already 0, so omitting it says the same thing.
+    if (value) params.set(key, String(value));
   }
   return get<UsageSummary>(`/api/v1/admin/usage/summary?${params.toString()}`);
 }
@@ -320,12 +1171,42 @@ export function adminUsageRecords(query: {
   userId?: string;
   projectId?: string;
   modelId?: string;
+  clientIp?: string;
+  teamId?: string;
 }): Promise<UsageRecordPage> {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
     if (value !== undefined && value !== '') params.set(key, String(value));
   }
   return get<UsageRecordPage>(`/api/v1/admin/usage/records?${params.toString()}`);
+}
+
+/** #634: per-hour token table, cross-tabbed by project and user/team. */
+export function adminUsageHourly(query: {
+  date?: string;
+  days?: number;
+  dimension?: string;
+  userId?: string;
+  projectId?: string;
+  tzOffsetMinutes?: number;
+  teamId?: string;
+}): Promise<HourlyUsageReport> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== '') params.set(key, String(value));
+  }
+  return get<HourlyUsageReport>(`/api/v1/admin/usage/hourly?${params.toString()}`);
+}
+
+/**
+ * #707: one model call's lifecycle timeline, keyed by the gateway request ID
+ * (#705). 404 means there is nothing to replay for that id — the lifecycle
+ * table only covers calls that actually reached upstream, so coalesced and
+ * cache-hit requests are expected to miss. Callers render that as a hint, not
+ * an error.
+ */
+export function adminUsageTimeline(gatewayRequestId: string): Promise<ModelCallTimeline> {
+  return get<ModelCallTimeline>('/api/v1/admin/usage/timeline', { gatewayRequestId });
 }
 
 export function createExport(
@@ -343,7 +1224,7 @@ export function exportStatus(id: string): Promise<ExportTask> {
 }
 
 export function exportRecent(): Promise<ExportTask[]> {
-  return get<ExportTask[]>('/api/v1/admin/exports?limit=20');
+  return getList<ExportTask>('/api/v1/admin/exports?limit=20');
 }
 
 export function deletionPreview(from: string, to: string): Promise<{ count: number }> {
@@ -373,11 +1254,11 @@ export function confirmDeletion(id: string, confirmToken: string): Promise<Usage
 }
 
 export function deletionRecent(): Promise<UsageDeletionRequest[]> {
-  return get<UsageDeletionRequest[]>('/api/v1/admin/usage-deletions?limit=20');
+  return getList<UsageDeletionRequest>('/api/v1/admin/usage-deletions?limit=20');
 }
 
 export function listWebhooks(): Promise<WebhookEndpointView[]> {
-  return get<WebhookEndpointView[]>('/api/v1/admin/webhooks');
+  return getList<WebhookEndpointView>('/api/v1/admin/webhooks');
 }
 
 export function createWebhook(body: {
@@ -405,11 +1286,11 @@ export function testWebhook(id: string): Promise<{ httpStatus?: number; errorMes
 }
 
 export function webhookDeliveries(id: string): Promise<WebhookDelivery[]> {
-  return get<WebhookDelivery[]>(`/api/v1/admin/webhooks/${id}/deliveries?limit=20`);
+  return getList<WebhookDelivery>(`/api/v1/admin/webhooks/${id}/deliveries?limit=20`);
 }
 
 export function listAlertRules(): Promise<AlertRule[]> {
-  return get<AlertRule[]>('/api/v1/admin/alert-rules');
+  return getList<AlertRule>('/api/v1/admin/alert-rules');
 }
 
 export function createAlertRule(body: {
@@ -418,6 +1299,7 @@ export function createAlertRule(body: {
   threshold: number;
   dedupeMinutes?: number;
   webhookEndpointId?: string;
+  scopeJson?: string;
 }): Promise<AlertRule> {
   return post<AlertRule>('/api/v1/admin/alert-rules', body);
 }
@@ -430,6 +1312,7 @@ export function updateAlertRule(
     dedupeMinutes?: number;
     enabled?: boolean;
     webhookEndpointId?: string;
+    scopeJson?: string;
   },
 ): Promise<AlertRule> {
   return patch<AlertRule>(`/api/v1/admin/alert-rules/${id}`, body);
@@ -439,9 +1322,266 @@ export function deleteAlertRule(id: string): Promise<void> {
   return del<void>(`/api/v1/admin/alert-rules/${id}`);
 }
 
-export function auditEvents(query: { size?: number; action?: string }): Promise<AuditEventView[]> {
+/** Audit record query filters shared by the list and CSV export endpoints. */
+export interface AuditQuery {
+  size?: number;
+  action?: string;
+  targetType?: string;
+  actorId?: string;
+  /** ISO-8601 instants (UTC), same semantics as the backend TIME_RANGE_INVALID check. */
+  from?: string;
+  to?: string;
+}
+
+export function auditEvents(query: AuditQuery): Promise<AuditEventView[]> {
   const params = new URLSearchParams();
   if (query.size) params.set('size', String(query.size));
   if (query.action) params.set('action', query.action);
-  return get<AuditEventView[]>(`/api/v1/admin/audit-events?${params.toString()}`);
+  if (query.targetType) params.set('targetType', query.targetType);
+  if (query.actorId) params.set('actorId', query.actorId);
+  if (query.from) params.set('from', query.from);
+  if (query.to) params.set('to', query.to);
+  return getList<AuditEventView>(`/api/v1/admin/audit-events?${params.toString()}`);
+}
+
+export interface AuditCsvExport {
+  csv: string;
+  truncated: boolean;
+}
+
+/**
+ * Downloads the filtered audit chain as a compliance CSV. The backend truncates
+ * at 50k rows and declares it via {@code X-MiQroKey-Truncated}; the caller
+ * surfaces that instead of silently handing over an incomplete file.
+ */
+export async function exportAuditCsv(query: Omit<AuditQuery, 'size'>): Promise<AuditCsvExport> {
+  const params = new URLSearchParams();
+  if (query.action) params.set('action', query.action);
+  if (query.targetType) params.set('targetType', query.targetType);
+  if (query.actorId) params.set('actorId', query.actorId);
+  if (query.from) params.set('from', query.from);
+  if (query.to) params.set('to', query.to);
+  const response = await fetch(`/api/v1/admin/audit-events/export?${params.toString()}`, {
+    headers: { Accept: 'text/csv' },
+    credentials: 'include',
+  });
+  if (!response.ok) {
+    let details:
+      { detail?: string; code?: string; status?: number; requestId?: string } | undefined;
+    try {
+      details = (await response.json()) as typeof details;
+    } catch {
+      // Not JSON — generic error below.
+    }
+    throw new ApiError({
+      type: 'about:blank',
+      title: '导出失败',
+      status: response.status,
+      code: details?.code ?? 'HTTP_ERROR',
+      detail: details?.detail,
+      requestId: details?.requestId ?? '',
+    });
+  }
+  return {
+    csv: await response.text(),
+    truncated: response.headers.get('X-MiQroKey-Truncated') === 'true',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Bill reconciliation (F19, coverage-matrix I2). The endpoints return Maps, so
+// the DTOs live here next to their clients (same pattern as ApiConsumerActivity).
+// ---------------------------------------------------------------------------
+
+export type ReconciliationStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+export type ReconciliationVerdict =
+  'MATCHED' | 'PARTIAL' | 'UNMATCHED_PROVIDER' | 'UNMATCHED_LOCAL';
+
+/** Report metadata view; identical shape for create, list entries and GET /{id}. */
+export interface ReconciliationReport {
+  id: string;
+  providerCode: string;
+  currency: string;
+  windowFrom: string;
+  windowTo: string;
+  status: ReconciliationStatus;
+  uploadSha256?: string | null;
+  uploadBytes?: number | null;
+  totalRows?: number | null;
+  matched?: number | null;
+  partialBuckets?: number | null;
+  unmatchedProvider?: number | null;
+  unmatchedLocal?: number | null;
+  lineErrorCount?: number | null;
+  amountDiff?: string | null;
+  errorMessage?: string | null;
+  createdBy?: string | null;
+  createdAt: string;
+  finishedAt?: string | null;
+}
+
+/**
+ * CSV export payload: `AuditCsvExport` plus the exact data-row count the
+ * backend reports through {@code X-MiQroKey-Rows}. Bill text is
+ * provider-controlled and may contain newlines, so counting lines in the file
+ * (what the audit/retention views do) would under-report here.
+ */
+export interface ReconciliationCsvExport extends AuditCsvExport {
+  rows: number;
+}
+
+/** One four-state detail row; `detail` carries per-verdict context fields. */
+export interface ReconciliationRow {
+  rowNo: number;
+  verdict: ReconciliationVerdict;
+  matchedBy?: string | null;
+  providerRowRef?: string | null;
+  localRef?: string | null;
+  detail?: Record<string, unknown> | null;
+}
+
+export function listReconciliations(limit = 20): Promise<{ reports: ReconciliationReport[] }> {
+  return get<{ reports: ReconciliationReport[] }>('/api/v1/admin/reconciliations', { limit });
+}
+
+export function reconciliationReport(id: string): Promise<ReconciliationReport> {
+  return get<ReconciliationReport>(`/api/v1/admin/reconciliations/${id}`);
+}
+
+/** One cursor page of detail rows; `nextCursor` is '' once the slice is exhausted. */
+export function reconciliationRows(
+  id: string,
+  query: { state?: string; cursor?: string | number; limit?: number } = {},
+): Promise<{ rows: ReconciliationRow[]; nextCursor: string | number }> {
+  return get<{ rows: ReconciliationRow[]; nextCursor: string | number }>(
+    `/api/v1/admin/reconciliations/${id}/rows`,
+    query,
+  );
+}
+
+export function createReconciliation(
+  params: { providerCode: string; currency: string; windowFrom: string; windowTo: string },
+  content: Blob,
+): Promise<ReconciliationReport> {
+  const qs = new URLSearchParams(params).toString();
+  return uploadBytes<ReconciliationReport>(`/api/v1/admin/reconciliations?${qs}`, content);
+}
+
+/**
+ * Downloads the four-state detail rows of one report as CSV (same shape as the
+ * audit and retention exports: 50k-row cap declared via
+ * {@code X-MiQroKey-Truncated}, row count via {@code X-MiQroKey-Rows}). The
+ * optional state narrows the file to the filter the page is showing.
+ */
+export async function exportReconciliationCsv(
+  id: string,
+  state?: string,
+): Promise<ReconciliationCsvExport> {
+  const params = new URLSearchParams();
+  if (state) params.set('state', state);
+  const query = params.toString();
+  const suffix = query ? `?${query}` : '';
+  const response = await fetch(`/api/v1/admin/reconciliations/${id}/export${suffix}`, {
+    headers: { Accept: 'text/csv' },
+    credentials: 'include',
+  });
+  if (!response.ok) {
+    let details:
+      { detail?: string; code?: string; status?: number; requestId?: string } | undefined;
+    try {
+      details = (await response.json()) as typeof details;
+    } catch {
+      // Not JSON — generic error below.
+    }
+    throw new ApiError({
+      type: 'about:blank',
+      title: '导出失败',
+      status: response.status,
+      code: details?.code ?? 'HTTP_ERROR',
+      detail: details?.detail,
+      requestId: details?.requestId ?? '',
+    });
+  }
+  return {
+    csv: await response.text(),
+    truncated: response.headers.get('X-MiQroKey-Truncated') === 'true',
+    rows: Number(response.headers.get('X-MiQroKey-Rows') ?? '0'),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Retention logs (ADR-0014 §8, admin console)
+// ---------------------------------------------------------------------------
+
+export interface RetentionLogQuery {
+  userId?: string;
+  direction?: string;
+  protocol?: string;
+  from?: string;
+  to?: string;
+}
+
+/** ADR-0014 (#688): tenant retention switch + content cap. */
+export function getRetentionConfig(): Promise<RetentionConfigView> {
+  return get<RetentionConfigView>('/api/v1/admin/retention-config');
+}
+
+export function putRetentionConfig(body: {
+  enabled: boolean;
+  maxContentBytes?: number;
+}): Promise<RetentionConfigView> {
+  return put<RetentionConfigView>('/api/v1/admin/retention-config', body);
+}
+
+/** Filtered, decrypted page over the retention ledger (SYSTEM_ADMIN). */
+export function retentionLogs(
+  query: RetentionLogQuery & { page?: number; size?: number },
+): Promise<AdminRetentionLogView[]> {
+  const params = new URLSearchParams();
+  if (query.userId) params.set('userId', query.userId);
+  if (query.direction) params.set('direction', query.direction);
+  if (query.protocol) params.set('protocol', query.protocol);
+  if (query.from) params.set('from', query.from);
+  if (query.to) params.set('to', query.to);
+  if (query.page !== undefined) params.set('page', String(query.page));
+  if (query.size !== undefined) params.set('size', String(query.size));
+  return getList<AdminRetentionLogView>(`/api/v1/admin/retention-logs?${params.toString()}`);
+}
+
+/**
+ * Downloads the filtered retention ledger as a compliance CSV (same shape as
+ * the audit export: 50k-row cap declared via {@code X-MiQroKey-Truncated}).
+ */
+export async function exportRetentionLogsCsv(query: RetentionLogQuery): Promise<AuditCsvExport> {
+  const params = new URLSearchParams();
+  if (query.userId) params.set('userId', query.userId);
+  if (query.direction) params.set('direction', query.direction);
+  if (query.protocol) params.set('protocol', query.protocol);
+  if (query.from) params.set('from', query.from);
+  if (query.to) params.set('to', query.to);
+  const response = await fetch(`/api/v1/admin/retention-logs/export?${params.toString()}`, {
+    headers: { Accept: 'text/csv' },
+    credentials: 'include',
+  });
+  if (!response.ok) {
+    let details:
+      { detail?: string; code?: string; status?: number; requestId?: string } | undefined;
+    try {
+      details = (await response.json()) as typeof details;
+    } catch {
+      // Not JSON — generic error below.
+    }
+    throw new ApiError({
+      type: 'about:blank',
+      title: '导出失败',
+      status: response.status,
+      code: details?.code ?? 'HTTP_ERROR',
+      detail: details?.detail,
+      requestId: details?.requestId ?? '',
+    });
+  }
+  return {
+    csv: await response.text(),
+    truncated: response.headers.get('X-MiQroKey-Truncated') === 'true',
+  };
 }

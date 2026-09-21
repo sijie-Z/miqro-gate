@@ -1,0 +1,993 @@
+<script setup lang="ts">
+/**
+ * NextAdminConsumersView — /app/consumers v2 admin page (U2 ops batch).
+ * Behaviour parity with the legacy consumers page: create external-system
+ * API consumers with a one-shot key reveal, list and gated disable.
+ */
+import { onMounted, ref } from 'vue';
+import * as api from '@/api';
+import { countWhenLoaded } from '@/utils/load-state';
+import { ApiError } from '@/api/http';
+import {
+  UiButton,
+  UiCheckbox,
+  UiDialog,
+  UiInput,
+  UiPageGuide,
+  UiRadio,
+  UiStatusBadge,
+  UiTable,
+  toast,
+} from '@/ui';
+import type { ApiConsumerView } from '@/types/generated-api';
+import { CONSUMERS_GUIDE } from '@/content/pageGuides';
+
+const consumers = ref<ApiConsumerView[]>([]);
+const loading = ref(true);
+const loadError = ref('');
+const loadRequestId = ref('');
+
+const creating = ref(false);
+const createName = ref('');
+const createExpiresAt = ref('');
+const submitting = ref(false);
+const formError = ref('');
+
+const reveal = ref(false);
+const revealName = ref('');
+const revealKey = ref('');
+const revealAcked = ref(false);
+
+const confirmState = ref<{
+  title: string;
+  body: string;
+  confirmLabel: string;
+  tone: 'danger' | 'primary';
+  run: () => Promise<void>;
+} | null>(null);
+
+const scopeTarget = ref<ApiConsumerView | null>(null);
+const scopeMode = ref<'full' | 'custom'>('full');
+const scopeBilling = ref(true);
+const scopeMcp = ref(true);
+const scopeSaving = ref(false);
+const scopeError = ref('');
+
+// ADR-0011: consumer JWT verification key. The platform signs with its own
+// private key; this console only ever holds the public PEM (rotate/remove).
+const jwtTarget = ref<ApiConsumerView | null>(null);
+const jwtPem = ref('');
+const jwtSaving = ref(false);
+const jwtError = ref('');
+
+function openJwt(consumer: ApiConsumerView) {
+  jwtTarget.value = consumer;
+  jwtPem.value = '';
+  jwtError.value = '';
+}
+
+async function saveJwt() {
+  const target = jwtTarget.value;
+  if (!target) return;
+  if (!jwtPem.value.trim()) {
+    jwtError.value = '请粘贴平台提供的公钥 PEM。';
+    return;
+  }
+  jwtSaving.value = true;
+  jwtError.value = '';
+  try {
+    await api.setConsumerJwtKey(target.id!, jwtPem.value.trim());
+    toast.success(target.jwtKeyFingerprint ? 'JWT 公钥已轮换' : 'JWT 公钥已保存');
+    jwtTarget.value = null;
+    await load();
+  } catch (error) {
+    jwtError.value = error instanceof ApiError ? error.message : '保存失败';
+  } finally {
+    jwtSaving.value = false;
+  }
+}
+
+function requestRemoveJwt(consumer: ApiConsumerView) {
+  confirmState.value = {
+    title: `移除消费者「${consumer.name}」的 JWT 公钥`,
+    body: '移除后，使用该公钥签发的 JWT 立即失效；API Key 通道不受影响。',
+    confirmLabel: '移除公钥',
+    tone: 'danger',
+    run: async () => {
+      try {
+        await api.removeConsumerJwtKey(consumer.id!);
+        toast.success('JWT 公钥已移除');
+        jwtTarget.value = null;
+        await load();
+      } catch (error) {
+        if (error instanceof ApiError) {
+          toast.error(error.message);
+        }
+      }
+    },
+  };
+}
+
+// #338 call overview dialog.
+const activityTarget = ref<ApiConsumerView | null>(null);
+const activityVisible = ref(false);
+const activityLoading = ref(false);
+const activityHours = ref(24);
+const activity = ref<api.ApiConsumerActivity | null>(null);
+const activityError = ref('');
+
+function openActivity(consumer: ApiConsumerView) {
+  activityTarget.value = consumer;
+  activityHours.value = 24;
+  activity.value = null;
+  activityError.value = '';
+  activityVisible.value = true;
+  void loadActivity();
+}
+
+// #399：请求序号守卫——过期响应（含失败）一律丢弃；loading 只由最新请求收尾。
+let activityRequestSeq = 0;
+
+async function loadActivity() {
+  if (!activityTarget.value) return;
+  const seq = ++activityRequestSeq;
+  const consumerId = activityTarget.value.id!;
+  const hours = activityHours.value;
+  activityLoading.value = true;
+  activityError.value = '';
+  try {
+    const view = await api.adminConsumerActivity(consumerId, hours);
+    if (seq !== activityRequestSeq) return;
+    activity.value = view;
+  } catch (error) {
+    if (seq !== activityRequestSeq) return;
+    activityError.value = error instanceof ApiError ? error.message : '加载失败';
+  } finally {
+    if (seq === activityRequestSeq) activityLoading.value = false;
+  }
+}
+
+function openScope(consumer: ApiConsumerView) {
+  const caps = consumer.capabilities ?? null;
+  scopeTarget.value = consumer;
+  if (caps === null) {
+    scopeMode.value = 'full';
+    scopeBilling.value = true;
+    scopeMcp.value = true;
+  } else {
+    scopeMode.value = 'custom';
+    scopeBilling.value = caps.includes('billing:read');
+    scopeMcp.value = caps.includes('mcp:call');
+  }
+  scopeError.value = '';
+}
+
+function capabilityText(consumer: ApiConsumerView): string {
+  const caps = consumer.capabilities;
+  if (caps == null) return '全量';
+  if (caps.length === 0) return '无通道';
+  return caps.join('、');
+}
+
+function toIso(local: string): string | undefined {
+  if (!local) return undefined;
+  const date = new Date(local);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
+function isExpiringSoon(consumer: ApiConsumerView): boolean {
+  const iso = consumer.expiresAt;
+  if (!iso) return false;
+  const ms = new Date(iso).getTime() - Date.now();
+  return ms > 0 && ms <= 7 * 86400000;
+}
+
+function expiryText(consumer: ApiConsumerView): string {
+  const iso = consumer.expiresAt;
+  if (!iso) return '永久';
+  const days = Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000);
+  if (days <= 0) return `${formatTime(iso)} · 已过期`;
+  if (days <= 7) return `${formatTime(iso)} · 剩 ${days} 天`;
+  return formatTime(iso);
+}
+
+async function saveScope() {
+  const target = scopeTarget.value;
+  if (!target) return;
+  scopeSaving.value = true;
+  scopeError.value = '';
+  try {
+    let capabilities: string[] | null = null;
+    if (scopeMode.value === 'custom') {
+      capabilities = [];
+      if (scopeBilling.value) capabilities.push('billing:read');
+      if (scopeMcp.value) capabilities.push('mcp:call');
+    }
+    await api.updateApiConsumerScope(target.id!, capabilities);
+    toast.success('能力作用域已更新');
+    scopeTarget.value = null;
+    await load();
+  } catch (error) {
+    scopeError.value = error instanceof ApiError ? error.message : '更新失败';
+  } finally {
+    scopeSaving.value = false;
+  }
+}
+
+const columns = [
+  { key: 'name', title: '名称', minWidth: '200px' },
+  { key: 'keyPrefix', title: 'Key 前缀', width: '160px' },
+  { key: 'credential', title: '凭证', width: '150px' },
+  { key: 'capabilities', title: '能力作用域', minWidth: '150px' },
+  { key: 'expiresAt', title: '到期', width: '150px' },
+  { key: 'status', title: '状态', width: '100px' },
+  { key: 'createdAt', title: '创建时间', width: '170px' },
+  { key: 'actions', title: '操作', width: '260px', align: 'center' as const },
+];
+
+async function load() {
+  loading.value = true;
+  loadError.value = '';
+  try {
+    consumers.value = await api.listApiConsumers();
+  } catch (error) {
+    if (error instanceof ApiError) {
+      loadError.value = error.message;
+      loadRequestId.value = error.requestId ?? '';
+    }
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function createConsumer() {
+  if (!createName.value.trim()) {
+    formError.value = '请输入消费者名称。';
+    return;
+  }
+  submitting.value = true;
+  formError.value = '';
+  try {
+    const response = await api.createApiConsumer(
+      createName.value.trim(),
+      toIso(createExpiresAt.value),
+    );
+    creating.value = false;
+    createName.value = '';
+    createExpiresAt.value = '';
+    revealName.value = response.consumer?.name ?? '';
+    revealKey.value = response.apiKey ?? '';
+    revealAcked.value = false;
+    reveal.value = true;
+    await load();
+  } catch (error) {
+    formError.value = error instanceof ApiError ? error.message : '创建失败';
+  } finally {
+    submitting.value = false;
+  }
+}
+
+async function copyKey() {
+  try {
+    await navigator.clipboard.writeText(revealKey.value);
+    toast.success('API 密钥已复制');
+  } catch {
+    toast.error('复制失败，请手动复制');
+  }
+}
+
+function requestDisable(consumer: ApiConsumerView) {
+  // Hub View schemas mark every field optional (springdoc omits `required`);
+  // consumer rows always carry the id — the `!` restores the pre-hub contract.
+  confirmState.value = {
+    title: `吊销消费者「${consumer.name}」`,
+    body: '吊销后该 API 密钥立即失效，外部系统将无法再调用计费查询接口。',
+    confirmLabel: '吊销',
+    tone: 'danger',
+    run: async () => {
+      try {
+        await api.disableApiConsumer(consumer.id!);
+        toast.success('消费者已吊销');
+        await load();
+      } catch (error) {
+        if (error instanceof ApiError) {
+          toast.error(error.message);
+        }
+      }
+    },
+  };
+}
+
+async function confirmAndRun() {
+  const state = confirmState.value;
+  if (!state) return;
+  confirmState.value = null;
+  await state.run();
+}
+
+function formatTime(iso?: string): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+onMounted(load);
+</script>
+
+<template>
+  <div class="ui-page next-consumers">
+    <header class="ui-page-header">
+      <div>
+        <h1 class="ui-page-title">API 消费者</h1>
+        <p class="ui-page-desc">外部系统专用密钥访问计费查询接口；密钥仅创建时显示一次。</p>
+      </div>
+      <div class="ui-page-actions">
+        <UiButton
+          variant="primary"
+          data-testid="consumer-create-open"
+          @click="creating = !creating"
+        >
+          {{ creating ? '收起表单' : '新建消费者' }}
+        </UiButton>
+      </div>
+    </header>
+
+    <UiPageGuide :guide="CONSUMERS_GUIDE" storage-key="consumers" />
+
+    <div v-if="loadError" class="ui-alert ui-alert--error" data-testid="consumers-load-error">
+      {{ loadError
+      }}<span v-if="loadRequestId" class="ui-request-id"> requestId: {{ loadRequestId }}</span>
+    </div>
+
+    <section
+      v-if="creating"
+      class="ui-panel next-consumers__create"
+      data-testid="consumer-create-form"
+    >
+      <div class="ui-panel-head">
+        <h2 class="ui-panel-title">新建消费者</h2>
+      </div>
+      <div class="ui-panel-body">
+        <div class="next-consumers__form">
+          <UiInput
+            v-model="createName"
+            label="名称"
+            required
+            hint="最长 200 个字符；名称需唯一（JWT 的 sub 映射键）。"
+            placeholder="例如 billing-sync"
+            data-testid="consumer-create-name"
+          />
+          <UiInput
+            v-model="createExpiresAt"
+            type="datetime-local"
+            label="到期时间（可选，留空 = 永不过期）"
+            hint="到期后该消费者的请求将静默返回 401。"
+            data-testid="consumer-create-expires"
+          />
+          <p v-if="formError" class="ui-form-error">{{ formError }}</p>
+          <div class="next-consumers__actions">
+            <UiButton
+              variant="primary"
+              :loading="submitting"
+              data-testid="consumer-create-submit"
+              @click="createConsumer"
+            >
+              创建
+            </UiButton>
+            <UiButton variant="ghost" @click="creating = false">取消</UiButton>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="ui-panel">
+      <div class="ui-panel-toolbar">
+        <span class="ui-panel-sub"
+          >共 {{ countWhenLoaded(loadError, consumers.length) }} 个消费者</span
+        >
+      </div>
+      <UiTable
+        :columns="columns"
+        :data="consumers"
+        :loading="loading"
+        row-key="id"
+        empty-title="还没有 API 消费者"
+        empty-description="外部系统（平台）对接时再创建；机器身份与人类用户分开管理。"
+        data-testid="consumers-table"
+        :error="loadError"
+        @retry="load"
+      >
+        <template #name="{ row }">
+          <span class="next-consumers__name">{{ (row as ApiConsumerView).name }}</span>
+        </template>
+        <template #keyPrefix="{ row }">
+          <span class="ui-mono">{{ (row as ApiConsumerView).keyPrefix }}</span>
+        </template>
+        <template #credential="{ row }">
+          <span class="next-consumers__credentials">
+            <UiStatusBadge tone="neutral" label="API Key" />
+            <UiStatusBadge
+              v-if="(row as ApiConsumerView).jwtKeyFingerprint"
+              tone="info"
+              label="JWT"
+              data-testid="consumer-jwt-badge"
+            />
+          </span>
+        </template>
+        <template #capabilities="{ row }">
+          <span
+            class="next-consumers__caps"
+            :class="{
+              'next-consumers__caps--full': (row as ApiConsumerView).capabilities === null,
+            }"
+            data-testid="consumer-capabilities"
+          >
+            {{ capabilityText(row as ApiConsumerView) }}
+          </span>
+        </template>
+        <template #expiresAt="{ row }">
+          <span
+            class="next-consumers__expiry"
+            :class="{ 'next-consumers__expiry--soon': isExpiringSoon(row as ApiConsumerView) }"
+            data-testid="consumer-expires"
+          >
+            {{ expiryText(row as ApiConsumerView) }}
+          </span>
+        </template>
+        <template #status="{ row }">
+          <UiStatusBadge
+            :tone="(row as ApiConsumerView).status === 'ACTIVE' ? 'success' : 'neutral'"
+            :label="(row as ApiConsumerView).status === 'ACTIVE' ? '正常' : '已吊销'"
+          />
+        </template>
+        <template #createdAt="{ row }">{{
+          formatTime((row as ApiConsumerView).createdAt)
+        }}</template>
+        <template #actions="{ row }">
+          <UiButton
+            variant="link"
+            size="sm"
+            data-testid="consumer-activity"
+            @click="openActivity(row as ApiConsumerView)"
+          >
+            调用概览
+          </UiButton>
+          <UiButton
+            v-if="(row as ApiConsumerView).status === 'ACTIVE'"
+            variant="link"
+            size="sm"
+            data-testid="consumer-jwt-open"
+            @click="openJwt(row as ApiConsumerView)"
+          >
+            JWT 公钥
+          </UiButton>
+          <UiButton
+            v-if="(row as ApiConsumerView).status === 'ACTIVE'"
+            variant="link"
+            size="sm"
+            data-testid="consumer-scope"
+            @click="openScope(row as ApiConsumerView)"
+          >
+            作用域
+          </UiButton>
+          <UiButton
+            v-if="(row as ApiConsumerView).status === 'ACTIVE'"
+            variant="link-danger"
+            size="sm"
+            data-testid="consumer-disable"
+            @click="requestDisable(row as ApiConsumerView)"
+          >
+            吊销
+          </UiButton>
+          <span v-if="(row as ApiConsumerView).status !== 'ACTIVE'">—</span>
+        </template>
+      </UiTable>
+    </section>
+
+    <!-- One-shot API key reveal -->
+    <UiDialog
+      :open="reveal"
+      title="API 密钥已生成，仅显示一次"
+      :description="`消费者「${revealName}」的密钥如下，请立即交付并妥善保存；关闭后无法再次查看。`"
+      width="540px"
+      :dismissible="false"
+      @update:open="revealAcked && (reveal = $event)"
+    >
+      <div class="ui-mono next-consumers__key" data-testid="consumer-key-value">
+        {{ revealKey }}
+      </div>
+      <label class="next-consumers__ack">
+        <input
+          v-model="revealAcked"
+          type="checkbox"
+          class="next-consumers__ack-input"
+          data-testid="consumer-key-ack"
+        />
+        <span class="next-consumers__ack-box" aria-hidden="true">
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+            <path
+              d="M3.5 8.5 6.5 11.5 12.5 4.5"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </span>
+        <span>我已保存该密钥</span>
+      </label>
+      <template #footer>
+        <UiButton variant="secondary" data-testid="consumer-key-copy" @click="copyKey"
+          >复制</UiButton
+        >
+        <UiButton
+          variant="primary"
+          :disabled="!revealAcked"
+          data-testid="consumer-key-close"
+          @click="reveal = false"
+        >
+          完成
+        </UiButton>
+      </template>
+    </UiDialog>
+
+    <UiDialog
+      v-if="confirmState"
+      :open="true"
+      :title="confirmState.title"
+      :description="confirmState.body"
+      width="440px"
+      @update:open="confirmState = null"
+    >
+      <template #footer>
+        <UiButton variant="ghost" @click="confirmState = null">取消</UiButton>
+        <UiButton
+          :variant="confirmState.tone === 'danger' ? 'danger' : 'primary'"
+          @click="confirmAndRun"
+        >
+          {{ confirmState.confirmLabel }}
+        </UiButton>
+      </template>
+    </UiDialog>
+    <!-- Consumer JWT verification key (ADR-0011) -->
+    <UiDialog
+      v-if="jwtTarget"
+      :open="true"
+      :title="`JWT 公钥 — ${jwtTarget.name}`"
+      description="平台自持私钥签发 RS256 JWT；网关仅保存公钥验签，不接触私钥。"
+      width="540px"
+      @update:open="jwtTarget = null"
+    >
+      <div
+        v-if="jwtTarget.jwtKeyFingerprint"
+        class="next-consumers__jwt-state"
+        data-testid="consumer-jwt-state"
+      >
+        <p>
+          当前指纹：<span class="ui-mono">{{ jwtTarget.jwtKeyFingerprint }}</span>
+        </p>
+        <p>设置于 {{ formatTime(jwtTarget.jwtKeySetAt) }}</p>
+      </div>
+      <p v-else class="next-consumers__jwt-state" data-testid="consumer-jwt-state">
+        尚未配置 JWT 公钥。
+      </p>
+      <label class="next-consumers__jwt-field">
+        <span>{{ jwtTarget.jwtKeyFingerprint ? '粘贴新公钥以轮换' : '粘贴公钥 PEM' }}</span>
+        <textarea
+          v-model="jwtPem"
+          class="ui-textarea next-consumers__jwt-input"
+          rows="6"
+          placeholder="-----BEGIN PUBLIC KEY-----"
+          data-testid="consumer-jwt-pem"
+        ></textarea>
+      </label>
+      <p class="next-consumers__jwt-hint">
+        保存后旧签名立即失效；仅接受 RSA SubjectPublicKeyInfo PEM。
+      </p>
+      <p v-if="jwtError" class="ui-form-error" data-testid="consumer-jwt-error">{{ jwtError }}</p>
+      <template #footer>
+        <UiButton
+          v-if="jwtTarget.jwtKeyFingerprint"
+          variant="link-danger"
+          data-testid="consumer-jwt-remove"
+          @click="requestRemoveJwt(jwtTarget)"
+        >
+          移除公钥
+        </UiButton>
+        <UiButton variant="ghost" @click="jwtTarget = null">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="jwtSaving"
+          data-testid="consumer-jwt-save"
+          @click="saveJwt"
+        >
+          {{ jwtTarget.jwtKeyFingerprint ? '轮换公钥' : '保存公钥' }}
+        </UiButton>
+      </template>
+    </UiDialog>
+
+    <!-- Call overview (issue #338 / I5) -->
+    <UiDialog
+      v-if="activityTarget"
+      :open="activityVisible"
+      :title="'调用概览 — ' + activityTarget.name"
+      description="来自 MCP 访问日志（纯元数据）的窗口聚合；401 未知密钥 / 404 未知服务无可信身份，不计入。"
+      width="560px"
+      @update:open="activityVisible = false"
+    >
+      <div class="next-consumers__activity-range">
+        <button
+          type="button"
+          class="next-consumers__seg"
+          :class="{ 'next-consumers__seg--on': activityHours === 24 }"
+          data-testid="activity-range-24h"
+          @click="
+            activityHours = 24;
+            loadActivity();
+          "
+        >
+          近 24 小时
+        </button>
+        <button
+          type="button"
+          class="next-consumers__seg"
+          :class="{ 'next-consumers__seg--on': activityHours === 168 }"
+          data-testid="activity-range-7d"
+          @click="
+            activityHours = 168;
+            loadActivity();
+          "
+        >
+          近 7 天
+        </button>
+      </div>
+      <div v-if="activityLoading" class="next-consumers__activity-loading">统计中…</div>
+      <p v-else-if="activityError" class="ui-form-error">{{ activityError }}</p>
+      <div
+        v-else-if="activity"
+        class="next-consumers__activity"
+        data-testid="consumer-activity-body"
+      >
+        <div class="next-consumers__stats">
+          <div class="next-consumers__stat">
+            <span class="next-consumers__stat-num">{{ activity.totalCalls }}</span>
+            <span class="next-consumers__stat-label">总调用</span>
+          </div>
+          <div class="next-consumers__stat">
+            <span class="next-consumers__stat-num">{{ activity.forwarded }}</span>
+            <span class="next-consumers__stat-label">已转发</span>
+          </div>
+          <div class="next-consumers__stat">
+            <span class="next-consumers__stat-num">{{ activity.denied }}</span>
+            <span class="next-consumers__stat-label">被拒</span>
+          </div>
+          <div class="next-consumers__stat">
+            <span class="next-consumers__stat-num">{{ activity.failed }}</span>
+            <span class="next-consumers__stat-label">失败</span>
+          </div>
+        </div>
+        <p class="next-consumers__activity-last">
+          最近调用：{{ activity.lastCallAt ? formatTime(activity.lastCallAt) : '窗口内无调用' }}
+        </p>
+        <div class="next-consumers__lists">
+          <div>
+            <h4 class="next-consumers__list-title">Top 工具</h4>
+            <p v-if="activity.topTools.length === 0" class="next-consumers__list-empty">
+              窗口内无调用
+            </p>
+            <ul v-else class="next-consumers__list">
+              <li v-for="item in activity.topTools" :key="item.name">
+                <span class="ui-mono">{{ item.name }}</span
+                ><span>{{ item.calls }}</span>
+              </li>
+            </ul>
+          </div>
+          <div>
+            <h4 class="next-consumers__list-title">Top 服务</h4>
+            <p v-if="activity.topServices.length === 0" class="next-consumers__list-empty">
+              窗口内无调用
+            </p>
+            <ul v-else class="next-consumers__list">
+              <li v-for="item in activity.topServices" :key="item.name">
+                <span class="ui-mono">{{ item.name }}</span
+                ><span>{{ item.calls }}</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <UiButton variant="primary" @click="activityVisible = false">关闭</UiButton>
+      </template>
+    </UiDialog>
+
+    <!-- Channel scope (issue #316) -->
+    <UiDialog
+      v-if="scopeTarget"
+      :open="true"
+      :title="`能力作用域 — ${scopeTarget.name}`"
+      description="控制这把消费者密钥能访问哪些通道；能力不足的调用会被拒绝（403 CONSUMER_SCOPE_DENIED / consumer_scope_denied）。"
+      width="520px"
+      @update:open="scopeTarget = null"
+    >
+      <div class="next-consumers__scope-mode">
+        <UiRadio v-model="scopeMode" value="full" data-testid="scope-mode-full">
+          全量（不裁剪，默认）
+        </UiRadio>
+        <UiRadio v-model="scopeMode" value="custom" data-testid="scope-mode-custom">
+          自定义通道
+        </UiRadio>
+      </div>
+      <div v-if="scopeMode === 'custom'" class="next-consumers__scope-caps">
+        <UiCheckbox v-model="scopeBilling" data-testid="scope-cap-billing">
+          计费查询通道（billing:read）
+        </UiCheckbox>
+        <UiCheckbox v-model="scopeMcp" data-testid="scope-cap-mcp">
+          MCP 数据面通道（mcp:call）
+        </UiCheckbox>
+        <p class="next-consumers__scope-hint">
+          一个都不选 = 无任何通道（该密钥立即无法访问计费接口与 MCP 服务）。
+        </p>
+      </div>
+      <p v-if="scopeError" class="ui-form-error">{{ scopeError }}</p>
+      <template #footer>
+        <UiButton variant="ghost" @click="scopeTarget = null">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="scopeSaving"
+          data-testid="scope-save"
+          @click="saveScope"
+        >
+          保存
+        </UiButton>
+      </template>
+    </UiDialog>
+  </div>
+</template>
+
+<style scoped>
+.ui-alert {
+  padding: var(--ui-space-3) var(--ui-space-4);
+  margin-bottom: var(--ui-space-4);
+  border-radius: var(--ui-radius-control);
+  font-size: var(--ui-font-size-sm);
+}
+
+.ui-alert--error {
+  background: var(--ui-danger-bg);
+  color: var(--ui-danger-fg);
+}
+
+.next-consumers__create {
+  margin-bottom: var(--ui-space-5);
+  max-width: 680px;
+}
+
+.next-consumers__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-4);
+  max-width: 440px;
+}
+
+.next-consumers__actions {
+  display: flex;
+  gap: var(--ui-space-2);
+}
+
+.next-consumers__name {
+  font-weight: var(--ui-weight-medium);
+}
+
+.next-consumers__credentials {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-space-1);
+}
+
+.next-consumers__jwt-state {
+  margin: 0 0 var(--ui-space-3);
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-consumers__jwt-state p {
+  margin: 0 0 var(--ui-space-1);
+}
+
+.next-consumers__jwt-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-1);
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground);
+}
+
+.next-consumers__jwt-input {
+  width: 100%;
+  font-family: var(--ui-font-mono);
+  font-size: var(--ui-font-size-xs);
+}
+
+.next-consumers__jwt-hint {
+  margin: var(--ui-space-2) 0 0;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+}
+
+.next-consumers__caps {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--ui-space-2);
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-muted);
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-consumers__expiry {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-consumers__expiry--soon {
+  color: var(--ui-danger-fg);
+  font-weight: var(--ui-weight-medium);
+}
+
+.next-consumers__caps--full {
+  background: var(--ui-success-bg);
+  color: var(--ui-success-fg);
+}
+
+.next-consumers__scope-mode,
+.next-consumers__scope-caps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+  margin-bottom: var(--ui-space-3);
+}
+
+.next-consumers__scope-hint {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+  margin: var(--ui-space-1) 0 0 var(--ui-space-5);
+}
+
+.next-consumers__key {
+  padding: var(--ui-space-3) var(--ui-space-4);
+  background: var(--ui-muted);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-control);
+  font-size: var(--ui-font-size-base);
+  line-height: var(--ui-line-height-lg);
+  word-break: break-all;
+  user-select: all;
+}
+
+.next-consumers__ack {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  margin-top: var(--ui-space-4);
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground);
+  cursor: pointer;
+}
+
+.next-consumers__ack-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.next-consumers__ack-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--ui-input-border);
+  border-radius: 4px;
+  background: var(--ui-card);
+  color: transparent;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.next-consumers__ack-input:checked + .next-consumers__ack-box {
+  background: var(--ui-primary);
+  border-color: var(--ui-primary);
+  color: var(--miqrokey-text-inverse);
+}
+.next-consumers__activity-range {
+  display: flex;
+  gap: var(--ui-space-2);
+  margin-bottom: var(--ui-space-3);
+}
+
+.next-consumers__seg {
+  padding: 4px 12px;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-control);
+  background: transparent;
+  color: var(--ui-foreground-secondary);
+  font-size: var(--ui-font-size-xs);
+  cursor: pointer;
+}
+
+.next-consumers__seg--on {
+  border-color: var(--ui-primary);
+  color: var(--ui-primary-text);
+}
+
+.next-consumers__stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--ui-space-2);
+  margin-bottom: var(--ui-space-3);
+}
+
+.next-consumers__stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--ui-space-2);
+  background: var(--ui-muted);
+  border-radius: var(--ui-radius-control);
+}
+
+.next-consumers__stat-num {
+  font-size: var(--ui-font-size-lg);
+  font-weight: var(--ui-weight-medium);
+}
+
+.next-consumers__stat-label {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-consumers__activity-last {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+  margin-bottom: var(--ui-space-3);
+}
+
+.next-consumers__lists {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--ui-space-4);
+}
+
+.next-consumers__list-title {
+  font-size: var(--ui-font-size-sm);
+  margin-bottom: var(--ui-space-2);
+}
+
+.next-consumers__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-1);
+  font-size: var(--ui-font-size-sm);
+}
+
+.next-consumers__list li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--ui-space-2);
+}
+
+.next-consumers__list-empty {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+</style>

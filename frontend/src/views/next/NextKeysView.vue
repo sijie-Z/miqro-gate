@@ -1,0 +1,2054 @@
+<script setup lang="ts">
+/**
+ * NextKeysView — /app-new/keys pilot page (UI U0, PostHog language).
+ * Behaviour parity with the legacy KeysView (keys list + single-page create
+ * flow + rotate/revoke + one-shot secret), rendered on the v2 component set.
+ * APIs and route semantics are untouched.
+ */
+import { computed, onMounted, ref, watch } from 'vue';
+import {
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuItemIndicator,
+  DropdownMenuPortal,
+  DropdownMenuRoot,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from 'radix-vue';
+import * as api from '@/api';
+import { ApiError } from '@/api/http';
+import CcSwitchImport from '@/components/CcSwitchImport.vue';
+import {
+  claudeEnvSnippet,
+  claudeSettingsPath,
+  claudeSettingsSnippet,
+  codexAuthJsonModeTomlSnippet,
+  codexAuthJsonSnippet,
+  codexAuthPath,
+  codexConfigPath,
+  codexTomlSnippet,
+  defaultAppForPurpose,
+  openaiCompatSnippet,
+  SHELL_FLAVOR_LABEL,
+  USAGE_CLIENT_LABEL,
+  type CodexAuthMode,
+  type ShellFlavor,
+  type UsageClient,
+} from '@/lib/ccswitch';
+import {
+  UiButton,
+  UiCheckbox,
+  UiDialog,
+  UiEmptyState,
+  UiInput,
+  UiPageGuide,
+  UiSelect,
+  UiStatusBadge,
+  UiTable,
+  UiTooltip,
+  toast,
+} from '@/ui';
+import type { UiSelectOption } from '@/ui';
+import { KEYS_GUIDE } from '@/content/pageGuides';
+import type { VirtualKeyPurpose } from '@/types/api';
+import type {
+  CreateVirtualKeyResponse,
+  MeGrantsResponse,
+  UsageSummary,
+  VirtualKeyView,
+} from '@/types/generated-api';
+
+const keys = ref<VirtualKeyView[]>([]);
+const grants = ref<MeGrantsResponse | null>(null);
+const loading = ref(true);
+const loadError = ref('');
+const loadRequestId = ref('');
+
+const creating = ref(false);
+const submitting = ref(false);
+const createName = ref('');
+const createProjectId = ref('');
+const createGrantId = ref('');
+const createPurpose = ref<VirtualKeyPurpose>('CLAUDE_CODE');
+const createModels = ref<string[]>([]);
+const createCachePolicy = ref<'DISABLED' | 'ENABLED'>('DISABLED');
+const formError = ref('');
+const formRequestId = ref('');
+
+// ---- one-shot secret reveal (create / rotate result) ----
+const revealOpen = ref(false);
+const revealData = ref<CreateVirtualKeyResponse | null>(null);
+const revealAcked = ref(false);
+const revealCopied = ref(false);
+
+// ---- confirm gate (replaces TDesign confirmDialog for this page) ----
+const confirmState = ref<{
+  title: string;
+  body: string;
+  confirmLabel: string;
+  tone: 'danger' | 'primary';
+  run: () => Promise<void>;
+} | null>(null);
+
+const purposeLabel: Record<string, string> = {
+  CLAUDE_CODE: 'Claude Code',
+  CLAUDE_DESKTOP: 'Claude Desktop',
+  CODEX: 'Codex',
+  CUSTOM: '自定义',
+};
+
+const statusLabel: Record<string, string> = {
+  ACTIVE: '可用',
+  ROTATING: '轮换中',
+  REVOKED: '已吊销',
+  DISABLED: '停用',
+};
+
+const purposeOptions = computed<UiSelectOption[]>(() => {
+  const purposes = grants.value?.purposes;
+  const available =
+    purposes && purposes.length ? purposes : (Object.keys(purposeLabel) as VirtualKeyPurpose[]);
+  return available.map((p) => ({ value: p, label: purposeLabel[p] ?? p }));
+});
+
+const columns = [
+  { key: 'name', title: '名称', minWidth: '220px', sortable: true },
+  { key: 'projectTag', title: '项目', width: '120px' },
+  {
+    key: 'purpose',
+    title: '用途',
+    width: '130px',
+  },
+  { key: 'modelIds', title: '允许模型', minWidth: '220px' },
+  { key: 'status', title: '状态', width: '110px' },
+  { key: 'cachePolicy', title: '缓存', width: '90px' },
+  { key: 'usage', title: '用量 · 近 7 天', width: '150px' },
+  { key: 'createdAt', title: '创建时间', width: '170px', sortable: true },
+  { key: 'actions', title: '操作', width: '96px', align: 'center' as const },
+];
+
+const keyFilter = ref('');
+
+// #582: status filter + inline 7-day usage + rename dialog.
+const statusFilter = ref<'ALL' | 'ACTIVE' | 'DISABLED' | 'ROTATING' | 'REVOKED'>('ALL');
+const statusFilterOptions: UiSelectOption[] = [
+  { value: 'ALL', label: '全部' },
+  { value: 'ACTIVE', label: '可用' },
+  { value: 'DISABLED', label: '停用' },
+  { value: 'ROTATING', label: '轮换中' },
+  { value: 'REVOKED', label: '已吊销' },
+];
+
+// 近 7 天行内用量（按 Key 归集；拉取失败静默为「—」，不阻塞列表）。
+const USAGE_WINDOW_DAYS = 7;
+const usageByKey = ref<Record<string, { requests: number; tokens: number }>>({});
+
+const renameTarget = ref<VirtualKeyView | null>(null);
+const renameName = ref('');
+const renameSaving = ref(false);
+const renameError = ref('');
+const renameRequestId = ref('');
+
+const filteredKeys = computed(() => {
+  const byStatus =
+    statusFilter.value === 'ALL'
+      ? keys.value
+      : keys.value.filter((k) => k.status === statusFilter.value);
+  const q = keyFilter.value.trim().toLowerCase();
+  if (!q) return byStatus;
+  return byStatus.filter(
+    (k) =>
+      (k.name ?? '').toLowerCase().includes(q) ||
+      (k.projectTag ?? '').toLowerCase().includes(q) ||
+      (k.display ?? '').toLowerCase().includes(q),
+  );
+});
+
+const keySummary = computed<{ text: string; tone: 'plain' | 'success' | 'warning' | 'danger' }[]>(
+  () => {
+    // #1065: counts come from a successful read only — after a failed load
+    // "共 0 个" would describe the failure, not the user's keys.
+    if (loadError.value) return [{ text: '—', tone: 'plain' as const }];
+    const active = keys.value.filter((k) => k.status === 'ACTIVE').length;
+    const rotating = keys.value.filter((k) => k.status === 'ROTATING').length;
+    const disabled = keys.value.filter((k) => k.status === 'DISABLED').length;
+    const revoked = keys.value.filter((k) => k.status === 'REVOKED').length;
+    const parts: { text: string; tone: 'plain' | 'success' | 'warning' | 'danger' }[] = [
+      { text: `共 ${keys.value.length} 个`, tone: 'plain' },
+    ];
+    if (active) parts.push({ text: `${active} 可用`, tone: 'success' as const });
+    if (rotating) parts.push({ text: `${rotating} 轮换中`, tone: 'warning' as const });
+    if (disabled) parts.push({ text: `${disabled} 停用`, tone: 'plain' });
+    if (revoked) parts.push({ text: `${revoked} 已吊销`, tone: 'danger' as const });
+    return parts;
+  },
+);
+
+/** Hide the project column while every key shares one project. */
+const tableColumns = computed(() => {
+  const distinctProjects = new Set(keys.value.map((k) => k.projectTag));
+  if (distinctProjects.size <= 1 && keys.value.length > 0) {
+    return columns.filter((c) => c.key !== 'projectTag');
+  }
+  return columns;
+});
+
+/** Registered-but-empty account: has the admin joined this account to a project yet? */
+const hasNoProjects = computed(() => (grants.value?.projects?.length ?? 0) === 0);
+
+// ---- create form derived lists (identical semantics to legacy page) ----
+
+const projectsForGrant = computed(() => {
+  const list = grants.value?.projects ?? [];
+  const used = new Set((grants.value?.grants ?? []).map((g) => g.projectId));
+  return list.filter((p) => used.has(p.id));
+});
+
+const grantOptions = computed(
+  () => (grants.value?.grants ?? []).filter((g) => g.projectId === createProjectId.value) ?? [],
+);
+
+const selectedGrant = computed(() => grantOptions.value.find((g) => g.id === createGrantId.value));
+
+/**
+ * Picker label for a project. A project with no routing tag cannot host a key
+ * (#503/#647), so the label names what is missing instead of printing the gap: the
+ * select's option label is built in JS from whatever the wire carries — a NULL
+ * `project_tag` arrives as `"projectTag": null` (Jackson's default inclusion;
+ * nothing in `application.yml` or the DTO overrides it), so it read `Name（null）`
+ * — while the checkbox is a template interpolation, where `null` and an absent
+ * field both render as `Name（）`.
+ *
+ * This is a **fuse, not a path users take**. `createProject` derives a tag from the
+ * code (`generateProjectTag`), `updateProject` rejects a blank one and the V4 CHECK
+ * rejects it at the database, the historic NULLs were backfilled by V53
+ * (`WHERE project_tag IS NULL`), and the one tagless row the API can still create
+ * is the unattributed bucket — which `grantOptions` drops **server-side** by
+ * `system` (#1145), so it never reaches this picker. What the fuse catches is a
+ * *new* writer: manual SQL, or a future creation path that forgets the tag.
+ *
+ * #1149 (owner decision): keep a tagless project listed and labelled rather than
+ * hide it — the same "keep it visible, say what is wrong" rule the extra-project
+ * list follows (#1157), and what the server's `ROUTING_TAG_MISSING` detail says to
+ * a caller who reaches it another way.
+ */
+function projectLabel(p: NonNullable<MeGrantsResponse['projects']>[number]): string {
+  return p.projectTag ? `${p.name}（${p.projectTag}）` : `${p.name}（需补路由标签）`;
+}
+
+// ADR-0018: one key may serve several projects. The picker above stays the
+// PRIMARY project (its grant is chosen explicitly); these are extra bindings —
+// the server matches each one to that project's own grant of the same product.
+const extraProjectOptions = computed(() =>
+  projectsForGrant.value.filter((p) => p.id && p.id !== createProjectId.value),
+);
+
+/**
+ * Of those, the ones this key can actually bind: the server matches each extra to
+ * that project's own grant **of the same provider product** (ADR-0018), which is
+ * the constraint the field hint already states. #1157: the defaults ignored it and
+ * pre-selected every project with any grant at all, so a form the user had not
+ * touched came back `409 PROJECT_GRANT_MISSING`. Nothing is bindable until the
+ * primary's grant — and therefore its product — is chosen.
+ */
+const bindableExtraProjectIds = computed(() => {
+  const productId = selectedGrant.value?.providerProductId;
+  if (!productId) {
+    return [];
+  }
+  const projectsWithThisProduct = new Set(
+    (grants.value?.grants ?? [])
+      .filter((g) => g.providerProductId === productId)
+      .map((g) => g.projectId),
+  );
+  return extraProjectOptions.value
+    .filter((p) => p.id && projectsWithThisProduct.has(p.id))
+    .map((p) => p.id)
+    .filter((id): id is string => Boolean(id));
+});
+
+/**
+ * #646 Default-All: "one key for every project" is the default path, so the
+ * selection is **derived** — every bindable project is in it unless the user said
+ * otherwise — rather than stored. Only the user's own deviations are kept.
+ *
+ * Storing the selection instead is what broke twice, and both ways were reachable
+ * from the form: re-deriving it on an unspecified trigger resurrected an explicit
+ * uncheck (silently binding a project the user had removed), while *not*
+ * re-deriving it left a stale, non-bindable id in place for the server to reject
+ * with the very 409 this scoping exists to prevent.
+ */
+const extraOverrides = ref<Record<string, boolean>>({});
+
+const createExtraProjectIds = computed<string[]>(() => {
+  const selection = new Set(bindableExtraProjectIds.value);
+  for (const [id, chosen] of Object.entries(extraOverrides.value)) {
+    if (chosen) {
+      selection.add(id);
+    } else {
+      selection.delete(id);
+    }
+  }
+  // The primary is never an extra. Checking a project and *then* promoting it to
+  // primary is reachable, and the override would otherwise add it back — the id
+  // would reach the server twice (harmless there, deduped by a LinkedHashSet, but
+  // not what this form means).
+  return [...selection].filter((id) => id !== createProjectId.value);
+});
+
+/** Turn the checkbox group's new value into whatever it deviates from the default by. */
+function onExtraProjects(next: boolean | string[] | Set<string>) {
+  if (!Array.isArray(next)) {
+    return;
+  }
+  const chosen = new Set(next);
+  const bindable = new Set(bindableExtraProjectIds.value);
+  const overrides: Record<string, boolean> = {};
+  for (const id of new Set([...bindable, ...chosen, ...Object.keys(extraOverrides.value)])) {
+    if (chosen.has(id) !== bindable.has(id)) {
+      overrides[id] = chosen.has(id);
+    }
+  }
+  extraOverrides.value = overrides;
+}
+
+function applyProjectDefaults(): void {
+  if (projectsForGrant.value.length === 0) {
+    return;
+  }
+  if (!createProjectId.value && projectsForGrant.value[0]?.id) {
+    createProjectId.value = projectsForGrant.value[0].id;
+  }
+}
+
+// The create form toggles from several places (header button, empty-state
+// button, cancel) — apply the defaults whenever it opens.
+watch(creating, (open) => {
+  if (open) {
+    applyProjectDefaults();
+  }
+});
+
+type GrantOption = NonNullable<MeGrantsResponse['grants']>[number];
+
+/**
+ * Entitlement picker label (#528): prefer the provider product's display
+ * identity carried by the API; fall back to the granted model ids for legacy
+ * rows whose product no longer resolves. A raw UUID tells the user nothing.
+ */
+function grantLabel(grant: GrantOption): string {
+  const models = [...(grant.models ?? [])].sort();
+  const modelText =
+    models.length === 0
+      ? '（无可用模型）'
+      : models.length <= 3
+        ? models.join('、')
+        : `${models.slice(0, 2).join('、')} 等 ${models.length} 个模型`;
+  const product = grant.providerProductName || grant.providerProductCode;
+  return product ? `${product} · ${modelText}` : modelText;
+}
+
+const modelOptions = computed(() => selectedGrant.value?.models ?? []);
+
+const canCreate = computed(
+  () =>
+    createName.value.trim().length > 0 &&
+    createProjectId.value !== '' &&
+    createGrantId.value !== '' &&
+    createModels.value.length > 0,
+);
+
+// ---- load ----
+
+onMounted(load);
+
+/** Group the window summary into a per-key {requests, tokens} lookup (#582). */
+function summarizeUsage(
+  summary: UsageSummary | null,
+): Record<string, { requests: number; tokens: number }> {
+  const map: Record<string, { requests: number; tokens: number }> = {};
+  for (const group of summary?.groups ?? []) {
+    if (!group.groupKey) continue;
+    const r = group.requests;
+    const requests = (r?.upstream ?? 0) + (r?.coalesced ?? 0) + (r?.l1Hit ?? 0) + (r?.l2Hit ?? 0);
+    const tokens = (group.tokens?.input ?? 0) + (group.tokens?.output ?? 0);
+    map[group.groupKey] = { requests, tokens };
+  }
+  return map;
+}
+
+function compactNumber(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return String(value);
+}
+
+async function load() {
+  loading.value = true;
+  loadError.value = '';
+  try {
+    const from = new Date(Date.now() - USAGE_WINDOW_DAYS * 86400000).toISOString();
+    const [keyList, grantList, usage] = await Promise.all([
+      api.listVirtualKeys(),
+      api.myGrants(),
+      api.usageSummary('virtual_key', from, new Date().toISOString()).catch(() => null),
+    ]);
+    keys.value = keyList;
+    grants.value = grantList;
+    usageByKey.value = summarizeUsage(usage);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      loadError.value = error.message;
+      loadRequestId.value = error.requestId ?? '';
+    } else {
+      loadError.value = '加载虚拟密钥失败。';
+    }
+  } finally {
+    loading.value = false;
+  }
+}
+
+// ---- create ----
+
+function onProjectChange() {
+  // The selection is derived (#646 Default-All), so there is nothing to backfill:
+  // the new primary simply leaves the extras list (`extraProjectOptions` excludes
+  // it), and a previous primary this product can still bind is already in it. A
+  // previous primary that *cannot* bind is deliberately not kept — binding it is
+  // exactly the 409 the product scoping exists to prevent.
+  createGrantId.value = '';
+  createModels.value = [];
+}
+
+function onGrantChange() {
+  // Default to all models authorized for the grant. The extras need no hook: which
+  // projects are bindable is derived from this grant's product.
+  createModels.value = [...(selectedGrant.value?.models ?? [])];
+}
+
+function resetForm() {
+  createName.value = '';
+  createProjectId.value = '';
+  extraOverrides.value = {};
+  createGrantId.value = '';
+  createPurpose.value = 'CLAUDE_CODE';
+  createModels.value = [];
+  createCachePolicy.value = 'DISABLED';
+  formError.value = '';
+  formRequestId.value = '';
+}
+
+async function createKey() {
+  formError.value = '';
+  formRequestId.value = '';
+  if (!selectedGrant.value || !createProjectId.value) {
+    formError.value = '请选择项目与授权组合。';
+    return;
+  }
+  submitting.value = true;
+  try {
+    const response = await api.createVirtualKey({
+      name: createName.value.trim(),
+      projectId: createProjectId.value,
+      projectIds: [createProjectId.value, ...createExtraProjectIds.value],
+      // server contract: grant rows always carry their provider product id
+      providerProductId: selectedGrant.value.providerProductId!,
+      credentialGrantId: createGrantId.value,
+      purpose: createPurpose.value,
+      allowedModels: createModels.value,
+      cachePolicy: createCachePolicy.value,
+    });
+    const createdName = createName.value;
+    const createdModels = [...createModels.value];
+    resetForm();
+    await load();
+    toast.success('虚拟密钥已创建');
+    openReveal(response, createdName, createdModels, createPurpose.value);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      formError.value = error.message;
+      formRequestId.value = error.requestId ?? '';
+    } else {
+      formError.value = '创建失败，请稍后重试。';
+    }
+  } finally {
+    submitting.value = false;
+  }
+}
+
+// ---- reveal (secret shown once) ----
+
+function openReveal(
+  response: CreateVirtualKeyResponse,
+  keyName: string,
+  models: string[],
+  purpose?: string,
+) {
+  revealData.value = response;
+  revealKeyName.value = keyName;
+  revealModels.value = [...models];
+  revealPurpose.value = purpose;
+  revealAcked.value = false;
+  revealCopied.value = false;
+  revealOpen.value = true;
+}
+
+// #440: clear the one-time secret as soon as the dialog closes — leaving it in
+// component memory until the next create/rotate is an avoidable exposure.
+function onRevealOpenChange(open: boolean) {
+  if (!revealAcked.value) {
+    return;
+  }
+  revealOpen.value = open;
+  if (!open) {
+    revealData.value = null;
+  }
+}
+
+async function copySecret() {
+  if (!revealData.value) return;
+  try {
+    // server contract: create/rotate responses always carry the one-shot secret
+    await navigator.clipboard.writeText(revealData.value.secret!);
+    revealCopied.value = true;
+  } catch {
+    toast.error('复制失败，请手动选择复制');
+  }
+}
+
+// ---- CC Switch integration (one-click import + copy-ready snippets) ----
+
+/** Key identity captured at create/rotate time (the secret is only shown here). */
+const revealKeyName = ref('');
+const revealModels = ref<string[]>([]);
+/** Declarative purpose of the revealed key — seeds the import target app. */
+const revealPurpose = ref<string | undefined>(undefined);
+
+/** Row-level「接入 CC Switch」dialog state. */
+const usageOpen = ref(false);
+const usageKey = ref<VirtualKeyView | null>(null);
+const usagePastedSecret = ref('');
+const usageShell = ref<ShellFlavor>('posix');
+const SHELL_FLAVORS = Object.keys(SHELL_FLAVOR_LABEL) as ShellFlavor[];
+const usageClient = ref<UsageClient>('claude');
+const USAGE_CLIENTS = Object.keys(USAGE_CLIENT_LABEL) as UsageClient[];
+/** Manual-model selection feeding the snippets and the import deep link. */
+const usageSelectedModel = ref('');
+/** Codex credential placement for the manual-config section (#839). */
+const usageCodexAuth = ref<CodexAuthMode>('auth-json');
+const CODEX_AUTH_MODES: CodexAuthMode[] = ['auth-json', 'env'];
+const CODEX_AUTH_LABEL: Record<CodexAuthMode, string> = {
+  'auth-json': 'auth.json 方式',
+  env: '环境变量方式',
+};
+
+/** Selected (or first granted) model of the inspected key — seeds the snippets. */
+function usageModel(): string {
+  return usageSelectedModel.value;
+}
+
+/** Codex config.toml variant matching the chosen credential placement. */
+function codexConfigSnippet(): string {
+  return usageCodexAuth.value === 'auth-json'
+    ? codexAuthJsonModeTomlSnippet(gatewayBaseUrl(), usageModel())
+    : codexTomlSnippet(gatewayBaseUrl(), usageModel());
+}
+
+function gatewayBaseUrl(): string {
+  return (revealData.value?.baseUrl ?? usageKey.value?.baseUrl ?? '').replace(/\/+$/, '');
+}
+
+/** Template-safe accessor: the dialog only renders with revealData present. */
+function revealSecret(): string {
+  return revealData.value?.secret ?? '';
+}
+
+async function copyText(text: string, okMessage: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast.success(okMessage);
+  } catch {
+    toast.error('复制失败，请手动选择复制');
+  }
+}
+
+function openUsageGuide(key: VirtualKeyView) {
+  usageKey.value = key;
+  usagePastedSecret.value = '';
+  usageSelectedModel.value = key.modelIds?.[0] ?? '';
+  usageClient.value = 'claude';
+  usageCodexAuth.value = 'auth-json';
+  usageOpen.value = true;
+}
+
+// ---- row actions ----
+
+async function copyKeyId(key: VirtualKeyView) {
+  const text = key.display ?? '';
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      toast.success('密钥 ID 已复制');
+      return;
+    }
+  } catch {
+    // fall through to the legacy path
+  }
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.style.position = 'fixed';
+  area.style.opacity = '0';
+  document.body.appendChild(area);
+  area.select();
+  const ok = document.execCommand('copy');
+  area.remove();
+  if (ok) {
+    toast.success('密钥 ID 已复制');
+  } else {
+    toast.error('复制失败，请手动选择复制');
+  }
+}
+
+async function handleRotate(key: VirtualKeyView) {
+  confirmState.value = {
+    title: `轮换虚拟密钥「${key.name}」`,
+    body: '轮换后旧密钥进入宽限期，宽限结束后失效。新密钥仅在本次弹窗中显示一次。',
+    confirmLabel: '轮换',
+    tone: 'primary',
+    run: async () => {
+      try {
+        // server contract: listed keys always carry their id
+        const response = await api.rotateVirtualKey(key.id!);
+        await load();
+        openReveal(response, key.name ?? '', key.modelIds ?? [], key.purpose);
+      } catch (error) {
+        if (error instanceof ApiError) {
+          toast.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
+        }
+      }
+    },
+  };
+}
+
+async function handleRevoke(key: VirtualKeyView) {
+  confirmState.value = {
+    title: `吊销虚拟密钥「${key.name}」`,
+    body: '吊销后该密钥立即失效，使用它的客户端将无法继续请求。此操作不可撤销。',
+    confirmLabel: '吊销',
+    tone: 'danger',
+    run: async () => {
+      try {
+        await api.revokeVirtualKey(key.id!);
+        toast.success('虚拟密钥已吊销');
+        await load();
+      } catch (error) {
+        if (error instanceof ApiError) {
+          toast.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
+        }
+      }
+    },
+  };
+}
+
+async function confirmAndRun() {
+  const state = confirmState.value;
+  if (!state) return;
+  confirmState.value = null;
+  await state.run();
+}
+
+/** #582: temporary soft stop — reversible via 启用, unlike 吊销. */
+async function handleDisable(key: VirtualKeyView) {
+  confirmState.value = {
+    title: `停用虚拟密钥「${key.name}」`,
+    body: '停用后该密钥立即失效（客户端将收到 404，与未知密钥不可区分）；可随时「启用」恢复，绑定与授权不变。',
+    confirmLabel: '停用',
+    tone: 'primary',
+    run: async () => {
+      try {
+        await api.disableVirtualKey(key.id!);
+        toast.success('虚拟密钥已停用');
+        await load();
+      } catch (error) {
+        if (error instanceof ApiError) {
+          toast.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
+        }
+      }
+    },
+  };
+}
+
+async function handleEnable(key: VirtualKeyView) {
+  try {
+    await api.enableVirtualKey(key.id!);
+    toast.success('虚拟密钥已启用');
+    await load();
+  } catch (error) {
+    if (error instanceof ApiError) {
+      toast.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
+    }
+  }
+}
+
+function openRename(key: VirtualKeyView) {
+  renameTarget.value = key;
+  renameName.value = key.name ?? '';
+  renameError.value = '';
+  renameRequestId.value = '';
+}
+
+async function saveRename() {
+  const target = renameTarget.value;
+  if (!target) return;
+  const name = renameName.value.trim();
+  if (!name || name.length > 200) {
+    renameError.value = '名称必填，最长 200 个字符。';
+    return;
+  }
+  renameSaving.value = true;
+  renameError.value = '';
+  renameRequestId.value = '';
+  try {
+    await api.renameVirtualKey(target.id!, name);
+    toast.success('虚拟密钥已重命名');
+    renameTarget.value = null;
+    await load();
+  } catch (error) {
+    if (error instanceof ApiError) {
+      renameError.value = error.message;
+      renameRequestId.value = error.requestId ?? '';
+    } else {
+      renameError.value = '重命名失败';
+    }
+  } finally {
+    renameSaving.value = false;
+  }
+}
+
+function formatDate(iso?: string): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutral' {
+  switch (status) {
+    case 'ACTIVE':
+      return 'success';
+    case 'ROTATING':
+      return 'warning';
+    case 'REVOKED':
+      return 'danger';
+    default:
+      return 'neutral';
+  }
+}
+</script>
+
+<template>
+  <div class="ui-page next-keys">
+    <header class="ui-page-header">
+      <div>
+        <h1 class="ui-page-title">我的密钥</h1>
+        <p class="ui-page-desc">通过 CC Switch 使用这些密钥访问授权模型。</p>
+      </div>
+      <div class="ui-page-actions">
+        <UiButton variant="primary" data-testid="create-key-open" @click="creating = !creating">
+          {{ creating ? '收起表单' : '创建虚拟密钥' }}
+        </UiButton>
+      </div>
+    </header>
+
+    <UiPageGuide :guide="KEYS_GUIDE" storage-key="keys" />
+
+    <div v-if="loadError" class="ui-alert ui-alert--error" data-testid="keys-load-error">
+      {{ loadError
+      }}<span v-if="loadRequestId" class="ui-request-id"> requestId: {{ loadRequestId }}</span>
+    </div>
+
+    <!-- Create flow — single-page form, dependent fields expand step by step -->
+    <section v-if="creating" class="ui-panel next-keys__create" data-testid="create-form">
+      <div class="ui-panel-head">
+        <h2 class="ui-panel-title">创建虚拟密钥</h2>
+      </div>
+      <div class="ui-panel-body">
+        <div class="next-keys__create-grid">
+          <UiInput
+            v-model="createName"
+            label="名称"
+            required
+            placeholder="例如 claude-code-main"
+            data-testid="create-name"
+          />
+          <UiSelect
+            v-model="createProjectId"
+            label="项目"
+            required
+            placeholder="选择项目"
+            :options="
+              projectsForGrant.map((p) => ({
+                value: p.id ?? '',
+                label: projectLabel(p),
+              }))
+            "
+            width="100%"
+            data-testid="create-project"
+            @change="onProjectChange"
+          />
+          <UiSelect
+            v-if="createProjectId"
+            v-model="createGrantId"
+            label="供应商产品 / 授权"
+            required
+            placeholder="选择已授权的供应商产品"
+            :options="
+              grantOptions.map((g) => ({
+                value: g.id ?? '',
+                label: grantLabel(g),
+              }))
+            "
+            width="100%"
+            data-testid="create-grant"
+            @change="onGrantChange"
+          />
+          <div
+            v-if="createProjectId && extraProjectOptions.length"
+            class="next-keys__field"
+            data-testid="create-extra-projects"
+          >
+            <span class="next-keys__field-label">同时绑定到其他项目</span>
+            <p class="next-keys__field-hint">
+              一把 Key
+              全项目可用——选定授权后默认勾选全部可绑定的项目，只需部分项目时可取消勾选。附加项目需已具备同一供应商产品的授权：未具备的会一并列出，但默认不勾选。
+            </p>
+            <div class="next-keys__extra-projects">
+              <UiCheckbox
+                v-for="p in extraProjectOptions"
+                :key="p.id"
+                :model-value="createExtraProjectIds"
+                :value="p.id!"
+                :data-testid="`create-extra-project-${p.id}`"
+                @update:model-value="onExtraProjects"
+              >
+                {{ projectLabel(p) }}
+              </UiCheckbox>
+            </div>
+          </div>
+          <div v-if="createGrantId" class="next-keys__field">
+            <span class="next-keys__field-label">用途</span>
+            <div
+              class="next-keys__segmented"
+              role="radiogroup"
+              aria-label="用途"
+              data-testid="create-purpose"
+            >
+              <label
+                v-for="option in purposeOptions"
+                :key="option.value"
+                class="next-keys__seg"
+                :class="{ 'next-keys__seg--on': createPurpose === option.value }"
+              >
+                <input
+                  v-model="createPurpose"
+                  type="radio"
+                  name="purpose"
+                  :value="option.value"
+                  class="next-keys__seg-input"
+                />
+                <span>{{ option.label }}</span>
+              </label>
+            </div>
+            <p class="next-keys__field-hint" data-testid="create-purpose-hint">
+              用途是声明性标签（用于展示与审计），不限制客户端：任何兼容协议的客户端都可以使用该密钥；实际可调用范围由所选授权产品与允许模型决定。
+            </p>
+          </div>
+          <div v-if="createGrantId" class="next-keys__field">
+            <span class="next-keys__field-label">缓存策略</span>
+            <div
+              class="next-keys__segmented"
+              role="radiogroup"
+              aria-label="缓存策略"
+              data-testid="create-cache-policy"
+            >
+              <label
+                class="next-keys__seg"
+                :class="{ 'next-keys__seg--on': createCachePolicy === 'DISABLED' }"
+              >
+                <input
+                  v-model="createCachePolicy"
+                  type="radio"
+                  name="cache-policy"
+                  value="DISABLED"
+                  class="next-keys__seg-input"
+                />
+                <span>关闭（默认）</span>
+              </label>
+              <label
+                class="next-keys__seg"
+                :class="{ 'next-keys__seg--on': createCachePolicy === 'ENABLED' }"
+              >
+                <input
+                  v-model="createCachePolicy"
+                  type="radio"
+                  name="cache-policy"
+                  value="ENABLED"
+                  class="next-keys__seg-input"
+                />
+                <span>开启</span>
+              </label>
+            </div>
+            <p class="next-keys__field-hint">
+              开启后网关会缓存该密钥的响应（需客户端声明 X-MiQroKey-Cacheable:
+              1；工具调用永不缓存）。
+            </p>
+          </div>
+          <div v-if="createGrantId" class="next-keys__field">
+            <span class="next-keys__field-label">允许模型（已默认勾选授权全集）</span>
+            <div class="next-keys__model-list" data-testid="create-models">
+              <label
+                v-for="model in modelOptions"
+                :key="model"
+                class="next-keys__model"
+                :class="{ 'next-keys__model--on': createModels.includes(model) }"
+              >
+                <input
+                  v-model="createModels"
+                  type="checkbox"
+                  :value="model"
+                  class="next-keys__model-input"
+                />
+                <svg
+                  class="next-keys__model-check"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M3.5 8.5 6.5 11.5 12.5 4.5"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+                <span class="ui-mono">{{ model }}</span>
+              </label>
+            </div>
+          </div>
+          <p v-if="formError" class="ui-form-error" data-testid="create-error">
+            {{ formError
+            }}<span v-if="formRequestId" class="ui-request-id">
+              requestId: {{ formRequestId }}</span
+            >
+          </p>
+          <div class="next-keys__form-actions">
+            <UiButton
+              variant="primary"
+              :disabled="!canCreate"
+              :loading="submitting"
+              data-testid="create-submit"
+              @click="createKey"
+            >
+              创建 Virtual Key
+            </UiButton>
+            <UiButton variant="ghost" @click="creating = false">取消</UiButton>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Key list -->
+    <section class="ui-panel">
+      <div class="ui-panel-head next-keys__list-head">
+        <div class="next-keys__list-title">
+          <h2 class="ui-panel-title">虚拟密钥</h2>
+          <span class="ui-panel-sub next-keys__summary" data-testid="keys-summary">
+            <span
+              v-for="part in keySummary"
+              :key="part.text"
+              :class="`next-keys__summary-${part.tone}`"
+              >{{ part.text }}</span
+            >
+          </span>
+        </div>
+        <div class="next-keys__list-tools">
+          <UiSelect
+            v-model="statusFilter"
+            :options="statusFilterOptions"
+            width="130px"
+            data-testid="keys-status-filter"
+          />
+          <UiInput
+            v-model="keyFilter"
+            placeholder="按名称、项目或 Key 前缀过滤"
+            width="240px"
+            data-testid="keys-filter"
+          />
+        </div>
+      </div>
+      <UiTable
+        :columns="tableColumns"
+        :data="filteredKeys"
+        :loading="loading"
+        row-key="id"
+        empty-title="还没有虚拟密钥"
+        :error="loadError"
+        data-testid="keys-table"
+        @retry="load"
+      >
+        <template #name="{ row }">
+          <div class="next-keys__name-line">
+            <span class="next-keys__name">{{ (row as VirtualKeyView).name }}</span>
+            <button
+              type="button"
+              class="next-keys__copy"
+              :aria-label="`复制 ${(row as VirtualKeyView).name} 的密钥 ID`"
+              :title="'复制 Key ID'"
+              :data-testid="`key-copy-${(row as VirtualKeyView).id}`"
+              @click="copyKeyId(row as VirtualKeyView)"
+            >
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <rect
+                  x="5.5"
+                  y="5.5"
+                  width="8"
+                  height="8"
+                  rx="1.5"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                />
+                <path
+                  d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                />
+              </svg>
+            </button>
+          </div>
+          <div class="ui-mono next-keys__mask">{{ (row as VirtualKeyView).display }}</div>
+        </template>
+        <template #purpose="{ row }">
+          <UiTooltip text="声明标签，不限制客户端；可调用范围由所选授权产品与允许模型决定。">
+            <span>{{
+              purposeLabel[(row as VirtualKeyView).purpose!] ?? (row as VirtualKeyView).purpose
+            }}</span>
+          </UiTooltip>
+        </template>
+        <template #modelIds="{ row }">
+          <!-- 这一格是 nowrap + ellipsis（多模型必然截断），而允许模型是这把 Key 的绑定事实：
+               截掉的那几个模型在页面上没有任何别的入口能看到，所以底下的省略号必须能展开。 -->
+          <UiTooltip :text="(row as VirtualKeyView).modelIds?.join(', ') || '—'">
+            <div class="ui-mono next-keys__models">
+              {{ (row as VirtualKeyView).modelIds?.join(', ') ?? '' }}
+            </div>
+          </UiTooltip>
+        </template>
+        <template #projectTag="{ row }">
+          <span>{{ (row as VirtualKeyView).projectTag || '—' }}</span>
+          <span
+            v-if="((row as VirtualKeyView).boundProjects?.length ?? 0) > 1"
+            class="next-keys__extra-badge"
+            :title="
+              ((row as VirtualKeyView).boundProjects ?? []).map((b) => b.projectTag).join('、')
+            "
+            data-testid="key-extra-projects-badge"
+          >
+            +{{ ((row as VirtualKeyView).boundProjects?.length ?? 0) - 1 }}
+          </span>
+        </template>
+        <template #status="{ row }">
+          <UiStatusBadge
+            :tone="statusTone((row as VirtualKeyView).status)"
+            :label="statusLabel[(row as VirtualKeyView).status!] ?? (row as VirtualKeyView).status"
+          />
+        </template>
+        <template #cachePolicy="{ row }">
+          <span
+            :class="
+              (row as VirtualKeyView).cachePolicy === 'ENABLED'
+                ? 'next-keys__cache next-keys__cache--on'
+                : 'next-keys__cache'
+            "
+            >{{ (row as VirtualKeyView).cachePolicy === 'ENABLED' ? '开启' : '关闭' }}</span
+          >
+        </template>
+        <template #usage="{ row }">
+          <span
+            v-if="usageByKey[(row as VirtualKeyView).id!]"
+            class="ui-num next-keys__usage"
+            data-testid="key-usage-inline"
+          >
+            {{ usageByKey[(row as VirtualKeyView).id!]!.requests }} 次 ·
+            {{ compactNumber(usageByKey[(row as VirtualKeyView).id!]!.tokens) }} tok
+          </span>
+          <span v-else class="next-keys__usage next-keys__usage--empty">—</span>
+        </template>
+        <template #createdAt="{ row }">{{
+          formatDate((row as VirtualKeyView).createdAt)
+        }}</template>
+        <template #actions="{ row }">
+          <DropdownMenuRoot>
+            <DropdownMenuTrigger
+              class="next-keys__kebab ui-link-action"
+              aria-label="操作"
+              :data-testid="`key-actions-${(row as VirtualKeyView).id}`"
+            >
+              更多
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path
+                  d="m4 6 4 4 4-4"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </DropdownMenuTrigger>
+            <DropdownMenuPortal>
+              <DropdownMenuContent class="ui-menu" :side-offset="4" :align="'end'">
+                <DropdownMenuItem
+                  class="ui-menu__item next-keys__menu-item"
+                  @select="openUsageGuide(row as VirtualKeyView)"
+                >
+                  <DropdownMenuItemIndicator class="next-keys__menu-ind" />
+                  接入 CC Switch
+                </DropdownMenuItem>
+                <DropdownMenuSeparator class="next-keys__menu-sep" />
+                <DropdownMenuItem
+                  class="ui-menu__item next-keys__menu-item"
+                  :disabled="(row as VirtualKeyView).status !== 'ACTIVE'"
+                  @select="handleRotate(row as VirtualKeyView)"
+                >
+                  <DropdownMenuItemIndicator class="next-keys__menu-ind" />
+                  轮换
+                </DropdownMenuItem>
+                <DropdownMenuSeparator class="next-keys__menu-sep" />
+                <DropdownMenuItem
+                  class="ui-menu__item next-keys__menu-item"
+                  :disabled="(row as VirtualKeyView).status === 'REVOKED'"
+                  @select="openRename(row as VirtualKeyView)"
+                >
+                  <DropdownMenuItemIndicator class="next-keys__menu-ind" />
+                  重命名
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  v-if="(row as VirtualKeyView).status === 'ACTIVE'"
+                  class="ui-menu__item next-keys__menu-item"
+                  @select="handleDisable(row as VirtualKeyView)"
+                >
+                  <DropdownMenuItemIndicator class="next-keys__menu-ind" />
+                  停用
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  v-if="(row as VirtualKeyView).status === 'DISABLED'"
+                  class="ui-menu__item next-keys__menu-item"
+                  @select="handleEnable(row as VirtualKeyView)"
+                >
+                  <DropdownMenuItemIndicator class="next-keys__menu-ind" />
+                  启用
+                </DropdownMenuItem>
+                <DropdownMenuSeparator class="next-keys__menu-sep" />
+                <DropdownMenuItem
+                  class="ui-menu__item next-keys__menu-item next-keys__menu-item--danger"
+                  :disabled="!(row as VirtualKeyView).status?.match(/^(ACTIVE|ROTATING)$/)"
+                  @select="handleRevoke(row as VirtualKeyView)"
+                >
+                  <DropdownMenuItemIndicator class="next-keys__menu-ind" />
+                  吊销
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenuPortal>
+          </DropdownMenuRoot>
+        </template>
+        <template #empty>
+          <div v-if="hasNoProjects" data-testid="onboard-no-project">
+            <UiEmptyState title="等待管理员开通" description="你的账号还没有被加入任何项目。">
+              <div class="next-keys__onboard-steps">
+                <p>
+                  <strong>1</strong> 请管理员在「用户管理 →
+                  项目成员」中把你加入项目，并配置供应商授权（Grant）。
+                </p>
+                <p><strong>2</strong> 开通后点击下方按钮刷新，即可看到可用的项目与授权。</p>
+              </div>
+              <UiButton variant="secondary" data-testid="onboard-refresh" @click="load"
+                >刷新检查</UiButton
+              >
+            </UiEmptyState>
+          </div>
+          <div v-else data-testid="onboard-has-project">
+            <UiEmptyState
+              title="还没有虚拟密钥"
+              description="点击右上角「创建虚拟密钥」，用已授权的项目与供应商开始调用。"
+            >
+              <UiButton variant="primary" @click="creating = true">创建第一个 Key</UiButton>
+            </UiEmptyState>
+          </div>
+        </template>
+      </UiTable>
+    </section>
+
+    <!-- #582 rename dialog -->
+    <UiDialog
+      v-if="renameTarget"
+      :open="true"
+      title="重命名虚拟密钥"
+      :description="`修改「${renameTarget.name}」的名称；绑定、模型与密钥本身不变。`"
+      width="460px"
+      @update:open="renameTarget = null"
+    >
+      <UiInput v-model="renameName" label="名称" required data-testid="key-rename-name" />
+      <p v-if="renameError" class="ui-form-error" data-testid="key-rename-error">
+        {{ renameError
+        }}<span v-if="renameRequestId" class="ui-request-id">
+          requestId: {{ renameRequestId }}</span
+        >
+      </p>
+      <template #footer>
+        <UiButton variant="ghost" @click="renameTarget = null">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="renameSaving"
+          data-testid="key-rename-save"
+          @click="saveRename"
+        >
+          保存
+        </UiButton>
+      </template>
+    </UiDialog>
+
+    <!-- One-shot secret reveal -->
+    <UiDialog
+      v-if="revealData"
+      :open="revealOpen"
+      title="密钥已生成，仅显示一次"
+      description="请立即复制并保存到 CC Switch；关闭后无法再次查看明文。"
+      width="520px"
+      :dismissible="false"
+      data-testid="secret-dialog"
+      @update:open="onRevealOpenChange"
+    >
+      <p class="next-keys__reveal-url">
+        接入地址：<span class="ui-mono">{{ revealData.baseUrl }}</span>
+      </p>
+      <div class="next-keys__secret-box" data-testid="secret-value">
+        <code>{{ revealData.secret }}</code>
+      </div>
+      <CcSwitchImport
+        :secret="revealSecret()"
+        :key-name="revealKeyName"
+        :base-url="gatewayBaseUrl()"
+        :model="revealModels[0] ?? ''"
+        :default-app="defaultAppForPurpose(revealPurpose)"
+        :show-secret-input="false"
+        import-test-id="secret-ccswitch"
+      />
+      <div class="next-keys__import" data-testid="secret-actions">
+        <UiButton
+          variant="secondary"
+          data-testid="secret-copy-env"
+          @click="copyText(claudeEnvSnippet(revealSecret(), gatewayBaseUrl()), '环境变量已复制')"
+        >
+          复制环境变量
+        </UiButton>
+        <UiButton
+          variant="secondary"
+          data-testid="secret-copy-settings"
+          @click="
+            copyText(
+              claudeSettingsSnippet(revealSecret(), gatewayBaseUrl()),
+              'settings.json 已复制',
+            )
+          "
+        >
+          复制 settings.json
+        </UiButton>
+      </div>
+      <p class="next-keys__import-hint">
+        导入目标可选 Claude Code / Codex，自动填入网关地址与密钥、不会改动你当前启用的供应商； CC
+        Switch 弹出确认窗、点击确认后即完成。
+      </p>
+      <label class="next-keys__ack">
+        <input
+          v-model="revealAcked"
+          type="checkbox"
+          class="next-keys__ack-input"
+          data-testid="secret-ack"
+        />
+        <span class="next-keys__ack-box" aria-hidden="true">
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+            <path
+              d="M3.5 8.5 6.5 11.5 12.5 4.5"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </span>
+        <span>我已保存该密钥</span>
+      </label>
+      <template #footer>
+        <UiButton variant="secondary" data-testid="secret-copy" @click="copySecret">
+          {{ revealCopied ? '已复制' : '复制' }}
+        </UiButton>
+        <UiButton
+          variant="primary"
+          :disabled="!revealAcked"
+          data-testid="secret-close"
+          @click="revealOpen = false"
+        >
+          完成
+        </UiButton>
+      </template>
+    </UiDialog>
+
+    <!-- 接入指引：一键导入（目标应用 + 反馈闭环）与手动配置（行级；服务端不存明文） -->
+    <UiDialog
+      :open="usageOpen"
+      title="接入指引"
+      description="服务端只保存密钥摘要，明文仅在创建/轮换时展示一次；手头没有明文时可直接轮换生成新密钥再导入。"
+      width="640px"
+      data-testid="usage-dialog"
+      @update:open="usageOpen = $event"
+    >
+      <p class="next-keys__reveal-url">
+        网关地址：<span class="ui-mono">{{ usageKey?.baseUrl }}</span>
+        <UiButton
+          variant="ghost"
+          data-testid="usage-copy-base"
+          @click="copyText(usageKey?.baseUrl ?? '', '网关地址已复制')"
+        >
+          复制
+        </UiButton>
+      </p>
+      <CcSwitchImport
+        v-model:secret="usagePastedSecret"
+        :key-name="usageKey?.name ?? ''"
+        :base-url="gatewayBaseUrl()"
+        :model="usageSelectedModel"
+        :default-app="defaultAppForPurpose(usageKey?.purpose)"
+        import-test-id="usage-ccswitch"
+      />
+
+      <div class="next-keys__divider" role="separator" data-testid="usage-manual-divider">
+        <span>或 · 手动配置</span>
+      </div>
+
+      <div
+        class="next-keys__segmented"
+        role="radiogroup"
+        aria-label="客户端"
+        data-testid="usage-client"
+      >
+        <label
+          v-for="client in USAGE_CLIENTS"
+          :key="client"
+          class="next-keys__seg"
+          :class="{ 'next-keys__seg--on': usageClient === client }"
+        >
+          <input
+            v-model="usageClient"
+            type="radio"
+            name="usage-client"
+            :value="client"
+            class="next-keys__seg-input"
+          />
+          <span>{{ USAGE_CLIENT_LABEL[client] }}</span>
+        </label>
+      </div>
+
+      <div v-if="(usageKey?.modelIds ?? []).length" class="ui-field" data-testid="usage-models">
+        <span class="ui-field__label">模型（用于片段与导入的默认模型）</span>
+        <div class="next-keys__model-chips" role="radiogroup" aria-label="默认模型">
+          <button
+            v-for="model in usageKey?.modelIds ?? []"
+            :key="model"
+            type="button"
+            class="next-keys__model-chip"
+            :class="{ 'next-keys__model-chip--on': usageSelectedModel === model }"
+            :data-testid="`usage-model-${model}`"
+            @click="usageSelectedModel = model"
+          >
+            {{ model }}
+          </button>
+        </div>
+        <p class="next-keys__field-hint">
+          只能调用该密钥已授权的模型；未授权模型会被网关直接拒绝（不会静默降级）。
+        </p>
+      </div>
+
+      <template v-if="usageClient === 'claude'">
+        <div
+          class="next-keys__segmented"
+          role="radiogroup"
+          aria-label="终端类型"
+          data-testid="usage-shell"
+        >
+          <label
+            v-for="flavor in SHELL_FLAVORS"
+            :key="flavor"
+            class="next-keys__seg"
+            :class="{ 'next-keys__seg--on': usageShell === flavor }"
+          >
+            <input
+              v-model="usageShell"
+              type="radio"
+              name="usage-shell"
+              :value="flavor"
+              class="next-keys__seg-input"
+            />
+            <span>{{ SHELL_FLAVOR_LABEL[flavor] }}</span>
+          </label>
+        </div>
+        <div class="next-keys__cfg">
+          <div class="next-keys__cfg-head">
+            <span class="next-keys__cfg-title">终端环境变量（当前终端生效）</span>
+            <UiButton
+              variant="secondary"
+              size="sm"
+              data-testid="usage-copy-env"
+              @click="
+                copyText(
+                  claudeEnvSnippet('<粘贴你保存的密钥>', gatewayBaseUrl(), usageShell),
+                  '环境变量模板已复制',
+                )
+              "
+            >
+              复制
+            </UiButton>
+          </div>
+          <pre class="next-keys__snippet" data-testid="usage-env">{{
+            claudeEnvSnippet('<粘贴你保存的密钥>', gatewayBaseUrl(), usageShell)
+          }}</pre>
+        </div>
+        <div class="next-keys__cfg">
+          <div class="next-keys__cfg-head">
+            <span class="next-keys__cfg-title ui-mono">{{ claudeSettingsPath(usageShell) }}</span>
+            <UiButton
+              variant="secondary"
+              size="sm"
+              data-testid="usage-copy-settings"
+              @click="
+                copyText(
+                  claudeSettingsSnippet('<粘贴你保存的密钥>', gatewayBaseUrl()),
+                  'settings.json 模板已复制',
+                )
+              "
+            >
+              复制
+            </UiButton>
+          </div>
+          <p class="next-keys__cfg-note">VSCode / JetBrains 插件（Claude Code 扩展）读取此文件。</p>
+          <pre class="next-keys__snippet" data-testid="usage-settings">{{
+            claudeSettingsSnippet('<粘贴你保存的密钥>', gatewayBaseUrl())
+          }}</pre>
+        </div>
+      </template>
+      <template v-else-if="usageClient === 'codex'">
+        <div
+          class="next-keys__segmented"
+          role="radiogroup"
+          aria-label="认证方式"
+          data-testid="usage-codex-auth"
+        >
+          <label
+            v-for="mode in CODEX_AUTH_MODES"
+            :key="mode"
+            class="next-keys__seg"
+            :class="{ 'next-keys__seg--on': usageCodexAuth === mode }"
+          >
+            <input
+              v-model="usageCodexAuth"
+              type="radio"
+              name="usage-codex-auth"
+              :value="mode"
+              class="next-keys__seg-input"
+            />
+            <span>{{ CODEX_AUTH_LABEL[mode] }}</span>
+          </label>
+        </div>
+        <div class="next-keys__cfg">
+          <div class="next-keys__cfg-head">
+            <span class="next-keys__cfg-title ui-mono">{{ codexConfigPath(usageShell) }}</span>
+            <UiButton
+              variant="secondary"
+              size="sm"
+              data-testid="usage-copy-codex"
+              @click="copyText(codexConfigSnippet(), 'Codex 配置模板已复制')"
+            >
+              复制
+            </UiButton>
+          </div>
+          <pre class="next-keys__snippet" data-testid="usage-codex">{{ codexConfigSnippet() }}</pre>
+        </div>
+        <div v-if="usageCodexAuth === 'auth-json'" class="next-keys__cfg">
+          <div class="next-keys__cfg-head">
+            <span class="next-keys__cfg-title ui-mono">{{ codexAuthPath(usageShell) }}</span>
+            <UiButton
+              variant="secondary"
+              size="sm"
+              data-testid="usage-copy-codex-auth"
+              @click="copyText(codexAuthJsonSnippet(), 'auth.json 模板已复制')"
+            >
+              复制
+            </UiButton>
+          </div>
+          <p class="next-keys__cfg-note">
+            auth.json 含明文密钥，请勿提交到版本库、分享或粘贴到公开工单。
+          </p>
+          <pre class="next-keys__snippet" data-testid="usage-codex-auth">{{
+            codexAuthJsonSnippet()
+          }}</pre>
+        </div>
+        <p v-else class="next-keys__cfg-note">
+          环境变量方式：密钥不写进配置文件，按上方 config.toml 注释设置 MIQROKEY_API_KEY
+          即可（Windows CMD 用 set，PowerShell 用 $env:）。
+        </p>
+      </template>
+      <template v-else>
+        <div class="next-keys__cfg">
+          <div class="next-keys__cfg-head">
+            <span class="next-keys__cfg-title">Base URL / API Key（含连通性自测）</span>
+            <UiButton
+              variant="secondary"
+              size="sm"
+              data-testid="usage-copy-openai"
+              @click="
+                copyText(
+                  openaiCompatSnippet('<粘贴你保存的密钥>', gatewayBaseUrl(), usageModel()),
+                  'Base URL / Key 模板已复制',
+                )
+              "
+            >
+              复制
+            </UiButton>
+          </div>
+          <pre class="next-keys__snippet" data-testid="usage-openai">{{
+            openaiCompatSnippet('<粘贴你保存的密钥>', gatewayBaseUrl(), usageModel())
+          }}</pre>
+        </div>
+      </template>
+
+      <template #footer>
+        <UiButton variant="secondary" @click="usageOpen = false">关闭</UiButton>
+      </template>
+    </UiDialog>
+
+    <!-- Action confirm gate -->
+    <UiDialog
+      v-if="confirmState"
+      :open="true"
+      :title="confirmState.title"
+      :description="confirmState.body"
+      width="460px"
+      @update:open="confirmState = null"
+    >
+      <template #footer>
+        <UiButton variant="ghost" @click="confirmState = null">取消</UiButton>
+        <UiButton
+          :variant="confirmState.tone === 'danger' ? 'danger' : 'primary'"
+          @click="confirmAndRun"
+        >
+          {{ confirmState.confirmLabel }}
+        </UiButton>
+      </template>
+    </UiDialog>
+  </div>
+</template>
+
+<style scoped>
+.ui-alert {
+  padding: var(--ui-space-3) var(--ui-space-4);
+  margin-bottom: var(--ui-space-4);
+  border-radius: var(--ui-radius-control);
+  font-size: var(--ui-font-size-sm);
+  line-height: var(--ui-line-height-base);
+}
+
+.ui-alert--error {
+  background: var(--ui-danger-bg);
+  color: var(--ui-danger-fg);
+}
+
+.next-keys__create {
+  margin-bottom: var(--ui-space-5);
+  max-width: 860px;
+}
+
+.next-keys__create-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ui-space-4) var(--ui-space-6);
+  max-width: 760px;
+}
+
+.next-keys__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-1);
+}
+
+.next-keys__field-label {
+  font-size: var(--ui-font-size-xs);
+  font-weight: var(--ui-weight-medium);
+  color: var(--ui-foreground);
+  line-height: var(--ui-line-height-sm);
+}
+
+.next-keys__field-hint {
+  margin: var(--ui-space-1) 0 0;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+  line-height: var(--ui-line-height-base);
+}
+
+.next-keys__list-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+}
+
+.next-keys__usage--empty {
+  color: var(--ui-foreground-faint);
+}
+
+.next-keys__segmented {
+  display: inline-flex;
+  width: fit-content;
+  border: 1px solid var(--ui-input-border);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-card);
+  overflow: hidden;
+}
+
+.next-keys__seg {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--ui-space-3);
+  height: var(--ui-control-height);
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+  cursor: pointer;
+  border-left: 1px solid var(--ui-input-border);
+  user-select: none;
+  transition:
+    background-color var(--ui-ease),
+    color var(--ui-ease);
+}
+
+.next-keys__seg:first-child {
+  border-left: none;
+}
+
+.next-keys__seg:hover {
+  background: var(--ui-fill-hover);
+}
+
+.next-keys__seg--on {
+  background: var(--ui-primary-soft);
+  color: var(--ui-primary-text);
+  font-weight: var(--ui-weight-medium);
+}
+
+.next-keys__seg-input,
+.next-keys__model-input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.next-keys__model-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
+}
+
+.next-keys__model {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  height: var(--ui-control-height);
+  padding: 0 var(--ui-space-3);
+  border: 1px solid var(--ui-input-border);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-card);
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+  cursor: pointer;
+  user-select: none;
+  transition:
+    border-color var(--ui-ease),
+    background-color var(--ui-ease),
+    color var(--ui-ease);
+}
+
+.next-keys__model:hover {
+  border-color: var(--ui-border-strong);
+}
+
+.next-keys__model--on {
+  border-color: var(--ui-primary);
+  background: var(--ui-primary-soft);
+  color: var(--ui-primary-text);
+}
+
+.next-keys__model-check {
+  display: none;
+  flex-shrink: 0;
+}
+
+.next-keys__model--on .next-keys__model-check {
+  display: inline;
+}
+
+.next-keys__model-input:focus-visible + .next-keys__model-check {
+  outline: none;
+}
+
+.next-keys__model:has(.next-keys__model-input:focus-visible) {
+  box-shadow: var(--ui-shadow-focus);
+}
+
+.next-keys__form-actions {
+  display: flex;
+  gap: var(--ui-space-2);
+  margin-top: var(--ui-space-2);
+  grid-column: 1 / -1;
+}
+
+.next-keys__list-head {
+  align-items: center;
+}
+
+.next-keys__list-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ui-space-3);
+}
+
+.next-keys__cache {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-neutral-fg);
+}
+
+.next-keys__cache--on {
+  color: var(--ui-primary-text);
+  font-weight: var(--ui-weight-medium);
+}
+
+.next-keys__summary {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--ui-space-3);
+}
+
+.next-keys__summary-success {
+  color: var(--ui-success-fg);
+}
+
+.next-keys__summary-warning {
+  color: var(--ui-warning-fg);
+}
+
+.next-keys__summary-danger {
+  color: var(--ui-danger-fg);
+}
+
+.next-keys__name-line {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+}
+
+.next-keys__copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: var(--ui-radius-control);
+  background: transparent;
+  color: var(--ui-foreground-faint);
+  cursor: pointer;
+  transition:
+    color var(--ui-ease),
+    background-color var(--ui-ease);
+}
+
+.next-keys__copy:hover {
+  background: var(--ui-muted);
+  color: var(--ui-foreground);
+}
+
+.next-keys__copy:focus-visible {
+  outline: none;
+  box-shadow: var(--ui-shadow-focus);
+}
+
+.next-keys__name {
+  font-weight: var(--ui-weight-semibold);
+  line-height: var(--ui-line-height-lg);
+}
+
+.next-keys__mask {
+  font-size: var(--ui-font-size-xs);
+  line-height: var(--ui-line-height-sm);
+  color: var(--ui-foreground-faint);
+  margin-top: 3px;
+}
+
+.next-keys__models {
+  font-size: var(--ui-font-size-xs);
+  line-height: var(--ui-line-height-sm);
+  color: var(--ui-foreground-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 480px;
+}
+
+.next-keys__kebab {
+  /* Layout only — ink and hover come from the shared .ui-link-action row
+     action link style (#651). */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* .ui-menu panel chrome lives in styles/design-base.css (the radix popper
+   root drops the scoped data-v attribute). Item rules below are slot
+   children and stay scoped. */
+/* .next-keys__menu-item geometry comes from .ui-menu__item in the global
+   sheet; only the danger variant stays scoped. */
+.next-keys__menu-item--danger {
+  color: var(--ui-danger-fg);
+}
+
+.next-keys__menu-ind {
+  display: none;
+}
+
+.next-keys__menu-sep {
+  height: 1px;
+  margin: var(--ui-space-1) 0;
+  background: var(--ui-border-muted);
+}
+
+.next-keys__onboard-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-1);
+  text-align: left;
+  max-width: 460px;
+}
+
+.next-keys__onboard-steps p {
+  margin: 0;
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+  line-height: var(--ui-line-height-base);
+}
+
+.next-keys__onboard-steps strong {
+  display: inline-flex;
+  align-items: center;
+  margin-right: var(--ui-space-1);
+  color: var(--ui-primary-text);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: var(--ui-line-height-base);
+}
+
+.next-keys__reveal-url {
+  margin: 0 0 var(--ui-space-3);
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+  word-break: break-all;
+}
+
+.next-keys__secret-box {
+  padding: var(--ui-space-3) var(--ui-space-4);
+  background: var(--ui-muted);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-control);
+  font-family: var(--ui-font-mono);
+  font-size: var(--ui-font-size-base);
+  line-height: var(--ui-line-height-lg);
+  word-break: break-all;
+  user-select: all;
+}
+
+.next-keys__ack {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  margin-top: var(--ui-space-4);
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground);
+  cursor: pointer;
+}
+
+.next-keys__ack-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.next-keys__ack-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--ui-input-border);
+  border-radius: 4px;
+  background: var(--ui-card);
+  color: transparent;
+  flex-shrink: 0;
+
+  pointer-events: none;
+}
+
+.next-keys__ack-input:checked + .next-keys__ack-box {
+  background: var(--ui-primary);
+  border-color: var(--ui-primary);
+  color: #fff;
+}
+
+.next-keys__ack:has(.next-keys__ack-input:focus-visible) .next-keys__ack-box {
+  box-shadow: var(--ui-shadow-focus);
+}
+
+.next-keys__import {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
+  margin-top: var(--ui-space-3);
+}
+
+.next-keys__import-hint {
+  margin: var(--ui-space-2) 0 0;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-keys__snippet {
+  margin: var(--ui-space-2) 0;
+  padding: var(--ui-space-3);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-muted);
+  font-size: var(--ui-font-size-xs);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.next-keys__divider {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+  margin: var(--ui-space-1) 0;
+  color: var(--ui-foreground-faint);
+  font-size: var(--ui-font-size-xs);
+}
+
+.next-keys__divider::before,
+.next-keys__divider::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid var(--ui-border-muted);
+}
+
+.next-keys__cfg {
+  margin-top: var(--ui-space-3);
+}
+
+.next-keys__cfg-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-2);
+}
+
+.next-keys__cfg-title {
+  font-size: var(--ui-font-size-xs);
+  font-weight: var(--ui-weight-medium);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-keys__cfg-note {
+  margin: var(--ui-space-1) 0 0;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+  line-height: var(--ui-line-height-base);
+}
+
+.next-keys__model-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
+  margin-top: var(--ui-space-2);
+}
+
+.next-keys__model-chip {
+  border: 1px solid var(--ui-input-border);
+  background: var(--ui-card);
+  color: var(--ui-foreground-secondary);
+  border-radius: 999px;
+  height: 26px;
+  padding: 0 var(--ui-space-3);
+  font-size: var(--ui-font-size-xs);
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    border-color var(--ui-ease),
+    color var(--ui-ease),
+    background-color var(--ui-ease);
+}
+
+.next-keys__model-chip:hover {
+  border-color: var(--ui-primary);
+  color: var(--ui-foreground);
+}
+
+.next-keys__model-chip--on {
+  background: var(--ui-primary-soft);
+  border-color: var(--ui-primary);
+  color: var(--ui-primary-text);
+  font-weight: var(--ui-weight-medium);
+}
+.next-keys__extra-projects {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-1);
+}
+
+.next-keys__field-hint {
+  margin: 0;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+  line-height: var(--ui-line-height-sm);
+}
+
+.next-keys__extra-badge {
+  margin-left: var(--ui-space-1);
+  padding: 0 var(--ui-space-1);
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-muted);
+  color: var(--ui-foreground-secondary);
+  font-size: var(--ui-font-size-xs);
+  cursor: help;
+}
+</style>

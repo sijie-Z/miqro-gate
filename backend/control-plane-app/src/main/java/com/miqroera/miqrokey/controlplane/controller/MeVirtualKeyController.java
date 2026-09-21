@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.controlplane.controller;
 
 import com.miqroera.miqrokey.controlplane.dto.CreateVirtualKeyRequest;
 import com.miqroera.miqrokey.controlplane.dto.CreateVirtualKeyResponse;
+import com.miqroera.miqrokey.controlplane.dto.UpdateVirtualKeyRequest;
 import com.miqroera.miqrokey.controlplane.dto.VirtualKeyView;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.VirtualKeyService;
@@ -11,6 +12,7 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -23,8 +25,8 @@ import java.util.UUID;
 
 /**
  * Self-service Virtual Key endpoints (api-contract §4): list, create, detail,
- * rotate, revoke. The full secret appears only in the create/rotate response
- * ({@code shownOnce}); everything else is safe metadata.
+ * rotate, revoke, rename, disable, enable. The full secret appears only in the
+ * create/rotate response ({@code shownOnce}); everything else is safe metadata.
  *
  * <p>
  * Errors are RFC 9457 problem+json via {@link GlobalExceptionHandler}; an
@@ -69,6 +71,22 @@ public class MeVirtualKeyController {
     public ResponseEntity<Map<String, Object>> revoke(@PathVariable UUID id, HttpServletRequest httpReq) {
         virtualKeyService.revoke(user(), id, requestId(httpReq));
         return ResponseEntity.ok(Map.of("message", "Virtual key revoked"));
+    }
+
+    @PatchMapping("/{id}")
+    public VirtualKeyView rename(@PathVariable UUID id, @Valid @RequestBody UpdateVirtualKeyRequest request,
+            HttpServletRequest httpReq) {
+        return virtualKeyService.rename(user(), id, request.name(), requestId(httpReq));
+    }
+
+    @PostMapping("/{id}/disable")
+    public VirtualKeyView disable(@PathVariable UUID id, HttpServletRequest httpReq) {
+        return virtualKeyService.disable(user(), id, requestId(httpReq));
+    }
+
+    @PostMapping("/{id}/enable")
+    public VirtualKeyView enable(@PathVariable UUID id, HttpServletRequest httpReq) {
+        return virtualKeyService.enable(user(), id, requestId(httpReq));
     }
 
     // -------------------------------------------------------------------

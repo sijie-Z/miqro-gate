@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.persistence.repository;
 import com.miqroera.miqrokey.domain.model.Team;
 import com.miqroera.miqrokey.domain.model.TeamStatus;
 import com.miqroera.miqrokey.domain.repository.TeamRepository;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -63,7 +64,7 @@ public class TeamRepositoryImpl implements TeamRepository {
                 "UPDATE teams SET name = :name, description = :description, status = :status, version = version + 1, updated_at = :updatedAt WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion",
                 params);
         if (rows != 1)
-            throw new IllegalStateException("Optimistic lock failure: team " + team.id());
+            throw new OptimisticLockingFailureException("Optimistic lock failure: team " + team.id());
         return team;
     }
 

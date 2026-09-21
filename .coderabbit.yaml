@@ -12,6 +12,7 @@ reviews:
     drafts: false
     base_branches:
       - main
+      - develop
       - goal/*
       - feat/*
       - fix/*

@@ -62,6 +62,13 @@ public class QueueConfig {
             return new PostgresUsageEventWriter(jdbc, queueTransactionTemplate);
         }
 
+        /** Drop facts (F07, #245) — same connection pool, same transaction wiring. */
+        @Bean
+        QueueSignalWriter queueSignalWriter(NamedParameterJdbcTemplate jdbc,
+                TransactionTemplate queueTransactionTemplate) {
+            return new PostgresQueueSignalWriter(jdbc, queueTransactionTemplate);
+        }
+
         /**
          * Dedicated bounded writer executor (CLAUDE.md: usage persistence is written in
          * a dedicated bounded executor). Flushes run here, never on the shared
@@ -73,11 +80,17 @@ public class QueueConfig {
             return Schedulers.newBoundedElastic(props.writerThreads(), 100, "usage-writer");
         }
 
-        @Bean
-        UsageEventBus usageEventBus(UsageEventWriter usageEventWriter, QueueProperties props, Clock clock,
-                Scheduler usageWriterScheduler) {
+        /**
+         * ##451: destroyMethod flushes the queue on graceful shutdown — up to a full
+         * flush interval of accepted events used to be lost on every restart/deploy
+         * (and never counted as dropped).
+         */
+        @Bean(destroyMethod = "flush")
+        UsageEventBus usageEventBus(UsageEventWriter usageEventWriter, QueueSignalWriter queueSignalWriter,
+                QueueProperties props, Clock clock, Scheduler usageWriterScheduler) {
             return new PostgresUsageEventBus(props.capacity(), props.flushThreshold(), usageEventWriter,
-                    usageWriterScheduler, clock);
+                    usageWriterScheduler, clock, props.saturationMode(), props.writeThroughTimeout(),
+                    queueSignalWriter);
         }
     }
 
@@ -103,10 +116,14 @@ public class QueueConfig {
         return props.waitTimeout();
     }
 
-    /** Bounded-queue tuning: {@code miqrokey.gateway.queue.*}. */
+    /**
+     * Bounded-queue tuning: {@code miqrokey.gateway.queue.*}; the flush cadence
+     * default (1s, #424) lives in the bus's scheduled method.
+     */
     @ConfigurationProperties(prefix = "miqrokey.gateway.queue")
-    public record QueueProperties(@DefaultValue("10000") int capacity, @DefaultValue("100") int flushThreshold,
-            @DefaultValue("4") int writerThreads) {
+    public record QueueProperties(@DefaultValue("50000") int capacity, @DefaultValue("100") int flushThreshold,
+            @DefaultValue("4") int writerThreads, @DefaultValue("DROP") SaturationMode saturationMode,
+            @DefaultValue("5s") Duration writeThroughTimeout) {
 
         public QueueProperties {
             if (capacity <= 0) {
@@ -117,6 +134,13 @@ public class QueueConfig {
             }
             if (writerThreads <= 0) {
                 throw new IllegalArgumentException("miqrokey.gateway.queue.writer-threads must be > 0");
+            }
+            if (saturationMode == null) {
+                throw new IllegalArgumentException(
+                        "miqrokey.gateway.queue.saturation-mode must be DROP or WRITE_THROUGH");
+            }
+            if (writeThroughTimeout == null || writeThroughTimeout.isNegative() || writeThroughTimeout.isZero()) {
+                throw new IllegalArgumentException("miqrokey.gateway.queue.write-through-timeout must be positive");
             }
         }
     }

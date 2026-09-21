@@ -12,6 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.LongConsumer;
 
 /**
  * Records time-to-first-byte (TTFB) metadata without recording request or
@@ -35,6 +36,11 @@ public final class TtfbRecorder {
     private final String requestId;
     private final long requestStartMillis;
     private final Clock clock;
+    /**
+     * Optional first-byte observer (metrics hook); invoked once with the TTFB
+     * millis.
+     */
+    private final LongConsumer firstByteListener;
     private final AtomicLong firstByteMillis = new AtomicLong(-1);
     private final AtomicBoolean firstByteRecorded = new AtomicBoolean(false);
     private final AtomicLong completionMillis = new AtomicLong(-1);
@@ -49,9 +55,19 @@ public final class TtfbRecorder {
      *            the timestamp when the upstream request was initiated
      */
     public TtfbRecorder(String requestId, long startMillis, Clock clock) {
+        this(requestId, startMillis, clock, null);
+    }
+
+    /**
+     * Creates a new TTFB recorder with a first-byte listener (#486): invoked
+     * exactly once when the first upstream byte arrives, with the observed TTFB in
+     * milliseconds. Intended as a metrics hook — never receives body content.
+     */
+    public TtfbRecorder(String requestId, long startMillis, Clock clock, LongConsumer firstByteListener) {
         this.requestId = requestId;
         this.requestStartMillis = startMillis;
         this.clock = clock;
+        this.firstByteListener = firstByteListener;
     }
 
     /**
@@ -67,6 +83,9 @@ public final class TtfbRecorder {
                 long ttfb = now - requestStartMillis;
                 log.debug("TTFB recorded: requestId={}, ttfbMs={}, readableBytes={}", requestId, ttfb,
                         buffer.readableByteCount());
+                if (firstByteListener != null) {
+                    firstByteListener.accept(ttfb);
+                }
             }
         });
     }

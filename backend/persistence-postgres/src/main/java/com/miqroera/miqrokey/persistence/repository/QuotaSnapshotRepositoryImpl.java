@@ -57,6 +57,16 @@ public class QuotaSnapshotRepositoryImpl implements QuotaSnapshotRepository {
     }
 
     @Override
+    public List<QuotaSnapshot> findLatestForTenant(UUID tenantId) {
+        return jdbc.query("""
+                SELECT DISTINCT ON (subscription_id, seat_id, credential_id) *
+                FROM quota_snapshots
+                WHERE tenant_id = :tenantId
+                ORDER BY subscription_id, seat_id, credential_id, synced_at DESC
+                """, new MapSqlParameterSource("tenantId", tenantId), ROW_MAPPER);
+    }
+
+    @Override
     public List<QuotaSnapshot> findLatestBySubscription(UUID tenantId, UUID subscriptionId, int limit) {
         return jdbc.query("""
                 SELECT * FROM quota_snapshots

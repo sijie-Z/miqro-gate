@@ -1,0 +1,812 @@
+import { test, expect, type Page } from '@playwright/test';
+
+/**
+ * New-console pilot (/app-new/*, UI U0) — functional smoke over the v2 pages:
+ * shell guards, keys create-cascade basics, real radix-vue menu interactions
+ * (rotate/revoke through the confirm gate), usage quota/summary/records with
+ * paging, admin user list + temp-password dialog gating. API fully mocked.
+ * Screenshots land in test-results/baseline/ for the vision review loop.
+ */
+
+const REGULAR_USER = {
+  id: '0190-0000-0000-0009',
+  username: 'demo2_user',
+  displayName: 'Demo 用户',
+  role: 'USER',
+  mustChangePassword: false,
+  lastLoginAt: '2026-09-14T02:12:00Z',
+  sessionExpiresAt: '2026-09-16T05:01:41Z',
+};
+
+const GRANTS = {
+  projects: [{ id: '0190-0000-0000-00a1', code: 'LIVE', name: 'LIVE 项目', projectTag: 'live' }],
+  grants: [
+    {
+      id: '0190-0000-0000-00b1',
+      projectId: '0190-0000-0000-00a1',
+      providerProductId: 'deepseek-v4',
+      models: ['deepseek-v4-flash', 'deepseek-v4.1'],
+    },
+  ],
+  purposes: ['CLAUDE_CODE', 'CLAUDE_DESKTOP', 'CODEX', 'CUSTOM'],
+};
+
+const KEYS = [
+  {
+    id: '0190-0000-0000-0002',
+    name: 'claude-code-main',
+    display: 'mqk_live_…8f2a',
+    displayPrefix: 'mqk_live_abcdefghijklmnopqrstuv',
+    lastFour: '8f2a',
+    purpose: 'CLAUDE_CODE',
+    status: 'ACTIVE',
+    cachePolicy: 'DISABLED',
+    projectId: '0190-0000-0000-00a1',
+    projectTag: 'live',
+    modelIds: ['deepseek-v4-flash'],
+    baseUrl: 'https://gateway.test.internal',
+    createdAt: '2026-08-01T00:00:00Z',
+    lastUsedAt: '2026-08-26T00:00:00Z',
+  },
+  {
+    id: '0190-0000-0000-0003',
+    name: 'codex-tools',
+    display: 'mqk_live_…1b4c',
+    displayPrefix: 'mqk_live_uvwxyz',
+    lastFour: '1b4c',
+    purpose: 'CODEX',
+    status: 'ACTIVE',
+    cachePolicy: 'ENABLED',
+    projectId: '0190-0000-0000-00a2',
+    projectTag: 'tools',
+    modelIds: ['deepseek-v4.1'],
+    baseUrl: 'https://gateway.test.internal',
+    createdAt: '2026-08-05T00:00:00Z',
+    lastUsedAt: null,
+  },
+  {
+    id: '0190-0000-0000-0004',
+    name: 'claude-code-legacy',
+    display: 'mqk_live_…7c21',
+    displayPrefix: 'mqk_live_oldkeyprefix',
+    lastFour: '7c21',
+    purpose: 'CLAUDE_CODE',
+    status: 'ROTATING',
+    cachePolicy: 'DISABLED',
+    projectId: '0190-0000-0000-00a1',
+    projectTag: 'live',
+    modelIds: ['deepseek-v4-flash'],
+    baseUrl: 'https://gateway.test.internal',
+    createdAt: '2026-07-12T00:00:00Z',
+    lastUsedAt: '2026-09-01T12:30:00Z',
+  },
+  {
+    id: '0190-0000-0000-0005',
+    name: 'glm-agent-main',
+    display: 'mqk_live_…90f3',
+    displayPrefix: 'mqk_live_glmagent00',
+    lastFour: '90f3',
+    purpose: 'CUSTOM',
+    status: 'ACTIVE',
+    cachePolicy: 'ENABLED',
+    projectId: '0190-0000-0000-00a1',
+    projectTag: 'live',
+    modelIds: ['glm-5.1'],
+    baseUrl: 'https://gateway.test.internal',
+    createdAt: '2026-08-14T09:15:00Z',
+    lastUsedAt: '2026-09-03T02:05:00Z',
+  },
+  {
+    id: '0190-0000-0000-0006',
+    name: 'desktop-sync',
+    display: 'mqk_live_…4ba9',
+    displayPrefix: 'mqk_live_desktopkey',
+    lastFour: '4ba9',
+    purpose: 'CLAUDE_DESKTOP',
+    status: 'ACTIVE',
+    cachePolicy: 'DISABLED',
+    projectId: '0190-0000-0000-00a1',
+    projectTag: 'live',
+    modelIds: ['deepseek-v4-flash', 'deepseek-v4.1'],
+    baseUrl: 'https://gateway.test.internal',
+    createdAt: '2026-08-20T14:00:00Z',
+    lastUsedAt: '2026-09-02T18:44:00Z',
+  },
+  {
+    id: '0190-0000-0000-0007',
+    name: 'retired-qa-key',
+    display: 'mqk_live_…e08d',
+    displayPrefix: 'mqk_live_retiredqa0',
+    lastFour: 'e08d',
+    purpose: 'CLAUDE_CODE',
+    status: 'REVOKED',
+    cachePolicy: 'DISABLED',
+    projectId: '0190-0000-0000-00a1',
+    projectTag: 'live',
+    modelIds: ['deepseek-v4-flash'],
+    baseUrl: 'https://gateway.test.internal',
+    createdAt: '2026-06-01T00:00:00Z',
+    revokedAt: '2026-08-28T00:00:00Z',
+  },
+  {
+    id: '0190-0000-0000-0008',
+    name: 'suspended-tools',
+    display: 'mqk_live_…c5d7',
+    displayPrefix: 'mqk_live_suspended00',
+    lastFour: 'c5d7',
+    purpose: 'CODEX',
+    status: 'DISABLED',
+    cachePolicy: 'DISABLED',
+    projectId: '0190-0000-0000-00a1',
+    projectTag: 'live',
+    modelIds: ['deepseek-v4.1'],
+    baseUrl: 'https://gateway.test.internal',
+    createdAt: '2026-07-30T10:00:00Z',
+    lastUsedAt: '2026-08-25T16:20:00Z',
+  },
+  {
+    id: '0190-0000-0000-000a',
+    name: 'kimi-coding-daily',
+    display: 'mqk_live_…22f6',
+    displayPrefix: 'mqk_live_kimicoding',
+    lastFour: '22f6',
+    purpose: 'CLAUDE_CODE',
+    status: 'ACTIVE',
+    cachePolicy: 'DISABLED',
+    projectId: '0190-0000-0000-00a1',
+    projectTag: 'live',
+    modelIds: ['kimi-k2.5'],
+    baseUrl: 'https://gateway.test.internal',
+    createdAt: '2026-09-01T08:00:00Z',
+    lastUsedAt: '2026-09-03T09:12:00Z',
+  },
+];
+
+const GROUPS = [
+  {
+    groupKey: 'live',
+    label: 'LIVE 项目',
+    requests: { upstream: 12, coalesced: 2, l1Hit: 4, l2Hit: 1 },
+    tokens: { input: 120_000, output: 40_000, cacheRead: 8_000, cacheCreation: 15_000 },
+    cost: { upstreamPaid: '0.320000', gatewayObserved: '0.002000' },
+  },
+  {
+    groupKey: 'coding-plan',
+    label: '编码计划',
+    requests: { upstream: 9, coalesced: 0, l1Hit: 1, l2Hit: 0 },
+    tokens: { input: 64_000, output: 21_000, cacheRead: 0, cacheCreation: 2_400 },
+    cost: { upstreamPaid: '0.152000', gatewayObserved: '0.001100' },
+  },
+  {
+    groupKey: 'agent-exp',
+    label: '智能体实验',
+    requests: { upstream: 6, coalesced: 1, l1Hit: 2, l2Hit: 0 },
+    tokens: { input: 41_000, output: 12_000, cacheRead: 1_200, cacheCreation: 3_800 },
+    cost: { upstreamPaid: '0.090000', gatewayObserved: '0.000700' },
+  },
+  {
+    groupKey: 'qa-suite',
+    label: 'QA 回归',
+    requests: { upstream: 4, coalesced: 0, l1Hit: 0, l2Hit: 0 },
+    tokens: { input: 18_000, output: 9_600, cacheRead: 0, cacheCreation: 900 },
+    cost: { upstreamPaid: '0.048000', gatewayObserved: '0.000300' },
+  },
+  {
+    groupKey: 'docs-writer',
+    label: '文档写作',
+    requests: { upstream: 3, coalesced: 0, l1Hit: 1, l2Hit: 0 },
+    tokens: { input: 9_500, output: 7_200, cacheRead: 400, cacheCreation: 600 },
+    cost: { upstreamPaid: '0.034000', gatewayObserved: '0.000200' },
+  },
+  {
+    groupKey: 'support-triage',
+    label: '工单初筛',
+    requests: { upstream: 2, coalesced: 0, l1Hit: 0, l2Hit: 0 },
+    tokens: { input: 6_200, output: 2_100, cacheRead: 0, cacheCreation: 300 },
+    cost: { upstreamPaid: '0.016000', gatewayObserved: '0.000100' },
+  },
+];
+
+const USAGE_SUMMARY = {
+  groupBy: 'project',
+  groups: GROUPS,
+  totals: {
+    groupKey: '__totals__',
+    label: '合计',
+    requests: { upstream: 36, coalesced: 3, l1Hit: 8, l2Hit: 1 },
+    tokens: { input: 258_700, output: 91_900, cacheRead: 9_600, cacheCreation: 23_000 },
+    cost: { upstreamPaid: '0.660000', gatewayObserved: '0.004400' },
+  },
+};
+
+const QUOTA_RULES = [
+  {
+    id: '0190-0000-0000-00d1',
+    scopeType: 'USER',
+    scopeId: '0190-0000-0000-0009',
+    scopeName: 'demo2_user',
+    scopeTag: 'demo2_user',
+    metric: 'TOKENS',
+    period: 'MONTHLY',
+    limitValue: 2_000_000,
+    warnPercent: 80,
+    status: 'ACTIVE',
+    used: 160_000,
+    usedPct: 8,
+    level: 'NORMAL',
+    windowFrom: '2026-09-01T00:00:00Z',
+    windowTo: '2026-09-30T23:59:59Z',
+    createdAt: '2026-09-01T00:00:00Z',
+    updatedAt: '2026-09-01T00:00:00Z',
+    version: 1,
+  },
+];
+
+const USERS = [
+  {
+    id: '0190-0000-0000-0010',
+    username: 'root',
+    displayName: 'Root Admin',
+    role: 'SYSTEM_ADMIN',
+    status: 'ACTIVE',
+    mustChangePassword: false,
+    createdAt: '2026-06-28T03:14:00Z',
+  },
+  {
+    id: '0190-0000-0000-0011',
+    username: 'alice',
+    displayName: 'Alice Wang',
+    role: 'USER',
+    status: 'ACTIVE',
+    mustChangePassword: true,
+    createdAt: '2026-07-19T09:47:00Z',
+  },
+  {
+    id: '0190-0000-0000-0012',
+    username: 'bob',
+    displayName: 'Bob Chen',
+    role: 'USER',
+    status: 'DISABLED',
+    mustChangePassword: false,
+    createdAt: '2026-08-10T16:05:00Z',
+  },
+  {
+    id: '0190-0000-0000-0013',
+    username: 'demo2_user',
+    displayName: 'Demo 用户',
+    role: 'USER',
+    status: 'ACTIVE',
+    mustChangePassword: false,
+    lastLoginAt: '2026-09-03T01:22:00Z',
+    createdAt: '2026-08-28T00:00:00Z',
+  },
+  {
+    id: '0190-0000-0000-0014',
+    username: 'carol',
+    displayName: 'Carol',
+    role: 'USER',
+    status: 'ACTIVE',
+    mustChangePassword: false,
+    lastLoginAt: '2026-09-02T06:40:00Z',
+    createdAt: '2026-08-15T11:23:00Z',
+  },
+  {
+    id: '0190-0000-0000-0015',
+    username: 'dave',
+    displayName: 'Dave',
+    role: 'USER',
+    status: 'LOCKED',
+    mustChangePassword: false,
+    lastLoginAt: '2026-08-30T11:05:00Z',
+    createdAt: '2026-08-20T00:00:00Z',
+  },
+];
+
+async function mockSession(page: Page, user: typeof REGULAR_USER) {
+  await page.route('**/api/v1/auth/me', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(user) }),
+  );
+}
+
+async function mockPilotApi(page: Page) {
+  await page.route('**/api/v1/me/grants', (route) => route.fulfill({ json: GRANTS }));
+  await page.route('**/api/v1/me/virtual-keys', (route) => route.fulfill({ json: KEYS }));
+  await page.route('**/api/v1/me/quota-rules', (route) => route.fulfill({ json: QUOTA_RULES }));
+  await page.route('**/api/v1/me/usage/summary*', (route) =>
+    route.fulfill({ json: USAGE_SUMMARY }),
+  );
+  await page.route('**/api/v1/me/usage/records*', async (route) => {
+    const url = new URL(route.request().url());
+    const pageNo = Number(url.searchParams.get('page') ?? 1);
+    const record = {
+      occurredAt: `2026-09-0${pageNo}T08:00:00Z`,
+      modelId: 'deepseek-v4-flash',
+      cacheLevel: 'UPSTREAM',
+      inputTokens: 1024,
+      outputTokens: 512,
+      totalTokens: 1536,
+      latencyMs: 480,
+      upstreamStatusCode: 200,
+      providerRequestId: `req_${pageNo}`,
+      gatewayRequestId: `gw-${pageNo}`,
+      isComplete: true,
+      usageMissing: false,
+      virtualKeyId: '0190-0000-0000-0002',
+    };
+    const size = Number(url.searchParams.get('size') ?? 20);
+    const items = Array.from({ length: 8 }, (_, i) => ({
+      ...record,
+      occurredAt: `2026-09-0${Math.min(pageNo, 3)}T0${i + 1}:20:00Z`,
+      providerRequestId: `req_${pageNo}_${i}`,
+      gatewayRequestId: `gw-${pageNo}-${i}`,
+    }));
+    await route.fulfill({ json: { items, page: pageNo, size, total: 45 } });
+  });
+  await page.route('**/api/v1/admin/users*', (route) => {
+    if (route.request().method() === 'GET') {
+      return route.fulfill({ json: USERS });
+    }
+    return route.fulfill({
+      json: {
+        user: {
+          id: '0190-0000-0000-0021',
+          username: 'newbie',
+          displayName: '新同学',
+          role: 'USER',
+          status: 'ACTIVE',
+          mustChangePassword: true,
+          createdAt: '2026-09-03T00:00:00Z',
+        },
+        temporaryPassword: 'TempPass2026!',
+      },
+    });
+  });
+}
+
+const SKILLS = [
+  {
+    id: '0190-0000-0000-00e1',
+    name: 'commit-msg-lint',
+    version: '1.2.0',
+    description: '规范 git 提交信息并自动生成变更提示的技能包，支持 Conventional Commits。',
+    tags: ['git', 'workflow'],
+    author: 'platform',
+    license: 'MIT',
+    contentBytes: 204_800,
+    createdAt: '2026-08-20T00:00:00Z',
+    updatedAt: '2026-08-20T00:00:00Z',
+    status: 'ACTIVE',
+  },
+  {
+    id: '0190-0000-0000-00e2',
+    name: 'pr-summarizer',
+    version: '0.4.1',
+    description: '基于 diff 生成 PR 摘要与风险点提示。',
+    tags: ['review'],
+    author: 'qa-team',
+    license: 'MIT',
+    contentBytes: 1_540_000,
+    createdAt: '2026-08-25T00:00:00Z',
+    updatedAt: '2026-08-25T00:00:00Z',
+    status: 'ACTIVE',
+  },
+];
+
+const MODEL_APPROVALS = [
+  {
+    id: '0190-0000-0000-00f1',
+    virtualKeyId: '0190-0000-0000-0002',
+    keyName: 'claude-code-main',
+    keyDisplay: 'mqk_live_…8f2a',
+    projectTag: 'live',
+    modelId: 'deepseek-v4.1',
+    reason: '编码任务需要更强推理',
+    status: 'PENDING',
+    requesterId: '0190-0000-0000-0009',
+    requesterName: 'demo2_user',
+    reviewNote: null,
+    reviewedByName: null,
+    createdAt: '2026-09-03T00:00:00Z',
+    updatedAt: '2026-09-03T00:00:00Z',
+  },
+  {
+    id: '0190-0000-0000-00f2',
+    virtualKeyId: '0190-0000-0000-0002',
+    keyName: 'claude-code-main',
+    keyDisplay: 'mqk_live_…8f2a',
+    projectTag: 'live',
+    modelId: 'kimi-k2.5',
+    reason: '长上下文任务',
+    status: 'APPROVED',
+    requesterId: '0190-0000-0000-0009',
+    requesterName: 'demo2_user',
+    reviewNote: '符合项目范围',
+    reviewedByName: 'root',
+    createdAt: '2026-09-02T00:00:00Z',
+    updatedAt: '2026-09-02T06:30:00Z',
+  },
+];
+
+async function mockUserPages(page: Page) {
+  await page.route('**/api/v1/skills', (route) => route.fulfill({ json: SKILLS }));
+  await page.route('**/api/v1/skills/*/download', (route) =>
+    route.fulfill({ status: 200, body: 'zipped-skill' }),
+  );
+  await page.route('**/api/v1/me/model-approvals', (route) =>
+    route.fulfill({ json: MODEL_APPROVALS }),
+  );
+}
+
+test('new login page renders login and register modes', async ({ page }) => {
+  // Public page — the session probe must read unauthenticated or the guard
+  // would redirect straight into the console.
+  await page.route('**/api/v1/auth/me', (route) => route.fulfill({ status: 401, json: {} }));
+  await page.goto('/login-new');
+  await expect(page.getByTestId('login-panel')).toBeVisible();
+  await expect(page.getByTestId('tab-register')).toBeVisible();
+  await page.getByTestId('tab-register').click();
+  await expect(page.getByTestId('register-display-name')).toBeVisible();
+  await page.getByTestId('tab-login').click();
+  await page.screenshot({ path: 'test-results/baseline/next-login-1440x900.png', fullPage: true });
+});
+
+test('new login page closes the register entry when self-registration is off (#550)', async ({
+  page,
+}) => {
+  await page.route('**/api/v1/auth/me', (route) => route.fulfill({ status: 401, json: {} }));
+  await page.route('**/api/v1/auth/registration-status', (route) =>
+    route.fulfill({ json: { enabled: false } }),
+  );
+  await page.goto('/login-new');
+
+  await expect(page.getByTestId('login-panel')).toBeVisible();
+  await expect(page.getByTestId('tab-register')).toBeDisabled();
+  await expect(page.getByTestId('register-display-name')).toHaveCount(0);
+  await expect(page.getByTestId('register-confirm')).toHaveCount(0);
+});
+
+test('keys page lists keys and rotates through the kebab confirm gate', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+  await mockPilotApi(page);
+  await page.route('**/api/v1/me/virtual-keys/0190-0000-0000-0002/rotate', (route) =>
+    route.fulfill({
+      json: {
+        id: '0190-0000-0000-0002',
+        secret: 'mqk_live_rotatedsecret',
+        baseUrl: 'https://gateway.test.internal',
+        display: 'mqk_live_…rotated',
+        shownOnce: true,
+        createdAt: '2026-09-03T00:00:00Z',
+        version: 2,
+      },
+    }),
+  );
+
+  await page.goto('/app-new/keys');
+  await expect(page.getByTestId('keys-table')).toBeVisible();
+  await expect(page.getByText('mqk_live_…8f2a')).toBeVisible();
+  await expect(page.getByText('可用').first()).toBeVisible();
+
+  // Kebab → 轮换 → confirm → one-shot secret with ack gate.
+  await page.getByTestId('key-actions-0190-0000-0000-0002').click();
+  await page.getByRole('menuitem', { name: '轮换' }).click();
+  await expect(page.getByText('轮换虚拟密钥「claude-code-main」')).toBeVisible();
+  await page.getByRole('button', { name: '轮换', exact: true }).last().click();
+
+  await expect(page.getByTestId('secret-dialog')).toBeVisible();
+  await expect(page.getByTestId('secret-value')).toContainText('mqk_live_rotatedsecret');
+  await expect(page.getByTestId('secret-close')).toBeDisabled();
+  await page.getByTestId('secret-ack').click();
+  await expect(page.getByTestId('secret-close')).toBeEnabled();
+  await page.getByTestId('secret-close').click();
+  await expect(page.getByTestId('secret-dialog')).toBeHidden();
+
+  await page.screenshot({ path: 'test-results/baseline/next-keys-1440x900.png', fullPage: true });
+});
+
+test('revoke also walks the confirm gate and reloads the list', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+  await mockPilotApi(page);
+  await page.route('**/api/v1/me/virtual-keys/0190-0000-0000-0003/revoke', (route) =>
+    route.fulfill({ json: { message: 'revoked' } }),
+  );
+
+  await page.goto('/app-new/keys');
+  await page.getByTestId('key-actions-0190-0000-0000-0003').click();
+  await page.getByRole('menuitem', { name: '吊销' }).click();
+  await expect(page.getByText('吊销虚拟密钥「codex-tools」')).toBeVisible();
+  await page.getByRole('button', { name: '吊销', exact: true }).last().click();
+  await expect(page.getByText('虚拟密钥已吊销')).toBeVisible();
+});
+
+test('keys page disables through the kebab menu and confirm gate (#582)', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+  await mockPilotApi(page);
+  await page.route('**/api/v1/me/virtual-keys/0190-0000-0000-0002/disable', (route) =>
+    route.fulfill({
+      json: { id: '0190-0000-0000-0002', name: 'claude-code-main', status: 'DISABLED' },
+    }),
+  );
+
+  await page.goto('/app-new/keys');
+  await expect(page.getByTestId('keys-table')).toBeVisible();
+
+  await page.getByTestId('key-actions-0190-0000-0000-0002').click();
+  await page.getByRole('menuitem', { name: '停用' }).click();
+  await expect(page.getByText('停用虚拟密钥「claude-code-main」')).toBeVisible();
+  await page.getByRole('button', { name: '停用', exact: true }).last().click();
+  await expect(page.getByText('虚拟密钥已停用')).toBeVisible();
+});
+
+test('keys page renames through the kebab menu (#582)', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+  await mockPilotApi(page);
+  await page.route('**/api/v1/me/virtual-keys/0190-0000-0000-0002', (route) => {
+    if (route.request().method() === 'PATCH') {
+      return route.fulfill({
+        json: { id: '0190-0000-0000-0002', name: 'renamed-in-e2e', status: 'ACTIVE' },
+      });
+    }
+    return route.fallback();
+  });
+
+  await page.goto('/app-new/keys');
+  await expect(page.getByTestId('keys-table')).toBeVisible();
+
+  await page.getByTestId('key-actions-0190-0000-0000-0002').click();
+  await page.getByRole('menuitem', { name: '重命名' }).click();
+  await expect(page.getByText('重命名虚拟密钥')).toBeVisible();
+  await page.getByTestId('key-rename-name').fill('renamed-in-e2e');
+  await page.getByTestId('key-rename-save').click();
+  await expect(page.getByText('虚拟密钥已重命名')).toBeVisible();
+});
+
+test('usage page shows quota, summary totals and pages the records', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+  await mockPilotApi(page);
+
+  await page.goto('/app-new/usage');
+  await expect(page.getByTestId('my-quota-row').first()).toBeVisible();
+  await expect(page.getByText('限额 2,000,000 · 本期用量 160,000（8%）')).toBeVisible();
+  await expect(page.getByTestId('summary-totals')).toContainText('48');
+  await expect(page.getByTestId('usage-chart')).toBeVisible();
+  await expect(page.getByText('deepseek-v4-flash').first()).toBeVisible();
+
+  await page.getByTestId('records-next').click();
+  await expect(page.getByText('共 45 条 · 第 2 / 3 页')).toBeVisible();
+  await page.screenshot({ path: 'test-results/baseline/next-usage-1440x900.png', fullPage: true });
+});
+
+test('overview page shows stats, usage bars and recent keys', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+  await mockPilotApi(page);
+
+  await page.goto('/app-new/overview');
+  await expect(page.getByTestId('overview-stats')).toBeVisible();
+  await expect(page.getByText('本月 Token')).toBeVisible();
+  await expect(page.getByTestId('overview-usage')).toContainText('用量分布');
+  await expect(page.getByTestId('overview-keys')).toContainText('claude-code-main');
+  await page.screenshot({
+    path: 'test-results/baseline/next-overview-1440x900.png',
+    fullPage: true,
+  });
+});
+
+test('skills page renders cards and downloads a skill', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+  await mockUserPages(page);
+
+  await page.goto('/app-new/skills');
+  await expect(page.getByTestId('skill-card').first()).toBeVisible();
+  await expect(page.getByText('commit-msg-lint')).toBeVisible();
+  await page.getByTestId('skill-download').first().click();
+  await expect(page.getByText('已下载 commit-msg-lint')).toBeVisible();
+  await page.screenshot({ path: 'test-results/baseline/next-skills-1440x900.png', fullPage: true });
+});
+
+test('model approvals lists applications and gates the create form', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+  await mockPilotApi(page);
+  await mockUserPages(page);
+
+  await page.goto('/app-new/model-approvals');
+  await expect(page.getByTestId('model-approvals-table')).toBeVisible();
+  await expect(page.getByText('待审批')).toBeVisible();
+
+  await page.getByTestId('model-approval-open').click();
+  await expect(page.getByTestId('model-approval-form')).toBeVisible();
+  await page.getByTestId('model-approval-submit').click();
+  await expect(page.getByText('请选择虚拟密钥')).toBeVisible();
+  await page.screenshot({
+    path: 'test-results/baseline/next-model-approvals-1440x900.png',
+    fullPage: true,
+  });
+});
+
+test('profile page validates the password form', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+  await mockPilotApi(page);
+
+  await page.goto('/app-new/profile');
+  await expect(page.getByTestId('account-username')).toHaveText('demo2_user');
+  await expect(page.getByTestId('profile-identity')).toContainText('@demo2_user');
+  await expect(page.getByTestId('profile-snapshot')).toContainText('本月请求');
+  await page.getByTestId('current-password').fill('TempPass2026!');
+  await page.getByTestId('new-password').fill('StrongPass2026!');
+  await page.getByTestId('confirm-password').fill('Different2026!');
+  await page.getByTestId('password-submit').click();
+  await expect(page.getByTestId('field-error')).toContainText('两次输入的新密码不一致');
+  await page.screenshot({
+    path: 'test-results/baseline/next-profile-1440x900.png',
+    fullPage: true,
+  });
+});
+
+test('profile: signs out of other sessions through the confirm dialog', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+  await mockPilotApi(page);
+  await page.route('**/api/v1/auth/logout-others', (route) =>
+    route.fulfill({ json: { message: 'Other sessions have been revoked.' } }),
+  );
+
+  await page.goto('/app-new/profile');
+  await page.getByTestId('logout-others').click();
+  await expect(page.getByTestId('logout-others-confirm')).toBeVisible();
+  await page.getByTestId('logout-others-confirm').click();
+  await expect(page.getByText('已退出其他会话')).toBeVisible();
+  await page.screenshot({
+    path: 'test-results/baseline/next-profile-sessions-1440x900.png',
+    fullPage: true,
+  });
+});
+
+test('admin credentials: kebab flows run validate, rotate and history', async ({ page }) => {
+  await mockSession(page, {
+    id: '0190-0000-0000-0001',
+    username: 'root',
+    displayName: 'Root Admin',
+    role: 'SYSTEM_ADMIN',
+    mustChangePassword: false,
+  });
+  const SUB = {
+    id: '0190-0000-0000-00g1',
+    providerProductId: '0190-0000-0000-00g0',
+    productName: 'DeepSeek PAYG',
+    name: 'Main',
+    billingMode: 'PAYG',
+    planScope: 'PERSONAL',
+    subscriptionPrice: null,
+    currency: 'USD',
+    quotaTotal: null,
+    quotaUnit: null,
+    status: 'ACTIVE',
+    createdAt: '2026-08-01T00:00:00Z',
+  };
+  const CRED = {
+    id: '0190-0000-0000-00g2',
+    name: 'deepseek-main',
+    subscriptionId: SUB.id,
+    status: 'ACTIVE',
+    activeVersionId: '0190-0000-0000-00g3',
+    fingerprintPrefix: 'sk-a1b2c3d4e5f6',
+    lastValidatedAt: null,
+    lastValidationError: null,
+    version: 1,
+    createdAt: '2026-08-01T00:00:00Z',
+    updatedAt: '2026-08-01T00:00:00Z',
+  };
+  await page.route('**/api/v1/admin/credentials', (route) => route.fulfill({ json: [CRED] }));
+  await page.route('**/api/v1/admin/subscriptions', (route) => route.fulfill({ json: [SUB] }));
+  await page.route('**/api/v1/admin/credentials/0190-0000-0000-00g2', (route) =>
+    route.fulfill({
+      json: {
+        credential: CRED,
+        versions: [
+          {
+            id: '0190-0000-0000-00g3',
+            status: 'ACTIVE',
+            encryptionKeyVersion: 'v2026-1',
+            fingerprintPrefix: 'sk-a1b2c3d4e5f6',
+            validFrom: '2026-08-01T00:00:00Z',
+            retiredAt: null,
+            createdAt: '2026-08-01T00:00:00Z',
+          },
+        ],
+      },
+    }),
+  );
+  await page.route('**/api/v1/admin/credentials/*/validate', (route) =>
+    route.fulfill({
+      json: {
+        matchesActive: true,
+        message: null,
+        providerStatus: 'VALID',
+        providerMessage: 'ok',
+        checkedAt: '2026-09-04T00:00:00Z',
+      },
+    }),
+  );
+  await page.route('**/api/v1/admin/credentials/*/rotate', (route) =>
+    route.fulfill({
+      json: { ...CRED, version: 2, activeVersionId: '0190-0000-0000-00g4' },
+    }),
+  );
+
+  await page.goto('/app/credentials');
+  await expect(page.getByTestId('credentials-table')).toBeVisible();
+
+  await page.getByTestId('credential-actions-0190-0000-0000-00g2').click();
+  await page.getByRole('menuitem', { name: '测试密钥' }).click();
+  await page.getByTestId('credential-validate-secret').fill('sk-candidate');
+  await page.getByTestId('credential-validate-run').click();
+  await expect(page.getByTestId('credential-validate-result')).toContainText('与当前生效版本一致');
+
+  await page.getByRole('button', { name: '关闭', exact: true }).last().click();
+  await page.getByTestId('credential-actions-0190-0000-0000-00g2').click();
+  await page.getByRole('menuitem', { name: '轮换' }).click();
+  await page.getByTestId('credential-rotate-secret').fill('sk-new-secret');
+  await page.getByTestId('credential-rotate-submit').click();
+  await expect(page.getByText('凭证已轮换，旧版本进入宽限期')).toBeVisible();
+
+  await page.getByTestId('credential-actions-0190-0000-0000-00g2').click();
+  await page.getByRole('menuitem', { name: '版本历史' }).click();
+  await expect(page.getByTestId('credential-versions')).toContainText('sk-a1b2c3d4e5f6');
+  await page.screenshot({
+    path: 'test-results/baseline/app-credentials-1440x900.png',
+    fullPage: true,
+  });
+});
+
+test('regular users are redirected from admin routes', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+  await mockPilotApi(page);
+
+  await page.goto('/app/users');
+  await expect(page).toHaveURL(/\/app\/keys/);
+});
+
+test('admin audit: filter select opens with the styled popper (empty-value option regression)', async ({
+  page,
+}) => {
+  await mockSession(page, {
+    id: '0190-0000-0000-0001',
+    username: 'root',
+    displayName: 'Root Admin',
+    role: 'SYSTEM_ADMIN',
+    mustChangePassword: false,
+  });
+  await page.route('**/api/v1/admin/audit-events*', (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: '0190-0000-0000-00e1',
+          chainPosition: 167,
+          createdAt: '2026-09-14T06:20:18Z',
+          action: 'LOGIN_SUCCESS',
+          targetType: 'USER',
+          targetId: '0190-0000-0000-0001',
+          targetName: 'root',
+          changeSummary: '{"username": "root"}',
+        },
+      ],
+    }),
+  );
+
+  await page.goto('/app/audit');
+  await expect(page.getByTestId('audit-table')).toBeVisible();
+
+  // The 目标类型 filter carries a `{ value: '', label: '全部类型' }` option.
+  // radix SelectItem rejects empty-string values — opening used to crash the
+  // popper so nothing rendered. The popover must open, list its options and
+  // carry the global popper chrome (white card + border + shadow) even though
+  // the teleported radix root drops the scoped data-v attribute.
+  await page.getByTestId('audit-targettype-filter').click();
+  const listbox = page.getByRole('listbox');
+  await expect(listbox).toBeVisible();
+  await expect(listbox).toContainText('全部类型');
+  await expect(listbox).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+  await expect(listbox).toHaveCSS('box-shadow', /rgba?\(/);
+
+  await page.getByRole('option', { name: '全部类型' }).click();
+  await expect(page.getByTestId('audit-targettype-filter')).toContainText('全部类型');
+});

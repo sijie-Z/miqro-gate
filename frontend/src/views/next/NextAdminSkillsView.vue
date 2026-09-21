@@ -1,0 +1,677 @@
+<script setup lang="ts">
+/**
+ * NextAdminSkillsView — /app/skillhub v2 admin page (U2 ops batch).
+ * Behaviour parity with the legacy skillhub page: upload an Agent Skills zip
+ * with a semver, manage download authorisation per project/team (no scope =
+ * public) and archive deprecated skills. Project/team scope lists render as
+ * checkbox groups (the v2 select is single-value; console scale keeps the
+ * list short and fully testable).
+ */
+import { computed, onMounted, ref } from 'vue';
+import * as api from '@/api';
+import { countWhenLoaded } from '@/utils/load-state';
+import { ApiError } from '@/api/http';
+import { UiButton, UiCheckbox, UiDialog, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
+import type { Project, SkillRevisionView, SkillView, Team } from '@/types/generated-api';
+
+const skills = ref<SkillView[]>([]);
+const projects = ref<Project[]>([]);
+const teams = ref<Team[]>([]);
+const refsLoading = ref(true);
+const refsError = ref('');
+const loading = ref(true);
+const loadError = ref('');
+const loadRequestId = ref('');
+
+const columns = [
+  { key: 'name', title: '名称', minWidth: '200px' },
+  { key: 'version', title: '版本', width: '90px' },
+  { key: 'tags', title: '标签', minWidth: '160px' },
+  { key: 'contentBytes', title: '大小', width: '90px', align: 'right' as const },
+  { key: 'status', title: '状态', width: '110px' },
+  { key: 'createdByName', title: '创建人', width: '140px' },
+  { key: 'createdAt', title: '发布时间', width: '170px' },
+  { key: 'actions', title: '操作', width: '150px', align: 'center' as const },
+];
+
+// Upload form
+const uploadVisible = ref(false);
+const uploadVersion = ref('1.0.0');
+const uploadFile = ref<File | null>(null);
+const uploading = ref(false);
+const uploadError = ref('');
+
+// Access dialog
+const accessSkill = ref<SkillView | null>(null);
+const accessVisible = ref(false);
+const accessProjectIds = ref<string[]>([]);
+const accessTeamIds = ref<string[]>([]);
+const accessSaving = ref(false);
+const accessError = ref('');
+
+// Version history (I14): re-upload publishes revisions; rollback activates one.
+const revisionsSkill = ref<SkillView | null>(null);
+const revisionsVisible = ref(false);
+const revisions = ref<SkillRevisionView[]>([]);
+const revisionsLoading = ref(false);
+const revisionsError = ref('');
+
+const revisionColumns = [
+  { key: 'revision', title: '修订', width: '80px' },
+  { key: 'version', title: '版本', width: '90px' },
+  { key: 'size', title: '大小', width: '90px', align: 'right' as const },
+  { key: 'createdAt', title: '发布时间', width: '170px' },
+  { key: 'state', title: '状态', width: '110px' },
+  { key: 'actions', title: '操作', width: '90px', align: 'center' as const },
+];
+
+// #407：目标切换的过期响应防护（#399 序号守卫模式）。
+let skillRevisionsRequestSeq = 0;
+
+async function openRevisions(skill: SkillView) {
+  revisionsSkill.value = skill;
+  revisionsVisible.value = true;
+  revisionsError.value = '';
+  revisionsLoading.value = true;
+  const seq = ++skillRevisionsRequestSeq;
+  try {
+    const list = await api.adminListSkillRevisions(skill.id!);
+    if (seq !== skillRevisionsRequestSeq) {
+      return;
+    }
+    revisions.value = list;
+  } catch (error) {
+    if (seq !== skillRevisionsRequestSeq) {
+      return;
+    }
+    revisionsError.value = error instanceof ApiError ? error.message : '加载失败，请稍后重试。';
+    revisions.value = [];
+  } finally {
+    if (seq === skillRevisionsRequestSeq) {
+      revisionsLoading.value = false;
+    }
+  }
+}
+
+function requestRollback(revision: SkillRevisionView) {
+  const skill = revisionsSkill.value;
+  if (!skill) return;
+  confirmState.value = {
+    title: `回滚「${skill.name}」到 r${revision.revision}`,
+    body: `将把目录与下载切回版本 ${revision.version}（r${revision.revision}），历史记录不受影响。`,
+    confirmLabel: '回滚',
+    tone: 'primary',
+    run: async () => {
+      try {
+        await api.adminActivateSkillRevision(skill.id!, revision.revision!);
+        toast.success(`已回滚到 r${revision.revision}`);
+        await load();
+        await openRevisions(skill);
+      } catch (error) {
+        if (error instanceof ApiError) {
+          toast.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
+        }
+      }
+    },
+  };
+}
+
+const confirmState = ref<{
+  title: string;
+  body: string;
+  confirmLabel: string;
+  tone: 'danger' | 'primary';
+  run: () => Promise<void>;
+} | null>(null);
+
+const canUpload = computed(
+  () => uploadFile.value !== null && uploadVersion.value.trim().length > 0,
+);
+
+async function load() {
+  loading.value = true;
+  loadError.value = '';
+  try {
+    skills.value = await api.adminListSkills();
+  } catch (error) {
+    if (error instanceof ApiError) {
+      loadError.value = error.message;
+      loadRequestId.value = error.requestId ?? '';
+    } else {
+      loadError.value = '加载技能列表失败。';
+    }
+  } finally {
+    loading.value = false;
+  }
+}
+
+function onFileChange(event: Event) {
+  const input = event.target as HTMLInputElement;
+  uploadFile.value = input.files?.[0] ?? null;
+  if (uploadFile.value && !/\.zip$/i.test(uploadFile.value.name)) {
+    uploadError.value = '技能包必须是 .zip 文件。';
+    uploadFile.value = null;
+    input.value = '';
+  } else {
+    uploadError.value = '';
+  }
+}
+
+async function upload() {
+  uploadError.value = '';
+  if (!canUpload.value || !uploadFile.value) {
+    uploadError.value = '请选择 zip 文件并填写版本号。';
+    return;
+  }
+  uploading.value = true;
+  try {
+    await api.adminUploadSkill(uploadVersion.value.trim(), uploadFile.value);
+    uploadVisible.value = false;
+    uploadFile.value = null;
+    uploadVersion.value = '1.0.0';
+    toast.success('技能已上传');
+    await load();
+  } catch (error) {
+    uploadError.value = error instanceof ApiError ? error.message : '上传失败，请稍后重试。';
+  } finally {
+    uploading.value = false;
+  }
+}
+
+function openAccess(skill: SkillView) {
+  accessSkill.value = skill;
+  accessProjectIds.value = [];
+  accessTeamIds.value = [];
+  accessError.value = '';
+  accessVisible.value = true;
+}
+
+async function saveAccess() {
+  if (!accessSkill.value) {
+    return;
+  }
+  // Hub View schemas mark every field optional (springdoc omits `required`);
+  // skill rows always carry the id — the `!` restores the pre-hub contract.
+  accessSaving.value = true;
+  accessError.value = '';
+  const scopes = [
+    ...accessProjectIds.value.map((id) => ({ scopeType: 'PROJECT', scopeId: id })),
+    ...accessTeamIds.value.map((id) => ({ scopeType: 'TEAM', scopeId: id })),
+  ];
+  try {
+    await api.adminSetSkillAccess(accessSkill.value.id!, scopes);
+    accessVisible.value = false;
+    toast.success(scopes.length ? '下载授权已更新' : '技能已设为公开（全员可下载）');
+  } catch (error) {
+    accessError.value = error instanceof ApiError ? error.message : '保存失败，请稍后重试。';
+  } finally {
+    accessSaving.value = false;
+  }
+}
+
+function requestArchive(skill: SkillView) {
+  confirmState.value = {
+    title: `归档技能「${skill.name}」`,
+    body: '归档后技能从目录隐藏（数据与授权保留）；重新上传同名技能即可恢复。',
+    confirmLabel: '归档',
+    tone: 'danger',
+    run: async () => {
+      try {
+        await api.adminArchiveSkill(skill.id!);
+        toast.success('技能已归档');
+        await load();
+      } catch (error) {
+        if (error instanceof ApiError) {
+          toast.error(error.message);
+        }
+      }
+    },
+  };
+}
+
+async function confirmAndRun() {
+  const state = confirmState.value;
+  if (!state) return;
+  confirmState.value = null;
+  await state.run();
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  }
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+function formatTime(iso?: string): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/**
+ * #1160 加载次序不变量：加载中 → 失败 → 空 → 有数据。
+ * 「暂无项目 / 暂无团队」只有在这一次读取**成功且确实为空**时才能出现；
+ * 读取失败还画空态，就是替租户回答「没有项目/团队」，而这次请求根本没有得到答案。
+ * 失败状态与保存用的 `accessError` 分开：那是保存失败槽，混用会让用户分不清
+ * 「列表没读出来」和「刚才那份授权没存进去」。
+ */
+async function loadRefs() {
+  refsLoading.value = true;
+  refsError.value = '';
+  try {
+    const [projectList, teamList] = await Promise.all([api.listProjects(), api.listTeams()]);
+    projects.value = projectList;
+    teams.value = teamList;
+  } catch (error) {
+    projects.value = [];
+    teams.value = [];
+    refsError.value = error instanceof ApiError ? error.message : '加载项目/团队列表失败。';
+  } finally {
+    refsLoading.value = false;
+  }
+}
+
+onMounted(() => {
+  void load();
+  void loadRefs();
+});
+</script>
+
+<template>
+  <div class="ui-page next-skills">
+    <header class="ui-page-header">
+      <div>
+        <h1 class="ui-page-title">技能库管理</h1>
+        <p class="ui-page-desc">
+          上传技能包（Anthropic Agent Skills 格式）并管理下载授权；上传后全员可见，下载按授权。
+        </p>
+      </div>
+      <div class="ui-page-actions">
+        <UiButton
+          variant="primary"
+          data-testid="skill-upload-open"
+          @click="uploadVisible = !uploadVisible"
+        >
+          {{ uploadVisible ? '收起表单' : '上传技能' }}
+        </UiButton>
+      </div>
+    </header>
+
+    <div v-if="loadError" class="ui-alert ui-alert--error">
+      {{ loadError
+      }}<span v-if="loadRequestId" class="ui-request-id"> requestId: {{ loadRequestId }}</span>
+    </div>
+
+    <section
+      v-if="uploadVisible"
+      class="ui-panel next-skills__upload"
+      data-testid="skill-upload-form"
+    >
+      <div class="ui-panel-head">
+        <h2 class="ui-panel-title">上传技能包</h2>
+      </div>
+      <div class="ui-panel-body">
+        <p class="next-skills__hint">
+          zip 内只包含一个技能目录（如 <span class="ui-mono">web-scraper/</span>），目录内含
+          <span class="ui-mono">SKILL.md</span>（YAML frontmatter：name 与目录名一致、description
+          必填）。包上限 5MB。同名重传将发布新版本（保留历史与旧包，可回滚）。
+        </p>
+        <div class="next-skills__upload-grid">
+          <div class="ui-field">
+            <span class="ui-field__label"
+              >技能包（zip） <span class="ui-field__required">*</span></span
+            >
+            <input
+              type="file"
+              accept=".zip"
+              class="next-skills__file"
+              data-testid="skill-upload-file"
+              @change="onFileChange"
+            />
+            <p class="ui-field__hint">
+              {{ uploadFile ? uploadFile.name : '选择 .zip 文件' }}
+            </p>
+          </div>
+          <UiInput
+            v-model="uploadVersion"
+            label="版本（语义化）"
+            required
+            placeholder="例如 1.0.0"
+            data-testid="skill-upload-version"
+          />
+          <p v-if="uploadError" class="ui-form-error">{{ uploadError }}</p>
+          <div class="next-skills__actions">
+            <UiButton
+              variant="primary"
+              :disabled="!canUpload"
+              :loading="uploading"
+              data-testid="skill-upload-submit"
+              @click="upload"
+            >
+              上传
+            </UiButton>
+            <UiButton variant="ghost" @click="uploadVisible = false">取消</UiButton>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="ui-panel">
+      <div class="ui-panel-toolbar">
+        <span class="ui-panel-sub">共 {{ countWhenLoaded(loadError, skills.length) }} 个技能</span>
+      </div>
+      <UiTable
+        :columns="columns"
+        :data="skills"
+        :loading="loading"
+        row-key="id"
+        empty-title="还没有技能"
+        empty-description="点击「上传技能」发布第一个技能包。"
+        data-testid="admin-skills-table"
+        :error="loadError"
+        @retry="load"
+      >
+        <template #name="{ row }">
+          <span class="next-skills__name">{{ (row as SkillView).name }}</span>
+        </template>
+        <template #version="{ row }">
+          <span class="ui-mono">v{{ (row as SkillView).version }}</span>
+        </template>
+        <template #tags="{ row }">
+          <span v-if="(row as SkillView).tags?.length" class="next-skills__tags">
+            <span v-for="tag in (row as SkillView).tags" :key="tag" class="next-skills__tag">{{
+              tag
+            }}</span>
+          </span>
+          <span v-else>—</span>
+        </template>
+        <template #contentBytes="{ row }">
+          <span class="ui-num">{{ formatBytes((row as SkillView).contentBytes ?? 0) }}</span>
+        </template>
+        <template #createdByName="{ row }">
+          <span>{{ (row as SkillView).createdByName ?? '—' }}</span>
+        </template>
+        <template #status="{ row }">
+          <UiStatusBadge
+            :tone="(row as SkillView).status === 'ACTIVE' ? 'success' : 'neutral'"
+            :label="(row as SkillView).status === 'ACTIVE' ? '已发布' : '已归档'"
+          />
+        </template>
+        <template #createdAt="{ row }">{{ formatTime((row as SkillView).createdAt) }}</template>
+        <template #actions="{ row }">
+          <div class="next-skills__actions">
+            <UiButton
+              variant="link"
+              size="sm"
+              data-testid="skill-revisions"
+              @click="openRevisions(row as SkillView)"
+              >版本</UiButton
+            >
+            <UiButton
+              variant="link"
+              size="sm"
+              data-testid="skill-access"
+              @click="openAccess(row as SkillView)"
+              >授权</UiButton
+            >
+            <UiButton
+              v-if="(row as SkillView).status === 'ACTIVE'"
+              variant="link-danger"
+              size="sm"
+              data-testid="skill-archive"
+              @click="requestArchive(row as SkillView)"
+              >归档</UiButton
+            >
+          </div>
+        </template>
+      </UiTable>
+    </section>
+
+    <!-- Download authorisation: no scope selected = public -->
+    <UiDialog
+      :open="accessVisible"
+      :title="accessSkill ? `下载授权 · ${accessSkill.name}` : '下载授权'"
+      width="520px"
+      data-testid="skill-access-dialog"
+      @update:open="accessVisible = false"
+    >
+      <p class="next-skills__hint">
+        不选任何范围 = 公开（全员可下载）。授权后仅所选团队/项目成员可下载。
+      </p>
+      <!-- #1160: 两个引用列表失败时在这里报错并原地重试；下面的「暂无*」由
+           refsError 门控，失败绝不再画空态。 -->
+      <p v-if="refsError" class="ui-form-error" data-testid="skill-refs-error">
+        {{ refsError }}
+        <UiButton variant="ghost" size="sm" data-testid="skill-refs-retry" @click="loadRefs"
+          >重试</UiButton
+        >
+      </p>
+      <div class="next-skills__scope">
+        <div class="ui-field">
+          <span class="ui-field__label">授权项目</span>
+          <div
+            v-if="projects.length"
+            class="next-skills__check-list"
+            data-testid="skill-access-projects"
+          >
+            <UiCheckbox
+              v-for="p in projects"
+              :key="p.id"
+              v-model="accessProjectIds"
+              :value="p.id"
+              data-testid="skill-access-project"
+            >
+              {{ p.name }}（{{ p.code }}）
+            </UiCheckbox>
+          </div>
+          <p v-else-if="refsLoading" class="ui-field__hint">加载中…</p>
+          <p v-else-if="!refsError" class="ui-field__hint">暂无项目</p>
+        </div>
+        <div class="ui-field">
+          <span class="ui-field__label">授权团队</span>
+          <div v-if="teams.length" class="next-skills__check-list" data-testid="skill-access-teams">
+            <UiCheckbox
+              v-for="t in teams"
+              :key="t.id"
+              v-model="accessTeamIds"
+              :value="t.id"
+              data-testid="skill-access-team"
+            >
+              {{ t.name }}
+            </UiCheckbox>
+          </div>
+          <p v-else-if="refsLoading" class="ui-field__hint">加载中…</p>
+          <p v-else-if="!refsError" class="ui-field__hint">暂无团队</p>
+        </div>
+        <p v-if="accessError" class="ui-form-error">{{ accessError }}</p>
+      </div>
+      <template #footer>
+        <UiButton variant="ghost" @click="accessVisible = false">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="accessSaving"
+          data-testid="skill-access-save"
+          @click="saveAccess"
+          >保存</UiButton
+        >
+      </template>
+    </UiDialog>
+
+    <!-- Version history (I14): rollback activates an older revision -->
+    <UiDialog
+      :open="revisionsVisible"
+      :title="revisionsSkill ? `版本历史 · ${revisionsSkill.name}` : '版本历史'"
+      width="640px"
+      data-testid="skill-revisions-dialog"
+      @update:open="revisionsVisible = false"
+    >
+      <p class="next-skills__hint">
+        同名重传发布新版本并保留历史（含旧包）；回滚即激活旧版本，不产生新版本号。
+      </p>
+      <p v-if="revisionsError" class="ui-form-error">{{ revisionsError }}</p>
+      <UiTable
+        :columns="revisionColumns"
+        :data="revisions"
+        :loading="revisionsLoading"
+        row-key="id"
+        empty-title="暂无版本记录"
+        data-testid="skill-revisions-table"
+      >
+        <template #revision="{ row }">
+          <span class="ui-mono">r{{ (row as SkillRevisionView).revision }}</span>
+        </template>
+        <template #version="{ row }">
+          <span class="ui-mono">v{{ (row as SkillRevisionView).version }}</span>
+        </template>
+        <template #size="{ row }">
+          <span class="ui-num">{{
+            formatBytes((row as SkillRevisionView).contentBytes ?? 0)
+          }}</span>
+        </template>
+        <template #createdAt="{ row }">
+          {{ formatTime((row as SkillRevisionView).createdAt) }}
+        </template>
+        <template #state="{ row }">
+          <UiStatusBadge
+            :tone="(row as SkillRevisionView).activatedAt ? 'success' : 'neutral'"
+            :label="(row as SkillRevisionView).activatedAt ? '当前版本' : '历史版本'"
+          />
+        </template>
+        <template #actions="{ row }">
+          <UiButton
+            v-if="!(row as SkillRevisionView).activatedAt"
+            variant="link"
+            size="sm"
+            data-testid="skill-rollback"
+            @click="requestRollback(row as SkillRevisionView)"
+            >回滚</UiButton
+          >
+        </template>
+      </UiTable>
+    </UiDialog>
+
+    <UiDialog
+      v-if="confirmState"
+      :open="true"
+      :title="confirmState.title"
+      :description="confirmState.body"
+      width="440px"
+      @update:open="confirmState = null"
+    >
+      <template #footer>
+        <UiButton variant="ghost" @click="confirmState = null">取消</UiButton>
+        <UiButton
+          :variant="confirmState.tone === 'danger' ? 'danger' : 'primary'"
+          @click="confirmAndRun"
+        >
+          {{ confirmState.confirmLabel }}
+        </UiButton>
+      </template>
+    </UiDialog>
+  </div>
+</template>
+
+<style scoped>
+.ui-alert {
+  padding: var(--ui-space-3) var(--ui-space-4);
+  margin-bottom: var(--ui-space-4);
+  border-radius: var(--ui-radius-control);
+  font-size: var(--ui-font-size-sm);
+}
+
+.ui-alert--error {
+  background: var(--ui-danger-bg);
+  color: var(--ui-danger-fg);
+}
+
+.ui-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-1);
+}
+
+.ui-field__label {
+  font-size: var(--ui-font-size-xs);
+  font-weight: var(--ui-weight-medium);
+  color: var(--ui-foreground);
+  line-height: var(--ui-line-height-sm);
+}
+
+.ui-field__required {
+  color: var(--ui-danger-fg);
+}
+
+.ui-field__hint {
+  margin: 0;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+  line-height: var(--ui-line-height-sm);
+}
+
+.next-skills__upload {
+  margin-bottom: var(--ui-space-5);
+  max-width: 720px;
+}
+
+.next-skills__hint {
+  margin: 0 0 var(--ui-space-4);
+  font-size: var(--ui-font-size-sm);
+  line-height: var(--ui-line-height-lg);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-skills__upload-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-4);
+  max-width: 520px;
+}
+
+.next-skills__file {
+  width: 100%;
+  font-size: var(--ui-font-size-sm);
+}
+
+.next-skills__actions {
+  display: inline-flex;
+  gap: var(--ui-space-1);
+}
+
+.next-skills__name {
+  font-weight: var(--ui-weight-medium);
+}
+
+.next-skills__tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-1);
+}
+
+.next-skills__tag {
+  font-size: var(--ui-font-size-xs);
+  line-height: var(--ui-line-height-sm);
+  padding: 1px var(--ui-space-2);
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-muted);
+  border: 1px solid var(--ui-border-muted);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-skills__scope {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-4);
+}
+
+.next-skills__check-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--ui-input-border);
+  border-radius: var(--ui-radius-control);
+  padding: var(--ui-space-1);
+}
+</style>

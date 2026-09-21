@@ -9,6 +9,8 @@ import com.miqroera.miqrokey.domain.model.PlanScope;
 import com.miqroera.miqrokey.domain.model.SeatStatus;
 import com.miqroera.miqrokey.domain.model.SubscriptionStatus;
 import com.miqroera.miqrokey.domain.model.UpstreamSubscription;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotNull;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -49,7 +51,7 @@ public class AdminSubscriptionController {
     }
 
     @PostMapping
-    public UpstreamSubscription create(@RequestBody CreateRequest body) {
+    public UpstreamSubscription create(@RequestBody SubscriptionCreateRequest body) {
         var admin = userContext.getUser();
         return providerService.createSubscription(admin.tenantId(), admin.id(), body.providerProductId(), body.name(),
                 body.billingMode(), body.planScope(), body.subscriptionPrice(), body.currency(), body.quotaTotal(),
@@ -57,7 +59,7 @@ public class AdminSubscriptionController {
     }
 
     @PatchMapping("/{subscriptionId}")
-    public UpstreamSubscription update(@PathVariable UUID subscriptionId, @RequestBody UpdateRequest body) {
+    public UpstreamSubscription update(@PathVariable UUID subscriptionId, @RequestBody SubscriptionUpdateRequest body) {
         var admin = userContext.getUser();
         return providerService.updateSubscription(admin.tenantId(), admin.id(), subscriptionId, body.name(),
                 body.subscriptionPrice(), body.currency(), body.quotaTotal(), body.quotaUnit(), body.status());
@@ -77,23 +79,23 @@ public class AdminSubscriptionController {
 
     @PatchMapping("/{subscriptionId}/seats/{seatId}")
     public SeatView updateSeat(@PathVariable UUID subscriptionId, @PathVariable UUID seatId,
-            @RequestBody SeatUpdateRequest body) {
+            @Valid @RequestBody SeatUpdateRequest body) {
         var admin = userContext.getUser();
         return providerService.updateSeat(admin.tenantId(), admin.id(), subscriptionId, seatId, body.assignedUserId(),
-                body.status(), body.displayName());
+                body.status(), body.displayName(), body.version());
     }
 
-    public record CreateRequest(UUID providerProductId, String name, BillingMode billingMode, PlanScope planScope,
-            BigDecimal subscriptionPrice, String currency, Long quotaTotal, String quotaUnit) {
+    public record SubscriptionCreateRequest(UUID providerProductId, String name, BillingMode billingMode,
+            PlanScope planScope, BigDecimal subscriptionPrice, String currency, Long quotaTotal, String quotaUnit) {
     }
 
-    public record UpdateRequest(String name, BigDecimal subscriptionPrice, String currency, Long quotaTotal,
+    public record SubscriptionUpdateRequest(String name, BigDecimal subscriptionPrice, String currency, Long quotaTotal,
             String quotaUnit, SubscriptionStatus status) {
     }
 
     public record SeatRequest(String externalSeatRef, String displayName, UUID assignedUserId) {
     }
 
-    public record SeatUpdateRequest(UUID assignedUserId, SeatStatus status, String displayName) {
+    public record SeatUpdateRequest(UUID assignedUserId, SeatStatus status, String displayName, @NotNull Long version) {
     }
 }

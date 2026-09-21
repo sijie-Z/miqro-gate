@@ -4,6 +4,7 @@ import com.miqroera.miqrokey.domain.model.VirtualKey;
 import com.miqroera.miqrokey.domain.model.VirtualKeyPurpose;
 import com.miqroera.miqrokey.domain.model.VirtualKeyStatus;
 import com.miqroera.miqrokey.domain.repository.VirtualKeyRepository;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -66,6 +67,15 @@ public class VirtualKeyRepositoryImpl implements VirtualKeyRepository {
     }
 
     @Override
+    public List<VirtualKey> findAllByIds(Collection<UUID> ids) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.query(SELECT_WITH_LAST_USED + " WHERE vk.id IN (:ids)", new MapSqlParameterSource("ids", ids),
+                ROW_MAPPER);
+    }
+
+    @Override
     public Optional<VirtualKey> findByPublicKeyId(String publicKeyId) {
         try {
             return Optional
@@ -80,6 +90,14 @@ public class VirtualKeyRepositoryImpl implements VirtualKeyRepository {
     public List<VirtualKey> findAllByUserId(UUID userId) {
         return jdbc.query(SELECT_WITH_LAST_USED + " WHERE vk.user_id = :userId ORDER BY vk.created_at DESC",
                 new MapSqlParameterSource("userId", userId), ROW_MAPPER);
+    }
+
+    @Override
+    public List<VirtualKey> findAllByTenantIdAndUserId(UUID tenantId, UUID userId) {
+        return jdbc.query(
+                SELECT_WITH_LAST_USED
+                        + " WHERE vk.tenant_id = :tenantId AND vk.user_id = :userId ORDER BY vk.created_at DESC",
+                new MapSqlParameterSource("tenantId", tenantId).addValue("userId", userId), ROW_MAPPER);
     }
 
     @Override
@@ -122,13 +140,13 @@ public class VirtualKeyRepositoryImpl implements VirtualKeyRepository {
         long expectedVersion = key.version() - 1;
         var params = toParams(key).addValue("expectedVersion", expectedVersion);
         int rows = jdbc.update("""
-                UPDATE virtual_keys SET status = :status, last_used_at = :lastUsedAt,
+                UPDATE virtual_keys SET name = :name, status = :status, last_used_at = :lastUsedAt,
                     revoked_at = :revokedAt, replaced_by_key_id = :replacedByKeyId,
                     version = version + 1
                 WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion
                 """, params);
         if (rows != 1)
-            throw new IllegalStateException("Optimistic lock failure: virtual key " + key.id());
+            throw new OptimisticLockingFailureException("Optimistic lock failure: virtual key " + key.id());
         return key;
     }
 

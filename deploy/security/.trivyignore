@@ -1,0 +1,72 @@
+# G6.3 (2026-08-26): Postgres image scan exemptions, each with rationale.
+# Review EVERY entry when the image digest is next upgraded (see
+# deploy/compose.yaml) — drop the entries that no longer apply.
+#
+# OpenSSL QUIC-server memory-growth DoS (libcrypto3/libssl3 3.5.7-r0,
+# fixed 3.5.8-r0): Postgres serves TCP TLS, never QUIC, so the vulnerable
+# code path is not reachable.
+CVE-2026-14456
+#
+# gosu (/usr/local/bin/gosu): Go su-wrapper used only by the entrypoint.
+# The full golang CVE set below is local-DoS class in bundled tooling, not
+# part of the postgres server attack surface.
+CVE-2025-61726
+CVE-2025-61729
+CVE-2025-68121
+CVE-2026-25679
+CVE-2026-27145
+CVE-2026-32280
+CVE-2026-32281
+CVE-2026-32283
+CVE-2026-33811
+CVE-2026-33814
+CVE-2026-33818
+CVE-2026-39820
+CVE-2026-39821
+CVE-2026-39822
+CVE-2026-39836
+CVE-2026-42499
+CVE-2026-42504
+CVE-2026-56853
+CVE-2026-56858
+#
+# golang toolchain local-DoS inside the alpine image (net/url, crypto/tls):
+# bundled tooling, not part of the postgres server attack surface.
+CVE-2026-56859
+CVE-2026-56860
+CVE-2026-56862
+#
+# 2026-09-05 (digest ef257d85... refreshed same-day): postgres:17.6-alpine
+# base = alpine 3.22.2, which lags the alpine 3.22 security rebuilds
+# (alpine-release 3.22.5 / openssl 3.5.7-r0 / musl 1.2.5-r12 / libxml2
+# 2.13.9-r1 already in the repo). All rows below are package-level fixes the
+# official image build has not baked in yet; the TLS-handshake/QUIC rows live
+# on the openssl path postgres exposes only to trusted app servers on a
+# private single-tenant LAN (localhost/docker-network binding), and the
+# util-linux/zlib rows concern host-side mount(8)/untgz tooling the container
+# never runs. DROP these entries at the next official digest refresh once the
+# base catches up.
+CVE-2025-15467
+CVE-2025-69421
+CVE-2026-28387
+CVE-2026-28388
+CVE-2026-28389
+CVE-2026-28390
+CVE-2026-31789
+CVE-2026-45447
+CVE-2026-6732
+CVE-2026-40200
+CVE-2026-22184
+#
+# 2026-09-06 util-linux/libuuid rows (alpine 3.22 backports now published as
+# 2.41-r10+; the official postgres:17.6-alpine image is not rebuilt yet -
+# same base-lag situation as the rows above). mount(8)/nsenter/cgroup and
+# X-mount helper code paths are host-side tools the container never runs;
+# postgres does not mount filesystems. DROP with the next official digest
+# refresh.
+CVE-2026-53612
+CVE-2026-53613
+CVE-2026-53614
+CVE-2026-76642
+CVE-2026-78408
+CVE-2026-78410

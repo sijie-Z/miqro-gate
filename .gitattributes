@@ -1,6 +1,16 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
+# These two are edited on every Goal and are stored as CRLF in the object
+# store (see the markdown note below). With `* text=auto` plus a Windows
+# checkout (core.autocrlf=true), any local edit re-normalizes the WHOLE file to
+# LF on `git add` — a one-line change shows up as a 673-line diff, and every
+# session paying that cost makes review noise. `-text` pins their storage:
+# edits keep whatever line endings the file already has, no conversion either
+# way. (Whitespace gate unaffected: it already runs with `cr-at-eol`.)
+CHANGELOG.md -text
+docs/progress.md -text
+
 # Java / Maven
 *.java text diff=java
 *.xml text
@@ -8,6 +18,13 @@
 
 # Shell scripts
 *.sh text eol=lf
+# Maven wrapper：容器内直接执行，Windows 检出必须保持 LF（#479）
+mvnw text eol=lf
+# mvnw 用 `while IFS= read -r` 逐行读取这两个文件并拼进 MAVEN_OPTS；read -r 只去掉
+# \n 不去掉 \r，CRLF 检出会把 `-Xmx2g\r` 原样传给 java（Invalid maximum heap size）。
+# 与 mvnw 同理，必须锁定 LF。
+.mvn/jvm.config text eol=lf
+.mvn/maven.config text eol=lf
 
 # Windows batch
 *.bat text eol=crlf
@@ -23,6 +40,23 @@
 *.yaml text
 *.yml text
 *.svg text
+
+# Markdown may legitimately sit in the object store as CRLF: `docs/progress.md`
+# is (5020 CR bytes at 3385e4dd, appended to on every Goal). Without this,
+# `git diff --check` counts the CR of every added line as trailing whitespace,
+# so a docs-only PR that appends to progress.md reports ~92 violations and the
+# CI gate (#895) looks broken the moment it is armed. `cr-at-eol` exempts only
+# the CR: a real trailing space and a leftover conflict marker still fail
+# (verified — see _orchestrate/reports/PH10_report.md §4).
+#
+# `-blank-at-eof` additionally: the release flow appends to CHANGELOG.md, and
+# two of the most recent docs commits (51da4666, 38134bf7) end with a blank
+# line at EOF. With the default rule armed, the gate's first real runs would
+# fail on the repo's own legitimate commits and invite `|| true` back. A
+# trailing blank at EOF is cosmetic for these docs; real trailing spaces and
+# conflict markers still fail (verified on 51da4666^..51da4666 after the
+# change: exit 0, while a synthetic trailing space / conflict marker: exit 2).
+*.md whitespace=cr-at-eol,-blank-at-eof
 
 # Binary
 *.jar binary

@@ -1,0 +1,169 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushPromises, mount } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
+import NextLoginView from '@/views/next/NextLoginView.vue';
+import * as api from '@/api';
+
+const push = vi.fn();
+
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: {} }),
+  useRouter: () => ({ push }),
+}));
+
+vi.mock('@/api', () => ({
+  login: vi.fn(),
+  register: vi.fn(),
+  registrationStatus: vi.fn(),
+  publicOauthProviders: vi.fn(),
+}));
+
+const mockApi = vi.mocked(api);
+
+/** New-console login card (UI U0): mode switch, register payload and client
+ *  guardrails. Real login flow is covered by e2e and the auth store spec. */
+describe('NextLoginView', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+    push.mockResolvedValue(undefined);
+    // Default deployment: self-registration open, so the register entry is live.
+    // Individual tests flip this to model an invite-only deployment (#550).
+    mockApi.registrationStatus.mockResolvedValue({ enabled: true });
+    mockApi.publicOauthProviders.mockResolvedValue([]);
+  });
+
+  function mountView() {
+    return mount(NextLoginView, { global: { plugins: [createPinia()] } });
+  }
+
+  async function setField(wrapper: ReturnType<typeof mountView>, testid: string, value: string) {
+    const input = wrapper.find(`${testid}`);
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(input.element, value);
+    input.element.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushPromises();
+  }
+
+  it('switches between login and register modes', async () => {
+    const wrapper = mountView();
+    expect(wrapper.find('[data-testid="tab-register"]').exists()).toBe(true);
+
+    await wrapper.find('[data-testid="tab-register"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('创建账号');
+    expect(wrapper.find('[data-testid="register-display-name"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="register-confirm"]').exists()).toBe(true);
+
+    await wrapper.find('[data-testid="tab-login"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('欢迎回来');
+    expect(wrapper.find('[data-testid="register-confirm"]').exists()).toBe(false);
+  });
+
+  it('closes the register entry on an invite-only deployment', async () => {
+    mockApi.registrationStatus.mockResolvedValue({ enabled: false });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const entry = wrapper.find('[data-testid="tab-register"]');
+    expect(entry.attributes('disabled')).toBeDefined();
+    expect(wrapper.text()).toContain('仅邀请注册');
+    expect(wrapper.text()).toContain('本部署已关闭自助注册，请联系管理员开通账号');
+
+    // The entry is inert: clicking it cannot reach the form it would submit.
+    await entry.trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[data-testid="register-display-name"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="register-confirm"]').exists()).toBe(false);
+    expect(mockApi.register).not.toHaveBeenCalled();
+  });
+
+  it('fails open when the status probe fails or omits the field (#550)', async () => {
+    mockApi.registrationStatus.mockRejectedValue(new Error('probe unavailable'));
+
+    const failed = mountView();
+    await flushPromises();
+    expect(failed.find('[data-testid="tab-register"]').attributes('disabled')).toBeUndefined();
+
+    // The generated schema leaves `enabled` optional; only an explicit `false`
+    // may close the entry, never an absent field.
+    mockApi.registrationStatus.mockResolvedValue({});
+    const blank = mountView();
+    await flushPromises();
+
+    const entry = blank.find('[data-testid="tab-register"]');
+    expect(entry.attributes('disabled')).toBeUndefined();
+    await entry.trigger('click');
+    await flushPromises();
+    expect(blank.find('[data-testid="register-display-name"]').exists()).toBe(true);
+    expect(blank.find('[data-testid="register-confirm"]').exists()).toBe(true);
+  });
+
+  it('renders the oauth button while the status probe is still pending (#550)', async () => {
+    // A status endpoint that never answers (e.g. blackholed behind a proxy) must
+    // not hold the provider probe's result hostage.
+    mockApi.registrationStatus.mockReturnValue(new Promise(() => {}));
+    mockApi.publicOauthProviders.mockResolvedValue([{ code: 'github', name: 'GitHub' }]);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="oauth-login"]').text()).toContain('GitHub');
+  });
+
+  it('requires both fields on login', async () => {
+    const wrapper = mountView();
+    await wrapper.find('form').trigger('submit');
+    await flushPromises();
+    expect(wrapper.find('[data-testid="login-error"]').text()).toContain('请输入账号和密码');
+    expect(mockApi.login).not.toHaveBeenCalled();
+  });
+
+  it('registers with nickname and lands on the new console keys page', async () => {
+    mockApi.register.mockResolvedValue({ id: 'u9' });
+
+    const wrapper = mountView();
+    await wrapper.find('[data-testid="tab-register"]').trigger('click');
+    await flushPromises();
+
+    await setField(wrapper, '[data-testid="login-username"]', 'newbie');
+    await setField(wrapper, '[data-testid="register-display-name"]', '新同学');
+    await setField(wrapper, '[data-testid="login-password"]', 'StrongPass2026!');
+    await setField(wrapper, '[data-testid="register-confirm"]', 'StrongPass2026!');
+
+    await wrapper.find('form').trigger('submit');
+    await flushPromises();
+
+    expect(mockApi.register).toHaveBeenCalledWith('newbie', '新同学', 'StrongPass2026!');
+    expect(push).toHaveBeenCalledWith('/app-new/keys');
+  });
+
+  it('blocks registration when the password confirmation differs', async () => {
+    const wrapper = mountView();
+    await wrapper.find('[data-testid="tab-register"]').trigger('click');
+    await flushPromises();
+
+    await setField(wrapper, '[data-testid="login-username"]', 'newbie');
+    await setField(wrapper, '[data-testid="login-password"]', 'StrongPass2026!');
+    await setField(wrapper, '[data-testid="register-confirm"]', 'Different2026!');
+
+    await wrapper.find('form').trigger('submit');
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="login-error"]').text()).toContain('两次输入的密码不一致');
+    expect(mockApi.register).not.toHaveBeenCalled();
+  });
+
+  it('toggles password visibility', async () => {
+    const wrapper = mountView();
+    await setField(wrapper, '[data-testid="login-password"]', 'hunter2');
+    const input = wrapper.find('[data-testid="login-password"]');
+    expect(input.attributes('type')).toBe('password');
+
+    await wrapper.find('[data-testid="password-toggle"]').trigger('click');
+    await flushPromises();
+    expect(input.attributes('type')).toBe('text');
+  });
+});

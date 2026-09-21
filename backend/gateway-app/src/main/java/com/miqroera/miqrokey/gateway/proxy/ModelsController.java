@@ -1,13 +1,15 @@
 package com.miqroera.miqrokey.gateway.proxy;
 
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 import com.miqroera.miqrokey.adapters.catalog.ProviderCatalog;
 import com.miqroera.miqrokey.domain.route.RouteSnapshot;
 import com.miqroera.miqrokey.gateway.vkey.AuthContext;
+import com.miqroera.miqrokey.gateway.vkey.QuotaGate;
 import com.miqroera.miqrokey.gateway.vkey.AuthFailureException;
 import com.miqroera.miqrokey.gateway.vkey.VirtualKeyResolver;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -56,6 +58,7 @@ public class ModelsController {
     public Mono<Void> listModels(ServerWebExchange exchange) {
         try {
             AuthContext ctx = keyResolver.resolve(exchange.getRequest());
+            QuotaGate.requireNotExceeded(ctx); // #684: blocked scopes get no model list either
             String body = buildListBody(ctx);
             exchange.getResponse().setStatusCode(HttpStatus.OK);
             exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
@@ -92,7 +95,19 @@ public class ModelsController {
             return Set.of();
         }
         Set<String> allowed = new TreeSet<>(ctx.models());
-        allowed.retainAll(snapshot.grantModels(ctx.key().grantId()));
+        // ADR-0018: the REQUEST's binding decides the grant — a key bound to
+        // several projects sees each project's own model scope. #647: under the
+        // unattributed policy there is no project grant — the policy's scope
+        // (empty = the product's ACTIVE upstream catalog) applies instead.
+        if ("POLICY_ROUTED".equals(ctx.context().resolutionStatus())) {
+            RouteSnapshot.UnattributedPolicyRecord policy = snapshot.unattributedPolicy(ctx.tenantId());
+            Set<String> scope = policy != null && !policy.models().isEmpty()
+                    ? policy.models()
+                    : snapshot.upstreamModels(ctx.productId());
+            allowed.retainAll(scope);
+        } else {
+            allowed.retainAll(snapshot.grantModels(ctx.binding().grantId()));
+        }
         allowed.retainAll(snapshot.upstreamModels(ctx.productId()));
         return allowed;
     }
@@ -100,6 +115,9 @@ public class ModelsController {
     private Mono<Void> writeError(ServerWebExchange exchange, AuthFailureException e) {
         exchange.getResponse().setStatusCode(HttpStatus.valueOf(e.status()));
         exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
+        if (e.retryAfterSeconds() != null) {
+            exchange.getResponse().getHeaders().set(HttpHeaders.RETRY_AFTER, String.valueOf(e.retryAfterSeconds()));
+        }
         // Same envelope as the proxy hot path (ErrorEnvelopes), so every
         // endpoint fails with the uniform {"error":{"type":...,...}} shape.
         byte[] bytes = ErrorEnvelopes.body(e, exchange.getRequest().getURI().getPath())

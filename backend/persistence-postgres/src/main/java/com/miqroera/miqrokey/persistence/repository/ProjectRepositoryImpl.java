@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.persistence.repository;
 import com.miqroera.miqrokey.domain.model.Project;
 import com.miqroera.miqrokey.domain.model.ProjectStatus;
 import com.miqroera.miqrokey.domain.repository.ProjectRepository;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -22,8 +24,8 @@ public class ProjectRepositoryImpl implements ProjectRepository {
     private static final RowMapper<Project> ROW_MAPPER = (rs, rowNum) -> new Project((UUID) rs.getObject("id"),
             (UUID) rs.getObject("tenant_id"), rs.getString("code"), rs.getString("name"), rs.getString("description"),
             rs.getString("cost_center"), ProjectStatus.valueOf(rs.getString("status")), rs.getString("project_tag"),
-            rs.getLong("version"), rs.getTimestamp("created_at").toInstant(),
-            rs.getTimestamp("updated_at").toInstant());
+            rs.getLong("version"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant(),
+            rs.getBoolean("system"));
 
     private final NamedParameterJdbcTemplate jdbc;
 
@@ -39,6 +41,15 @@ public class ProjectRepositoryImpl implements ProjectRepository {
         } catch (EmptyResultDataAccessException e) {
             return Optional.empty();
         }
+    }
+
+    @Override
+    public List<Project> findAllByIds(Collection<UUID> ids) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.query("SELECT * FROM projects WHERE id IN (:ids)", new MapSqlParameterSource("ids", ids),
+                ROW_MAPPER);
     }
 
     @Override
@@ -82,7 +93,7 @@ public class ProjectRepositoryImpl implements ProjectRepository {
                 WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion
                 """, params);
         if (rows != 1)
-            throw new IllegalStateException("Optimistic lock failure: project " + project.id());
+            throw new OptimisticLockingFailureException("Optimistic lock failure: project " + project.id());
         return project;
     }
 

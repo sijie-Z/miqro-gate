@@ -2,6 +2,25 @@
 
 任何一项硬门禁未通过都不得标记正式版本。例外必须由客户负责人书面接受并记录范围、期限和补救计划。
 
+## 0. G6.5 执行盘点（2026-09-02）
+
+> G6.5（发布就绪收尾）按本清单逐项盘点。判定符号：✅ 已满足（附证据）；⏳ 条件未到（真实凭证/部署环境/发布负责人授权）；➖ 不适用（当前交付形态无此对象）。清单本体保持可复用，正式 Go/No-Go 前由发布负责人复核本表。
+
+| 门禁 | 判定 | 依据 / 条件 |
+|---|---|---|
+| §1 进度与文档一致性 | ✅ | 本 Goal 收尾时更新 progress.md；文档契约同步检查发现 1 项未实现（见下 OpenAPI） |
+| §2 构建与测试硬门禁 | ✅ | 2026-09-02 全量 `verify -P integration` BUILD SUCCESS + 前端 lint/typecheck/vitest/build/e2e + 50 并发浸泡取证（见 §2.1） |
+| §2.1 50 条并发流式容量验收 | ✅ | `SoakIntegrationTest` 并发提升至 50 本机实跑 PASS（真实 gateway + mock 上游 + PostgreSQL，0 上游错误 + 全部落库），跑后还原；长效 soak 命令见 operations-runbook §性能（需部署环境） |
+| §3 供应商矩阵 | ⏳ | 23 产品全部 IMPLEMENTED/`WAITING_FOR_CREDENTIAL`（真实凭证未提供，禁止 VERIFIED——保持如实状态） |
+| §3.2 团队 Plan 真实共享池验证 | ⏳ | 需 MiniMax/智谱/腾讯团队产品真实凭证与真实组织账号 |
+| §4.1 Flyway/升级回滚 | ✅/➖ | 从空库 V1–V21 Testcontainers 全建（CI 每 PR）；真实恢复演练 PASS（G6.2）；「上一正式版本升级」不适用——尚无已发布正式版本，首版发布时建立基线 |
+| §4.2 大表/分区 migration 评估 | ➖ | 单客户私有化、50 并发上限（CLAUDE.md §2），无生产数据量副本可评估；`usage_event` 分区保留策略见 database-schema §6 |
+| §5.5 镜像非 root/固定 digest | ✅ | #479（2026-09-14）：deploy/docker/ 四镜像构建通过（CI images job 防腐烂）；基础镜像全部 @sha256 固定；gateway/control-plane `USER 10001`、backup `USER postgres`；密钥卷只读挂载（0400/0440）；portal nginx 需容器内绑 80/443 属「可行处」例外 |
+| §6.1 告警已测试 | ✅/⏳ | 已测：Webhook 签名投递/去重/指数退避（G4.5）、备份 Webhook（G6.2）、usage 队列饱和 drop warn + 指标（G2.4）、预算水位 BUDGET_THRESHOLD（G8.3）；未实现为告警类型：usage 队列饱和/解析失败/供应商错误/Plan 同步/磁盘（G4.5 已知缺口，接入需数据源接线）→ 正式发布前按需补充 |
+| §7 交付物 | ✅/⏳/➖ | 源码/wrapper/锁文件/Compose（dev + prod）/Secret 模板/.env.prod.example/签名目录/文档全齐；OpenAPI 生成物已实现（F09，见下行）；容器镜像已交付（#479：deploy/docker/ 四镜像 + compose.prod.yaml，基础镜像 digest 固定）；离线包（暂不适用，➖）；客户侧构建/恢复演练（无客户，➖） |
+| §8 Go/No-Go | ⏳ | **0.1.0-rc.1/#202 与 0.1.0-rc.2/#221 已打标并推送（2026-09-07，rc 预发布；rc.2 有中文 Release，rc.1 仅有 tag 注释、无 GitHub Release 对象）**；正式版本号与 Go/No-Go 仍由发布负责人（项目所有者）在发布节点签署 |
+| OpenAPI 3.1 生成 + CI 破坏性变更检查（api-contract §8 / document-map §3） | ✅ | F09 已实现：springdoc 生成 `GET /v3/api-docs`（3.1.0，无 swagger-ui）+ 鉴权 scheme 建模 + Info 元数据；基线 `docs/openapi/openapi-3.1.json`；CI backend-integration job 跑 `deploy/openapi/check-openapi-breaking.py`（删除 path/op/response/参数、属性变 required 即红）。遗留：前端 TS client 仍手写（codegen 列发布前候选） |
+
 ## 1. 范围与状态
 
 - [ ] `docs/progress.md` 与代码、测试、提交一致，目标 Goal 均为 `DONE`。
@@ -53,7 +72,7 @@
 
 - [ ] Flyway 校验通过；从上一正式版本升级和回滚策略已演练。
 - [ ] 大表/分区 migration 在生产数据量副本评估锁和时长。
-- [ ] 原始 usage、adjustment、导出和对账 schema 版本已固定。
+- [x] 原始 usage、adjustment、导出和对账 schema 版本已固定。（adjustment = V63，`usage_adjustments`，#709/F20）
 - [x] 发布前备份成功且完成隔离恢复验证。
 - [x] 永久保留/人工删除行为符合文档。
 
@@ -66,20 +85,20 @@
 - [x] 会话 Secure/HttpOnly/SameSite、CSRF、强密码和登录锁定已验证。
 - [x] SBOM、依赖漏洞扫描和镜像扫描完成；高/严重问题已处理。
 - [x] 生产依赖许可证仅为批准的宽松许可证；无 LiteLLM/Bifrost 运行时依赖。
-- [ ] 镜像使用非 root、固定 digest/版本、最小权限和只读挂载（可行处）。
+- [x] 镜像使用非 root、固定 digest/版本、最小权限和只读挂载（可行处）。（#479：基础镜像 @sha256；gateway/control-plane `USER 10001`、backup `USER postgres`，portal nginx 容器内绑 80/443 属例外；secrets-store 只读挂载）
 
 ## 6. 可观测性与运维
 
 - [x] readiness/liveness、结构化日志、Prometheus 指标和 request ID 可用。
 - [ ] usage 队列、解析失败、供应商错误、Plan 同步、Webhook、磁盘和备份告警已测试。
-- [x] Webhook 签名、重试、dead-letter 和人工重放测试通过。
+- [x] Webhook 签名、指数退避重试（最多 3 次）与**耗尽后静默终止**语义验证通过；dead-letter 与人工重放**不在本仓能力内**（见 operations-runbook §8；2026-09-20 #245 拍板 Q4A）。
 - [x] Provider 故障不自动切换，通知模板和 CC Switch 用户自选流程已准备。
 - [x] `operations-runbook.md` 的凭证轮换、吊销、数据库故障、备份恢复和 key 丢失流程已演练。
 
 ## 7. 交付物
 
 - [ ] 后端/前端源码、wrapper、锁文件和可重复构建说明。
-- [ ] 带 digest 的容器镜像或离线镜像包。
+- [x] 带 digest 的容器镜像或离线镜像包。（#479：deploy/docker/ 四镜像构建通过；依赖镜像 @sha256 固定，应用镜像由仓库源码构建并由 CI images job 验证非 root）
 - [ ] Docker Compose、示例非敏感配置、Secret 文件模板和目录/价格包。
 - [ ] OpenAPI、数据库 schema/migration 清单、SBOM、许可证和扫描报告。
 - [ ] 管理员手册、用户 Base URL/Key 使用说明、运维 Runbook、备份恢复说明。

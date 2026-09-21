@@ -5,6 +5,8 @@ import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapResponse;
 import com.miqroera.miqrokey.controlplane.dto.CsrfResponse;
 import com.miqroera.miqrokey.controlplane.dto.LoginRequest;
+import com.miqroera.miqrokey.controlplane.dto.RegisterRequest;
+import com.miqroera.miqrokey.controlplane.dto.RegistrationStatusResponse;
 import com.miqroera.miqrokey.controlplane.dto.LoginResponse;
 import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
 import com.miqroera.miqrokey.controlplane.dto.UserResponse;
@@ -15,6 +17,9 @@ import com.miqroera.miqrokey.controlplane.security.SessionService;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.domain.model.User;
 import com.miqroera.miqrokey.domain.model.UserSession;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -63,6 +68,8 @@ public class AuthController {
     }
 
     @PostMapping("/login")
+    @ApiResponse(responseCode = "200", description = "Logged in; session and CSRF cookies are set", content = @Content(mediaType = "application/json", schema = @Schema(implementation = LoginResponse.class)))
+    @ApiResponse(responseCode = "401", description = "Invalid credentials, disabled or locked account")
     public ResponseEntity<?> login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpReq,
             HttpServletResponse httpRes) {
         String requestId = resolveRequestId(httpReq);
@@ -81,6 +88,8 @@ public class AuthController {
     }
 
     @PostMapping("/bootstrap")
+    @ApiResponse(responseCode = "201", description = "First SYSTEM_ADMIN created; temporary password is shown once", content = @Content(mediaType = "application/json", schema = @Schema(implementation = BootstrapResponse.class)))
+    @ApiResponse(responseCode = "401", description = "Invalid bootstrap secret or tenant already bootstrapped")
     public ResponseEntity<?> bootstrap(@Valid @RequestBody BootstrapRequest request, HttpServletRequest httpReq,
             HttpServletResponse httpRes) {
         String requestId = resolveRequestId(httpReq);
@@ -97,6 +106,26 @@ public class AuthController {
         }
     }
 
+    /**
+     * Open self-registration (F-REG): creates a USER account and logs it in with
+     * the same session cookies as /login. Disabled by configuration returns 403
+     * REGISTRATION_DISABLED. PUBLIC (no session/CSRF required) — the endpoint is in
+     * the SessionFilter public list and the CSRF exemption set.
+     */
+    @PostMapping("/register")
+    @ApiResponse(responseCode = "201", description = "User created and logged in; body matches /login", content = @Content(mediaType = "application/json", schema = @Schema(implementation = LoginResponse.class)))
+    public ResponseEntity<?> register(@Valid @RequestBody RegisterRequest request, HttpServletRequest httpReq,
+            HttpServletResponse httpRes) {
+        String requestId = resolveRequestId(httpReq);
+        AuthenticationService.RegisterResult result = authenticationService.register(request.username(),
+                request.displayName(), request.password(), requestId);
+        sessionService.setCookies(httpRes, result.tokens(), result.sessionExpires());
+        User u = result.user();
+        LoginResponse resp = new LoginResponse(u.id().toString(), u.username(), u.displayName(), u.role().name(),
+                u.mustChangePassword(), result.sessionExpires());
+        return ResponseEntity.status(HttpStatus.CREATED).body(resp);
+    }
+
     @PostMapping("/logout")
     public ResponseEntity<?> logout(HttpServletRequest httpReq, HttpServletResponse httpRes) {
         if (!userContext.isAuthenticated()) {
@@ -109,6 +138,8 @@ public class AuthController {
     }
 
     @GetMapping("/me")
+    @ApiResponse(responseCode = "200", description = "Current user, role, status and session expiry", content = @Content(mediaType = "application/json", schema = @Schema(implementation = UserResponse.class)))
+    @ApiResponse(responseCode = "401", description = "Not authenticated")
     public ResponseEntity<?> me() {
         if (!userContext.isAuthenticated()) {
             return problemResponse(401, "UNAUTHORIZED", "Not authenticated", null, null);
@@ -136,7 +167,26 @@ public class AuthController {
         }
     }
 
+    /**
+     * Sign out every session except the current one (self-service counterpart of
+     * the admin {@code /admin/users/{id}/revoke-sessions}). The calling session
+     * keeps working; state-changing POST, so CSRF applies as usual.
+     */
+    @PostMapping("/logout-others")
+    @ApiResponse(responseCode = "200", description = "All other sessions of the current user revoked; the calling session stays valid")
+    @ApiResponse(responseCode = "401", description = "Not authenticated")
+    public ResponseEntity<?> logoutOthers(HttpServletRequest httpReq) {
+        if (!userContext.isAuthenticated() || userContext.getSession() == null) {
+            return problemResponse(401, "UNAUTHORIZED", "Not authenticated", null, resolveRequestId(httpReq));
+        }
+        String requestId = resolveRequestId(httpReq);
+        authenticationService.logoutOthers(userContext.getUser(), userContext.getSession().id(), requestId);
+        return ResponseEntity.ok(Map.of("message", "Other sessions have been revoked."));
+    }
+
     @GetMapping("/csrf")
+    @ApiResponse(responseCode = "200", description = "CSRF token read from its cookie plus session expiry", content = @Content(mediaType = "application/json", schema = @Schema(implementation = CsrfResponse.class)))
+    @ApiResponse(responseCode = "401", description = "Not authenticated")
     public ResponseEntity<?> csrfToken(HttpServletRequest httpReq) {
         if (!userContext.isAuthenticated() || userContext.getSession() == null) {
             return problemResponse(401, "UNAUTHORIZED", "Not authenticated", null, resolveRequestId(httpReq));
@@ -156,6 +206,20 @@ public class AuthController {
 
         CsrfResponse resp = new CsrfResponse(csrfToken, userContext.getSession().expiresAt());
         return ResponseEntity.ok(resp);
+    }
+
+    /**
+     * Anonymous read-only view of the self-registration switch
+     * ({@code miqrokey.registration-enabled}). The login page calls this before
+     * rendering so a closed deployment never shows a form whose submit would fail
+     * with {@code 403 REGISTRATION_DISABLED}. Public path: no session and no CSRF
+     * token required; the body carries the single boolean and nothing else about
+     * the deployment.
+     */
+    @GetMapping("/registration-status")
+    @ApiResponse(responseCode = "200", description = "Self-registration switch state (single boolean, anonymous)", content = @Content(mediaType = "application/json", schema = @Schema(implementation = RegistrationStatusResponse.class)))
+    public ResponseEntity<RegistrationStatusResponse> registrationStatus() {
+        return ResponseEntity.ok(new RegistrationStatusResponse(authProperties.isRegistrationEnabled()));
     }
 
     // -----------------------------------------------------------------------

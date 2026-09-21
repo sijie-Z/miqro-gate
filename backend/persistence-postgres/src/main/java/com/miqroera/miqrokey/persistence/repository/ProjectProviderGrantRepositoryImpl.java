@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.persistence.repository;
 import com.miqroera.miqrokey.domain.model.GrantStatus;
 import com.miqroera.miqrokey.domain.model.ProjectProviderGrant;
 import com.miqroera.miqrokey.domain.repository.ProjectProviderGrantRepository;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -78,7 +79,7 @@ public class ProjectProviderGrantRepositoryImpl implements ProjectProviderGrantR
                 "UPDATE project_provider_grants SET status = :status, version = version + 1, updated_at = :updatedAt WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion",
                 params);
         if (rows != 1)
-            throw new IllegalStateException("Optimistic lock failure: grant " + grant.id());
+            throw new OptimisticLockingFailureException("Optimistic lock failure: grant " + grant.id());
         return grant;
     }
 

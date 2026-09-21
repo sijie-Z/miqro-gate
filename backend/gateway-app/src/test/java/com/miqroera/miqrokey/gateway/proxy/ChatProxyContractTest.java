@@ -1,6 +1,10 @@
 package com.miqroera.miqrokey.gateway.proxy;
 
+import com.miqroera.miqrokey.domain.usage.RequestCompletedEvent;
+import com.miqroera.miqrokey.domain.usage.UsageEvent;
 import com.miqroera.miqrokey.gateway.GatewayAuthTestConfig;
+import com.miqroera.miqrokey.queue.InMemoryUsageEventBus;
+import com.miqroera.miqrokey.queue.UsageEventBus;
 import com.miqroera.miqrokey.testing.AnthropicMockProvider;
 import com.miqroera.miqrokey.testing.ChatFixtures;
 import com.miqroera.miqrokey.testing.GatewayTestKeys;
@@ -17,6 +21,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.web.reactive.server.EntityExchangeResult;
+import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
@@ -27,16 +33,18 @@ import reactor.test.StepVerifier;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.Objects;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
-        "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration,"
-                + "org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration,"
-                + "org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration",
+        "spring.autoconfigure.exclude=org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration,"
+                + "org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration,"
+                + "org.springframework.boot.jdbc.autoconfigure.DataSourceTransactionManagerAutoConfiguration",
         "miqrokey.gateway.persistence.enabled=false", "miqrokey.crypto.enabled=false",
         "spring.main.web-application-type=reactive", "logging.level.com.miqroera.miqrokey.gateway.proxy=DEBUG"})
+@AutoConfigureWebTestClient
 @Import(GatewayAuthTestConfig.class)
 @DisplayName("OpenAI Chat Completions transparent proxy contract")
 class ChatProxyContractTest {
@@ -45,6 +53,9 @@ class ChatProxyContractTest {
 
     @Autowired
     private WebTestClient webTestClient;
+
+    @Autowired
+    private UsageEventBus usageEventBus;
 
     @LocalServerPort
     private int gatewayPort;
@@ -493,5 +504,236 @@ class ChatProxyContractTest {
             assertThat(usageObs.getObservations()).hasSize(1);
             assertThat(usageObs.getObservations().toString()).doesNotContain(modelContent);
         }
+    }
+
+    @Nested
+    @DisplayName("Usage fact guard (model-less bodies)")
+    class UsageFactGuard {
+
+        @Test
+        @DisplayName("should forward a body without a model field verbatim but record no usage fact")
+        void shouldForwardModelLessBodyWithoutUsageFact() {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
+            InMemoryUsageEventBus bus = (InMemoryUsageEventBus) usageEventBus;
+            bus.clear();
+
+            String modelLessBody = "{\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}],\"max_tokens\":512}";
+            EntityExchangeResult<byte[]> proxied = webTestClient.post().uri("/v1/chat/completions")
+                    .bodyValue(modelLessBody).exchange().expectStatus().isOk().expectBody().returnResult();
+            String requestId = requestIdOf(proxied);
+
+            // Transparent proxy: the body still reaches upstream byte-identically.
+            var captured = mockProvider.getCapturedRequests();
+            assertThat(captured).hasSize(1);
+            assertThat(captured.get(0).bodyBytes).isEqualTo(modelLessBody.getBytes(StandardCharsets.UTF_8));
+
+            // usage_event.model_id is NOT NULL: a model-less request records no usage
+            // fact. The barrier names *this* request — by the id the gateway minted
+            // and echoed back — rather than "some terminal record arrived" (#1163).
+            // This bus is a context singleton whose accessors drain the queue on
+            // read, so a neighbouring request's record can land after this test's
+            // clear() and satisfy a "not empty" barrier by itself: CI then saw
+            // `modelId` come back as gpt-4o-mini on a request that had no model.
+            RequestCompletedEvent terminal = awaitTerminal(bus, requestId);
+            assertThat(terminal.modelId()).as("a model-less body records a null model").isNull();
+            assertThat(usageFor(bus, requestId)).as("a model-less body records no usage fact").isEmpty();
+        }
+
+        @Test
+        @DisplayName("should forward an unparseable body verbatim but record no usage fact")
+        void shouldForwardMalformedBodyWithoutUsageFact() {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
+            InMemoryUsageEventBus bus = (InMemoryUsageEventBus) usageEventBus;
+            bus.clear();
+
+            String malformedBody = "{not json";
+            EntityExchangeResult<byte[]> proxied = webTestClient.post().uri("/v1/chat/completions")
+                    .bodyValue(malformedBody).exchange().expectStatus().isOk().expectBody().returnResult();
+            String requestId = requestIdOf(proxied);
+
+            var captured = mockProvider.getCapturedRequests();
+            assertThat(captured).hasSize(1);
+            assertThat(captured.get(0).bodyBytes).isEqualTo(malformedBody.getBytes(StandardCharsets.UTF_8));
+            // Same barrier-by-this-request's-id as above: an unparseable body has no
+            // model either, so a neighbouring record must not stand in for it either.
+            awaitTerminal(bus, requestId);
+            assertThat(usageFor(bus, requestId)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should still record the usage fact for a well-formed request (control)")
+        void shouldRecordUsageFactForWellFormedRequest() {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
+            InMemoryUsageEventBus bus = (InMemoryUsageEventBus) usageEventBus;
+            bus.clear();
+
+            EntityExchangeResult<byte[]> proxied = webTestClient.post().uri("/v1/chat/completions")
+                    .bodyValue(ChatFixtures.REQUEST_NON_STREAMING).exchange().expectStatus().isOk().expectBody()
+                    .returnResult();
+            String requestId = requestIdOf(proxied);
+
+            // Asserted on this request's own fact, fetched by its id — the same
+            // barrier discipline as the model-less cases above (#1163). The wait is
+            // `awaitUsage`, not a snapshot: a positive assertion has to wait for the
+            // writer, or it races it.
+            assertThat(awaitUsage(bus, requestId).modelId()).isEqualTo("gpt-4o-mini");
+            assertThat(usageFor(bus, requestId)).as("exactly one usage fact for this request").hasSize(1);
+        }
+
+        @Test
+        @DisplayName("records the provider request id from the response body when no id header exists (#623)")
+        void shouldRecordProviderRequestIdFromResponseBody() {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json")
+                    .body("{\"id\":\"prov-body-42\",\"object\":\"chat.completion\",\"model\":\"gpt-4o-mini\","
+                            + "\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"hi\"}}],"
+                            + "\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}")
+                    .build());
+            InMemoryUsageEventBus bus = (InMemoryUsageEventBus) usageEventBus;
+            bus.clear();
+
+            EntityExchangeResult<byte[]> proxied = webTestClient.post().uri("/v1/chat/completions")
+                    .bodyValue(ChatFixtures.REQUEST_NON_STREAMING).exchange().expectStatus().isOk().expectBody()
+                    .returnResult();
+            String requestId = requestIdOf(proxied);
+
+            // The usage fact is published at response completion — an id resolved
+            // only in the terminal doFinally stage would land too late here.
+            assertThat(awaitUsage(bus, requestId).providerRequestId()).isEqualTo("prov-body-42");
+            assertThat(usageFor(bus, requestId)).as("exactly one usage fact for this request").hasSize(1);
+        }
+
+        @Test
+        @DisplayName("an id response header wins over the body id (#623)")
+        void headerIdWinsOverBodyId() {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").header("x-request-id", "hdr-1")
+                    .body("{\"id\":\"prov-body-42\",\"object\":\"chat.completion\",\"model\":\"gpt-4o-mini\","
+                            + "\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"hi\"}}],"
+                            + "\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}")
+                    .build());
+            InMemoryUsageEventBus bus = (InMemoryUsageEventBus) usageEventBus;
+            bus.clear();
+
+            EntityExchangeResult<byte[]> proxied = webTestClient.post().uri("/v1/chat/completions")
+                    .bodyValue(ChatFixtures.REQUEST_NON_STREAMING).exchange().expectStatus().isOk().expectBody()
+                    .returnResult();
+            String requestId = requestIdOf(proxied);
+
+            assertThat(awaitUsage(bus, requestId).providerRequestId()).isEqualTo("hdr-1");
+            assertThat(usageFor(bus, requestId)).as("exactly one usage fact for this request").hasSize(1);
+        }
+    }
+
+    /**
+     * The request id the gateway minted for this request, as echoed on the proxied
+     * response ({@code ProxyController} sets {@code X-MiqroKey-Request-Id} on every
+     * upstream response, streaming or not).
+     *
+     * <p>
+     * This is how a test names its own request. The bus is a context singleton, so
+     * "something arrived" is not the same fact as "my request's record arrived"
+     * (#1163) — and the id is the only handle that distinguishes them.
+     * </p>
+     *
+     * <p>
+     * Boundary: the header is set on the proxied <em>upstream</em> response, so it
+     * is absent from gateway-authored rejections and errors (401/403/404/413/502 —
+     * the {@code writeError} paths). Calling this on one of those fails the
+     * {@code isNotBlank} assertion on purpose; a test asserting an error path has
+     * no lifecycle record to correlate anyway.
+     * </p>
+     */
+    private static String requestIdOf(EntityExchangeResult<byte[]> proxied) {
+        String requestId = proxied.getResponseHeaders().getFirst("X-MiqroKey-Request-Id");
+        assertThat(requestId).as("the gateway echoes its request id on the proxied response").isNotBlank();
+        return requestId;
+    }
+
+    /** Waits for — and returns — this request's terminal lifecycle record. */
+    private static RequestCompletedEvent awaitTerminal(InMemoryUsageEventBus bus, String requestId) {
+        return awaitValue(() -> bus.completedEvents().stream()
+                .filter(record -> requestId.equals(record.gatewayRequestId())).findFirst().orElse(null),
+                "this request's terminal lifecycle record");
+    }
+
+    /**
+     * Waits for — and returns — this request's usage fact.
+     *
+     * <p>
+     * A waiting read, not a snapshot: a <em>positive</em> assertion about this
+     * request's usage (its model, its provider id) races the writer otherwise.
+     * {@link #usageFor} is for the negative case only.
+     * </p>
+     */
+    private static UsageEvent awaitUsage(InMemoryUsageEventBus bus, String requestId) {
+        return awaitValue(() -> bus.usageEvents().stream().filter(event -> requestId.equals(event.gatewayRequestId()))
+                .findFirst().orElse(null), "this request's usage fact");
+    }
+
+    /**
+     * This request's usage facts as they stand right now — a snapshot, no waiting.
+     *
+     * <p>
+     * Two sound uses. <b>Asserting there are none</b>: behind
+     * {@link #awaitTerminal}, which is a barrier for it because usage is offered in
+     * the response supplier (after the body is written) and the terminal record in
+     * the enclosing {@code doFinally} — two successive stages of the reactive
+     * chain, not one. <b>Counting</b> ({@code hasSize(1)}): only after
+     * {@link #awaitUsage} has returned; the wait guarantees the first fact and the
+     * snapshot then pins how many were visible at that instant. A duplicate offered
+     * after the snapshot is not seen — an inherent limit of that pair, and the
+     * pre-#1163 window was the same.
+     * </p>
+     *
+     * <p>
+     * Boundary: {@link #awaitTerminal} fires only for a request that reached the
+     * upstream. A coalescer waiter gets a usage fact but no terminal record of its
+     * own, so neither helper gives it a barrier — moot while the coalescer is off
+     * and this file uses no cache key, but a coalescer test would need its own.
+     * </p>
+     *
+     * <p>
+     * For any other positive assertion, use {@link #awaitUsage}.
+     * </p>
+     */
+    private static List<UsageEvent> usageFor(InMemoryUsageEventBus bus, String requestId) {
+        return bus.usageEvents().stream().filter(event -> requestId.equals(event.gatewayRequestId())).toList();
+    }
+
+    /**
+     * Polls for a value up to 5s; fails loudly instead of racing the writer.
+     *
+     * <p>
+     * Use it when the assertion is about a <em>specific</em> record rather than
+     * about "something arrived": the probe must name the fact being asserted, so a
+     * record belonging to another request cannot satisfy it — which is the point
+     * here, because the bus is a context singleton and the accessors drain its
+     * queue on read (#1163).
+     * </p>
+     *
+     * <p>
+     * The probe signals "not yet" with {@code null}, so it must never legitimately
+     * produce a null value.
+     * </p>
+     */
+    private static <T> T awaitValue(java.util.function.Supplier<T> probe, String what) {
+        long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (System.nanoTime() < deadline) {
+            T value = probe.get();
+            if (value != null) {
+                return value;
+            }
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Interrupted while waiting for " + what, e);
+            }
+        }
+        throw new AssertionError("Timed out waiting for " + what);
     }
 }

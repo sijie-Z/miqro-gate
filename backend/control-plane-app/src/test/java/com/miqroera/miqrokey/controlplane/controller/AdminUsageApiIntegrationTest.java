@@ -1,19 +1,21 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
 import com.miqroera.miqrokey.controlplane.dto.LoginRequest;
 import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
 import com.miqroera.miqrokey.domain.service.PasswordHasher;
 import jakarta.servlet.http.Cookie;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -23,12 +25,16 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -123,6 +129,47 @@ class AdminUsageApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("#1097: each cost split lands exactly on its own total, and the two splits cover different rows")
+    void costSplitReconcilesWithItsTotals() throws Exception {
+        fx.insertCatalogAndGrant();
+        fx.insertPrices(); // INPUT 1.00 / OUTPUT 2.00 per 1M tokens
+        UUID key = fx.createOwnKey();
+        fx.insertUsage(key, "chatcmpl-split-up", 1_000_000L, 0L); // 1.00 reached the provider
+        fx.insertUsageOnProject(key, fx.projectId, "chatcmpl-split-co", 0L, 500_000L, MODEL, Instant.now(),
+                "COALESCED");
+
+        String body = mockMvc.perform(get("/api/v1/admin/usage/summary").cookie(adminSession))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        JsonNode cost = objectMapper.readTree(body).path("totals").path("cost");
+
+        // The console draws a bar under these figures; if the segments do not add up to
+        // the number they sit under, the reader cannot tell a rounding artefact from a
+        // discrepancy in the data. Exact compare — the parts are summed from the same
+        // per-row amounts as the total.
+        Assertions.assertThat(sumParts(cost.path("upstreamPaidParts")))
+                .as("upstreamPaidParts must add up to upstreamPaid")
+                .isEqualByComparingTo(cost.path("upstreamPaid").decimalValue());
+        Assertions.assertThat(sumParts(cost.path("gatewayObservedParts")))
+                .as("gatewayObservedParts must add up to gatewayObserved")
+                .isEqualByComparingTo(cost.path("gatewayObserved").decimalValue());
+
+        // The coalesced row was served by the gateway, never paid upstream: it belongs
+        // to
+        // the observed split only. One split could not describe both totals.
+        Assertions.assertThat(cost.path("upstreamPaid").decimalValue()).isEqualByComparingTo("1");
+        Assertions.assertThat(cost.path("gatewayObserved").decimalValue()).isEqualByComparingTo("2");
+        Assertions.assertThat(cost.path("gatewayObservedParts").path("output").decimalValue())
+                .isEqualByComparingTo("1");
+        Assertions.assertThat(cost.path("upstreamPaidParts").path("output").decimalValue()).isEqualByComparingTo("0");
+        Assertions.assertThat(cost.path("upstreamPaidParts").path("input").decimalValue()).isEqualByComparingTo("1");
+    }
+
+    private static BigDecimal sumParts(JsonNode parts) {
+        return parts.path("input").decimalValue().add(parts.path("output").decimalValue())
+                .add(parts.path("cacheRead").decimalValue()).add(parts.path("cacheCreation").decimalValue());
+    }
+
+    @Test
     @DisplayName("admin summary filters by user")
     void adminSummaryFiltersByUser() throws Exception {
         fx.insertCatalogAndGrant();
@@ -177,6 +224,167 @@ class AdminUsageApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("records carry provider name, per-row cost, first byte and protocol (#758)")
+    void recordsCarryLifecycleEnrichment() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertPrices();
+        Instant pricedAt = Instant.now().minusSeconds(120);
+        Instant unpricedAt = Instant.now().minusSeconds(60);
+        // Priced row: 1000×1.00/1e6 + 500×2.00/1e6 = 0.002 USD; priced and fully wired.
+        fx.insertUsageWithGatewayId(ownKey, "chatcmpl-enr-1", "greq-enr-1", 1_000L, 500L, MODEL, pricedAt);
+        fx.insertLifecycle(ownKey, "greq-enr-1", "SUCCEEDED", 210L, 4_900L, pricedAt);
+        // Unpriced model (no snapshot): priced=false; failure terminal without a first
+        // byte.
+        fx.insertUsageWithGatewayId(ownKey, "chatcmpl-enr-2", "greq-enr-2", 7_000L, 3_000L, OTHER_MODEL, unpricedAt);
+        fx.insertLifecycle(ownKey, "greq-enr-2", "UPSTREAM_REJECTED", null, 1_200L, unpricedAt);
+
+        MvcResult r = mockMvc.perform(get("/api/v1/admin/usage/records").cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(2)).andReturn();
+        // Newest first: unpriced OTHER_MODEL row, then the priced MODEL row.
+        JsonNode items = objectMapper.readTree(r.getResponse().getContentAsString()).path("items");
+        JsonNode unpriced = items.get(0);
+        JsonNode priced = items.get(1);
+
+        Assertions.assertThat(unpriced.path("modelId").asText()).isEqualTo(OTHER_MODEL);
+        Assertions.assertThat(unpriced.path("providerProductName").asText()).isEqualTo("Test Product");
+        Assertions.assertThat(unpriced.path("priced").asBoolean()).isFalse();
+        Assertions.assertThat(unpriced.path("requestStatus").asText()).isEqualTo("UPSTREAM_REJECTED");
+        Assertions.assertThat(unpriced.path("ttfbMs").isNull()).isTrue();
+
+        Assertions.assertThat(priced.path("modelId").asText()).isEqualTo(MODEL);
+        Assertions.assertThat(priced.path("priced").asBoolean()).isTrue();
+        Assertions.assertThat(priced.path("cost").decimalValue()).isEqualByComparingTo("0.002");
+        Assertions.assertThat(priced.path("ttfbMs").asLong()).isEqualTo(210L);
+        Assertions.assertThat(priced.path("wireProtocol").asText()).isEqualTo("ANTHROPIC_MESSAGES");
+        Assertions.assertThat(priced.path("requestStatus").asText()).isEqualTo("SUCCEEDED");
+    }
+
+    @Test
+    @DisplayName("#1128/#1139: records carry the attribution ruling, its candidate cardinality and the claim it judged")
+    void recordsCarryAttribution() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertPrices();
+        Instant attributedAt = Instant.now().minusSeconds(120);
+        Instant plainAt = Instant.now().minusSeconds(60);
+        // The gateway writes the ruling, the candidate cardinality and the claim side
+        // by side. A row with none of them is one written before V54 (or outside the
+        // proxy path) — every authenticated proxy request walks the ladder, so this
+        // fixture is that older shape, not a single-binding key.
+        fx.insertAttributedUsage(ownKey, "chatcmpl-attr", 10L, 5L, attributedAt, "RESOLVED_HEADER", 2, "prompt_url",
+                "HIGH");
+        fx.insertUsage(ownKey, "chatcmpl-plain", 10L, 5L, MODEL, plainAt);
+
+        MvcResult r = mockMvc.perform(get("/api/v1/admin/usage/records").cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(2)).andReturn();
+        JsonNode items = objectMapper.readTree(r.getResponse().getContentAsString()).path("items");
+        JsonNode plain = items.get(0); // newest first
+        JsonNode attributed = items.get(1);
+
+        Assertions.assertThat(attributed.path("resolutionStatus").asText()).isEqualTo("RESOLVED_HEADER");
+        Assertions.assertThat(attributed.path("resolutionCandidates").asInt()).isEqualTo(2);
+        Assertions.assertThat(attributed.path("claimSource").asText()).isEqualTo("prompt_url");
+        Assertions.assertThat(attributed.path("claimConfidence").asText()).isEqualTo("HIGH");
+        // #1139: the wire value is the stored value — read the column back and compare,
+        // so a mapper that hardcodes or swaps the field cannot pass this.
+        Integer stored = jdbc.queryForObject(
+                "SELECT resolution_candidates FROM usage_event WHERE provider_request_id = 'chatcmpl-attr'",
+                new MapSqlParameterSource(), Integer.class);
+        Assertions.assertThat(stored).isEqualTo(attributed.path("resolutionCandidates").asInt());
+        // Null, not "" — and present rather than omitted: a reader has to be able to
+        // tell
+        // "no attribution recorded" from "the field is not in this response".
+        Assertions.assertThat(plain.path("resolutionStatus").isNull()).isTrue();
+        Assertions.assertThat(plain.path("resolutionCandidates").isNull()).isTrue();
+        Assertions.assertThat(plain.path("claimSource").isNull()).isTrue();
+        Assertions.assertThat(plain.path("claimConfidence").isNull()).isTrue();
+    }
+
+    @Test
+    @DisplayName("records survive a product missing from the catalog (LEFT JOIN, never inner) (#758)")
+    void recordsSurviveMissingCatalogProduct() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertUsageWithOrphanProduct(ownKey, "chatcmpl-orphan", "greq-orphan", 100L, 50L, Instant.now());
+
+        MvcResult r = mockMvc.perform(get("/api/v1/admin/usage/records").cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(1)).andReturn();
+        JsonNode item = objectMapper.readTree(r.getResponse().getContentAsString()).path("items").get(0);
+        Assertions.assertThat(item.path("inputTokens").asLong()).isEqualTo(100L);
+        Assertions.assertThat(item.path("providerProductName").isNull()).isTrue();
+    }
+
+    @Test
+    @DisplayName("groupBy=PRODUCT carries success rate and average latency from the lifecycle (#758)")
+    void productGroupByCarriesOutcomes() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        Instant t = Instant.now().minusSeconds(300);
+        // Four forwarded calls: two succeeded (ttfb 1s / 2s), one upstream failure, one
+        // client cancel.
+        fx.insertUsageWithGatewayId(ownKey, "chatcmpl-out-1", "greq-out-1", 100L, 10L, MODEL, t);
+        fx.insertLifecycle(ownKey, "greq-out-1", "SUCCEEDED", 1_000L, 3_000L, t);
+        fx.insertUsageWithGatewayId(ownKey, "chatcmpl-out-2", "greq-out-2", 100L, 10L, MODEL, t);
+        fx.insertLifecycle(ownKey, "greq-out-2", "SUCCEEDED", 2_000L, 5_000L, t);
+        fx.insertUsageWithGatewayId(ownKey, "chatcmpl-out-3", "greq-out-3", 100L, 10L, MODEL, t);
+        fx.insertLifecycle(ownKey, "greq-out-3", "UPSTREAM_REJECTED", null, 7_000L, t);
+        fx.insertUsageWithGatewayId(ownKey, "chatcmpl-out-4", "greq-out-4", 100L, 10L, MODEL, t);
+        fx.insertLifecycle(ownKey, "greq-out-4", "CLIENT_CANCELLED", null, 1_000L, t);
+
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "PRODUCT").cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.groups.length()").value(1))
+                .andExpect(jsonPath("$.groups[0].label").value("Test Product"))
+                .andExpect(jsonPath("$.groups[0].requests.upstream").value(4))
+                // succeeded = forwarded − failed − cancelled = 4 − 1 − 1
+                .andExpect(jsonPath("$.groups[0].outcomes.succeeded").value(2))
+                .andExpect(jsonPath("$.groups[0].outcomes.failed").value(1))
+                .andExpect(jsonPath("$.groups[0].outcomes.cancelled").value(1))
+                // avg over the four durations (3000+5000+7000+1000)/4 = 4000
+                .andExpect(jsonPath("$.groups[0].outcomes.avgDurationMs").value(4_000))
+                // ttfb averaged over the two rows that observed it: (1000+2000)/2 = 1500
+                .andExpect(jsonPath("$.groups[0].outcomes.avgTtfbMs").value(1_500))
+                .andExpect(jsonPath("$.totals.outcomes.succeeded").value(2));
+    }
+
+    @Test
+    @DisplayName("a call that started before the window but finished inside it keeps its outcome (#1132)")
+    void lifecycleSurvivesLeftEdgeOfWindow() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        // The window a report asks for: one hour. The fact row is selected on
+        // occurred_at, which ProxyController stamps when the response completes;
+        // the lifecycle row carries started_at, stamped before the upstream call.
+        Instant from = Instant.parse("2026-09-15T10:00:00Z");
+        Instant to = from.plusSeconds(3_600);
+        Instant completedAt = from.plusSeconds(5);
+        // One forwarded call: started 10s before the window, completed 5s inside it,
+        // rejected upstream (no first byte) after 15s.
+        fx.insertUsageWithGatewayId(ownKey, "chatcmpl-bd-1", "greq-bd-1", 100L, 10L, MODEL, completedAt);
+        fx.insertLifecycle(ownKey, "greq-bd-1", "UPSTREAM_REJECTED", null, 15_000L, completedAt.minusSeconds(15));
+
+        // The report for that window: one forwarded request, and it failed.
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "PRODUCT").param("from", from.toString())
+                .param("to", to.toString()).cookie(adminSession)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups.length()").value(1))
+                .andExpect(jsonPath("$.groups[0].requests.upstream").value(1))
+                .andExpect(jsonPath("$.groups[0].outcomes.failed").value(1))
+                .andExpect(jsonPath("$.groups[0].outcomes.succeeded").value(0))
+                // The dropped lifecycle row also left the duration average: its one
+                // sample is the only one in the window.
+                .andExpect(jsonPath("$.groups[0].outcomes.avgDurationMs").value(15_000));
+
+        // The detail list of the same window must describe the same call the same way.
+        MvcResult r = mockMvc
+                .perform(get("/api/v1/admin/usage/records").param("from", from.toString()).param("to", to.toString())
+                        .cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(1)).andReturn();
+        JsonNode item = objectMapper.readTree(r.getResponse().getContentAsString()).path("items").get(0);
+        Assertions.assertThat(item.path("requestStatus").asText()).isEqualTo("UPSTREAM_REJECTED");
+        Assertions.assertThat(item.path("wireProtocol").asText()).isEqualTo("ANTHROPIC_MESSAGES");
+    }
+
+    @Test
     @DisplayName("regular users are forbidden from admin usage endpoints")
     void nonAdminForbidden() throws Exception {
         mockMvc.perform(get("/api/v1/admin/usage/summary").cookie(userSession)).andExpect(status().isForbidden());
@@ -224,13 +432,15 @@ class AdminUsageApiIntegrationTest {
         final UUID userId = UUID.randomUUID();
         final UUID otherUserId = UUID.randomUUID();
         final UUID otherKeyId = UUID.randomUUID();
+        final UUID secondProjectId = UUID.randomUUID();
 
         void reset() {
-            for (String table : List.of("usage_event", "cache_hit_event", "price_snapshot", "virtual_key_models",
-                    "key_project_binding", "model_approval", "virtual_keys", "project_provider_grant_models",
-                    "project_provider_grants", "upstream_credential_versions", "upstream_credentials", "plan_seats",
-                    "upstream_subscriptions", "project_memberships", "projects", "provider_products", "providers",
-                    "admin_audit_events", "user_sessions", "users")) {
+            for (String table : List.of("usage_event", "cache_hit_event", "cache_entry", "request_usage_records",
+                    "price_snapshot", "virtual_key_models", "key_project_binding", "model_approval", "virtual_keys",
+                    "project_provider_grant_models", "project_provider_grants", "unattributed_policy",
+                    "upstream_credential_versions", "upstream_credentials", "plan_seats", "upstream_subscriptions",
+                    "project_memberships", "project_repositories", "projects", "provider_products", "providers",
+                    "admin_audit_events", "team_memberships", "teams", "user_sessions", "users")) {
                 try {
                     jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
                 } catch (Exception ignored) {
@@ -352,21 +562,295 @@ class AdminUsageApiIntegrationTest {
         }
 
         void insertUsage(UUID keyId, String providerRequestId, long input, long output, String model) {
+            insertUsage(keyId, providerRequestId, input, output, model, Instant.now());
+        }
+
+        void insertUsage(UUID keyId, String providerRequestId, long input, long output, String model,
+                Instant occurredAt) {
+            insertUsageOnProject(keyId, projectId, providerRequestId, input, output, model, occurredAt);
+        }
+
+        /** Usage on an explicit project (#634 hourly cross-tab tests). */
+        void insertUsageOnProject(UUID keyId, UUID onProjectId, String providerRequestId, long input, long output,
+                Instant occurredAt) {
+            insertUsageOnProject(keyId, onProjectId, providerRequestId, input, output, MODEL, occurredAt);
+        }
+
+        void insertUsageOnProject(UUID keyId, UUID onProjectId, String providerRequestId, long input, long output,
+                String model, Instant occurredAt) {
+            insertUsageOnProject(keyId, onProjectId, providerRequestId, input, output, model, occurredAt, "UPSTREAM");
+        }
+
+        /**
+         * Same, with the row's cache level spelled out: a COALESCED row never reached
+         * the provider, which is exactly the difference between the two cost splits
+         * (#1097).
+         */
+        void insertUsageOnProject(UUID keyId, UUID onProjectId, String providerRequestId, long input, long output,
+                String model, Instant occurredAt, String cacheLevel) {
             jdbc.update("""
                     INSERT INTO usage_event
                         (id, tenant_id, provider_request_id, virtual_key_id, project_id, provider_product_id,
                          credential_id, model_id, cache_level, input_tokens, output_tokens, total_tokens, latency_ms,
                          upstream_status_code, is_complete, usage_missing, gateway_request_id, occurred_at)
                     VALUES (:id, :tenantId, :providerRequestId, :keyId, :projectId, :productId, :credentialId, :model,
-                            'UPSTREAM', :input, :output, :total, 42, 200, TRUE, FALSE, 'greq', :occurredAt)
+                            :cacheLevel, :input, :output, :total, 42, 200, TRUE, FALSE, 'greq', :occurredAt)
                     """,
                     new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
                             .addValue("providerRequestId", providerRequestId).addValue("keyId", keyId)
-                            .addValue("projectId", projectId).addValue("productId", productId)
+                            .addValue("projectId", onProjectId).addValue("productId", productId)
                             .addValue("credentialId", credentialId).addValue("model", model).addValue("input", input)
                             .addValue("output", output).addValue("total", input + output)
-                            .addValue("occurredAt", Timestamp.from(Instant.now())));
+                            .addValue("cacheLevel", cacheLevel).addValue("occurredAt", Timestamp.from(occurredAt)));
         }
+
+        /** A second project so the hour x project grouping is observable (#634). */
+        void insertSecondProject() {
+            jdbc.update("""
+                    INSERT INTO projects (id, tenant_id, code, name, status, project_tag, version)
+                    VALUES (:id, :tenantId, 'P2', 'Project Two', 'ACTIVE', 'core-ai-2', 0)
+                    """, new MapSqlParameterSource("id", secondProjectId).addValue("tenantId", tenantId));
+        }
+
+        /**
+         * A usage fact row with an explicit gateway request id so a lifecycle row can
+         * be wired to it (#758).
+         */
+        void insertUsageWithGatewayId(UUID keyId, String providerRequestId, String gatewayRequestId, long input,
+                long output, String model, Instant occurredAt) {
+            jdbc.update("""
+                    INSERT INTO usage_event
+                        (id, tenant_id, provider_request_id, virtual_key_id, project_id, provider_product_id,
+                         credential_id, model_id, cache_level, input_tokens, output_tokens, total_tokens, latency_ms,
+                         upstream_status_code, is_complete, usage_missing, gateway_request_id, occurred_at)
+                    VALUES (:id, :tenantId, :providerRequestId, :keyId, :projectId, :productId, :credentialId, :model,
+                            'UPSTREAM', :input, :output, :total, 42, 200, TRUE, FALSE, :greq, :occurredAt)
+                    """,
+                    new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                            .addValue("providerRequestId", providerRequestId).addValue("greq", gatewayRequestId)
+                            .addValue("keyId", keyId).addValue("projectId", projectId).addValue("productId", productId)
+                            .addValue("credentialId", credentialId).addValue("model", model).addValue("input", input)
+                            .addValue("output", output).addValue("total", input + output)
+                            .addValue("occurredAt", Timestamp.from(occurredAt)));
+        }
+
+        /**
+         * A row shaped the way the gateway writes one after the CAA ladder ruled
+         * (#1128): the server's resolution plus the client's claim, which is unverified
+         * input.
+         */
+        void insertAttributedUsage(UUID keyId, String providerRequestId, long input, long output, Instant occurredAt,
+                String resolutionStatus, Integer resolutionCandidates, String claimSource, String claimConfidence) {
+            jdbc.update("""
+                    INSERT INTO usage_event
+                        (id, tenant_id, provider_request_id, virtual_key_id, project_id, provider_product_id,
+                         credential_id, model_id, cache_level, input_tokens, output_tokens, total_tokens, latency_ms,
+                         upstream_status_code, is_complete, usage_missing, gateway_request_id, occurred_at,
+                         resolution_status, resolution_candidates, claim_source, claim_confidence)
+                    VALUES (:id, :tenantId, :providerRequestId, :keyId, :projectId, :productId, :credentialId, :model,
+                            'UPSTREAM', :input, :output, :total, 42, 200, TRUE, FALSE, 'greq-attr', :occurredAt,
+                            :resolutionStatus, :resolutionCandidates, :claimSource, :claimConfidence)
+                    """, new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                    .addValue("providerRequestId", providerRequestId).addValue("keyId", keyId)
+                    .addValue("projectId", projectId).addValue("productId", productId)
+                    .addValue("credentialId", credentialId).addValue("model", MODEL).addValue("input", input)
+                    .addValue("output", output).addValue("total", input + output)
+                    .addValue("occurredAt", Timestamp.from(occurredAt)).addValue("resolutionStatus", resolutionStatus)
+                    .addValue("resolutionCandidates", resolutionCandidates).addValue("claimSource", claimSource)
+                    .addValue("claimConfidence", claimConfidence));
+        }
+
+        /**
+         * Usage on a product with no catalog row — {@code usage_event} carries no FK on
+         * {@code provider_product_id}, and #709's fixtures seed exactly this shape. The
+         * read side must keep such rows (LEFT JOIN, never inner) (#758).
+         */
+        void insertUsageWithOrphanProduct(UUID keyId, String providerRequestId, String gatewayRequestId, long input,
+                long output, Instant occurredAt) {
+            jdbc.update("""
+                    INSERT INTO usage_event
+                        (id, tenant_id, provider_request_id, virtual_key_id, project_id, provider_product_id,
+                         credential_id, model_id, cache_level, input_tokens, output_tokens, total_tokens, latency_ms,
+                         upstream_status_code, is_complete, usage_missing, gateway_request_id, occurred_at)
+                    VALUES (:id, :tenantId, :providerRequestId, :keyId, :projectId, :orphanProductId, :credentialId,
+                            :model, 'UPSTREAM', :input, :output, :total, 42, 200, TRUE, FALSE, :greq, :occurredAt)
+                    """,
+                    new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                            .addValue("providerRequestId", providerRequestId).addValue("greq", gatewayRequestId)
+                            .addValue("keyId", keyId).addValue("projectId", projectId)
+                            .addValue("orphanProductId", UUID.randomUUID()).addValue("credentialId", credentialId)
+                            .addValue("model", MODEL).addValue("input", input).addValue("output", output)
+                            .addValue("total", input + output).addValue("occurredAt", Timestamp.from(occurredAt)));
+        }
+
+        /**
+         * The lifecycle trail row of one forwarded call (#758): what the stats read
+         * enriches by gateway request id — protocol, first byte, terminal status.
+         */
+        void insertLifecycle(UUID keyId, String gatewayRequestId, String requestStatus, Long ttfbMs, Long durationMs,
+                Instant startedAt) {
+            Instant firstByteAt = ttfbMs == null ? null : startedAt.plusMillis(ttfbMs);
+            Instant completedAt = durationMs == null ? null : startedAt.plusMillis(durationMs);
+            jdbc.update("""
+                    INSERT INTO request_usage_records
+                        (started_at, id, gateway_request_id, tenant_id, user_id, project_id, virtual_key_id,
+                         provider_id, provider_product_id, credential_id, model_id, wire_protocol, streaming,
+                         request_status, first_byte_at, completed_at, duration_ms, time_to_first_byte_ms, http_status)
+                    VALUES (:startedAt, :id, :greq, :tenantId, :userId, :projectId, :keyId, :providerId, :productId,
+                            :credentialId, :model, 'ANTHROPIC_MESSAGES', FALSE, :status, :firstByteAt, :completedAt,
+                            :durationMs, :ttfbMs, 200)
+                    """, new MapSqlParameterSource("startedAt", Timestamp.from(startedAt))
+                    .addValue("id", UUID.randomUUID()).addValue("greq", gatewayRequestId).addValue("tenantId", tenantId)
+                    .addValue("userId", userId).addValue("projectId", projectId).addValue("keyId", keyId)
+                    .addValue("providerId", providerId).addValue("productId", productId)
+                    .addValue("credentialId", credentialId).addValue("model", MODEL).addValue("status", requestStatus)
+                    .addValue("firstByteAt", firstByteAt == null ? null : Timestamp.from(firstByteAt))
+                    .addValue("completedAt", completedAt == null ? null : Timestamp.from(completedAt))
+                    .addValue("durationMs", durationMs).addValue("ttfbMs", ttfbMs));
+        }
+
+        /**
+         * Team "Alpha" with both fixture users as members (#634). Returns the team id.
+         */
+        UUID insertTeamForBothUsers() {
+            UUID teamId = UUID.randomUUID();
+            jdbc.update("""
+                    INSERT INTO teams (id, tenant_id, name, status, version)
+                    VALUES (:id, :tenantId, 'Alpha', 'ACTIVE', 0)
+                    """, new MapSqlParameterSource("id", teamId).addValue("tenantId", tenantId));
+            for (UUID member : List.of(userId, otherUserId)) {
+                jdbc.update("""
+                        INSERT INTO team_memberships (tenant_id, team_id, user_id)
+                        VALUES (:tenantId, :teamId, :userId)
+                        """, new MapSqlParameterSource("tenantId", tenantId).addValue("teamId", teamId)
+                        .addValue("userId", member));
+            }
+            return teamId;
+        }
+
+        /**
+         * One cached response plus its hit events (#1200) — the hits half of
+         * {@code groupBy=cache_level}. {@code meta_json} carries the cached response's
+         * token usage, which is what each hit is valued against; the level lives on the
+         * events, never on the entry.
+         */
+        void insertCacheHits(UUID keyId, long inputTokens, long outputTokens, int l1Hits, int l2Hits) {
+            String keyHex = (UUID.randomUUID().toString() + UUID.randomUUID().toString()).replace("-", "");
+            String meta = "{\"usage\":{\"inputTokens\":" + inputTokens + ",\"outputTokens\":" + outputTokens + "}}";
+            jdbc.update("""
+                    INSERT INTO cache_entry
+                        (id, tenant_id, cache_key, virtual_key_id, project_id, provider_product_id, model_id,
+                         status_code, body, meta_json, hit_count_l1, hit_count_l2, created_at, updated_at)
+                    VALUES (:id, :tenantId, decode(:keyHex, 'hex'), :keyId, :projectId, :productId, :model, 200,
+                            decode('', 'hex'), CAST(:meta AS jsonb), :l1, :l2, now(), now())
+                    """,
+                    new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                            .addValue("keyHex", keyHex).addValue("keyId", keyId).addValue("projectId", projectId)
+                            .addValue("productId", productId).addValue("model", MODEL).addValue("meta", meta)
+                            .addValue("l1", l1Hits).addValue("l2", l2Hits));
+            insertHitEvents(keyId, keyHex, "L1_HIT", l1Hits);
+            insertHitEvents(keyId, keyHex, "L2_HIT", l2Hits);
+        }
+
+        private void insertHitEvents(UUID keyId, String keyHex, String level, int hits) {
+            for (int i = 0; i < hits; i++) {
+                jdbc.update("""
+                        INSERT INTO cache_hit_event
+                            (id, tenant_id, cache_key, virtual_key_id, project_id, provider_product_id, level,
+                             occurred_at, gateway_request_id, created_at)
+                        VALUES (:id, :tenantId, decode(:keyHex, 'hex'), :keyId, :projectId, :productId, :level,
+                                now() - make_interval(secs => :offset), :greq, now())
+                        """,
+                        new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                                .addValue("keyHex", keyHex).addValue("keyId", keyId).addValue("projectId", projectId)
+                                .addValue("productId", productId).addValue("level", level).addValue("offset", 2 + i)
+                                .addValue("greq", UUID.randomUUID().toString()));
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("hourly crosses hours with users and projects in the caller's timezone (#634)")
+    void hourlyCrossTabsUsersProjectsAndTimezone() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertOtherUsersKey();
+        fx.insertSecondProject();
+        fx.insertUsage(ownKey, "chatcmpl-h-1", 1_000L, 100L, MODEL, Instant.parse("2026-09-15T06:10:00Z"));
+        fx.insertUsage(ownKey, "chatcmpl-h-2", 2_000L, 200L, MODEL, Instant.parse("2026-09-15T06:50:00Z"));
+        fx.insertUsageOnProject(ownKey, fx.secondProjectId, "chatcmpl-h-3", 500L, 50L,
+                Instant.parse("2026-09-15T07:05:00Z"));
+        fx.insertUsage(fx.otherKeyId, "chatcmpl-h-4", 7_000L, 700L, MODEL, Instant.parse("2026-09-15T06:20:00Z"));
+
+        // UTC+8: 06:10Z/06:20Z/06:50Z all fall into the 14:00 local hour (06:00Z
+        // bucket).
+        mockMvc.perform(get("/api/v1/admin/usage/hourly").cookie(adminSession).param("date", "2026-09-15")
+                .param("tzOffsetMinutes", "480").param("dimension", "USER")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.date").value("2026-09-15")).andExpect(jsonPath("$.days").value(1))
+                .andExpect(jsonPath("$.dimension").value("USER")).andExpect(jsonPath("$.rows.length()").value(3))
+                .andExpect(jsonPath("$.rows[*].hourStart",
+                        containsInAnyOrder("2026-09-15T06:00:00Z", "2026-09-15T06:00:00Z", "2026-09-15T07:00:00Z")))
+                .andExpect(jsonPath("$.rows[*].dimensionLabel",
+                        containsInAnyOrder("regular_user", "other_user", "regular_user")))
+                .andExpect(jsonPath("$.rows[*].projectLabel",
+                        containsInAnyOrder("Project One", "Project One", "Project Two")))
+                .andExpect(jsonPath("$.rows[*].requests", containsInAnyOrder(2, 1, 1)))
+                .andExpect(jsonPath("$.rows[*].totalTokens", containsInAnyOrder(3_300, 7_700, 550)));
+    }
+
+    @Test
+    @DisplayName("hourly team dimension aggregates all members per hour (#634)")
+    void hourlyTeamDimension() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertOtherUsersKey();
+        fx.insertTeamForBothUsers();
+        fx.insertUsage(ownKey, "chatcmpl-t-1", 1_000L, 100L, MODEL, Instant.parse("2026-09-15T06:10:00Z"));
+        fx.insertUsage(fx.otherKeyId, "chatcmpl-t-2", 7_000L, 700L, MODEL, Instant.parse("2026-09-15T06:20:00Z"));
+        fx.insertUsage(ownKey, "chatcmpl-t-3", 2_000L, 200L, MODEL, Instant.parse("2026-09-15T07:50:00Z"));
+
+        mockMvc.perform(get("/api/v1/admin/usage/hourly").cookie(adminSession).param("date", "2026-09-15")
+                .param("tzOffsetMinutes", "480").param("dimension", "TEAM")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.rows.length()").value(2))
+                .andExpect(jsonPath("$.rows[*].dimensionLabel", containsInAnyOrder("Alpha", "Alpha")))
+                .andExpect(jsonPath("$.rows[*].requests", containsInAnyOrder(2, 1)))
+                .andExpect(jsonPath("$.rows[*].totalTokens", containsInAnyOrder(8_800, 2_200)));
+    }
+
+    @Test
+    @DisplayName("summary and records filter by teamId through the members' keys (#681)")
+    void teamFilterScopesSummaryAndRecords() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertOtherUsersKey();
+        UUID teamId = fx.insertTeamForBothUsers();
+        fx.insertUsage(ownKey, "chatcmpl-tf-1", 1_000L, 100L);
+        fx.insertUsage(fx.otherKeyId, "chatcmpl-tf-2", 7_000L, 700L);
+
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "team").param("teamId", teamId.toString())
+                .cookie(adminSession)).andExpect(status().isOk()).andExpect(jsonPath("$.groups.length()").value(1))
+                .andExpect(jsonPath("$.groups[0].label").value("Alpha"))
+                .andExpect(jsonPath("$.groups[0].requests.upstream").value(2))
+                .andExpect(jsonPath("$.totals.tokens.input").value(8_000));
+        // A team nobody belongs to narrows to nothing.
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "team")
+                .param("teamId", UUID.randomUUID().toString()).cookie(adminSession)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups.length()").value(0));
+        mockMvc.perform(get("/api/v1/admin/usage/records").param("teamId", teamId.toString()).cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(2));
+        mockMvc.perform(
+                get("/api/v1/admin/usage/records").param("teamId", UUID.randomUUID().toString()).cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(0));
+    }
+
+    @Test
+    @DisplayName("hourly enforces admin-only access and parameter bounds (#634)")
+    void hourlyValidationAndAccess() throws Exception {
+        mockMvc.perform(get("/api/v1/admin/usage/hourly").cookie(userSession)).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/admin/usage/hourly").cookie(adminSession).param("days", "8"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("DAYS_INVALID"));
+        mockMvc.perform(get("/api/v1/admin/usage/hourly").cookie(adminSession).param("dimension", "BOGUS"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("DIMENSION_INVALID"));
     }
 
     static class BootstrapHelper {
@@ -386,5 +870,142 @@ class AdminUsageApiIntegrationTest {
         static String secret() {
             return SECRET;
         }
+    }
+
+    @Test
+    @DisplayName("summary groups by consumer and by model (I15)")
+    void summaryGroupsByUserAndModel() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertOtherUsersKey();
+        fx.insertPrices();
+        fx.insertUsage(ownKey, "chatcmpl-own-1", 1_000L, 500L);
+        fx.insertUsage(fx.otherKeyId, "chatcmpl-other-1", 9_000L, 9_000L);
+        fx.insertUsage(ownKey, "chatcmpl-own-2", 200L, 100L, OTHER_MODEL);
+
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "USER").cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.groups.length()").value(2))
+                .andExpect(jsonPath("$.groups[?(@.label=='regular_user')].tokens.input").value(contains(1_200)))
+                .andExpect(jsonPath("$.groups[?(@.label=='other_user')].tokens.input").value(contains(9_000)));
+
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "MODEL").cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.groups.length()").value(2))
+                .andExpect(jsonPath("$.groups[*].label", containsInAnyOrder(MODEL, OTHER_MODEL)))
+                .andExpect(jsonPath("$.groups[?(@.label=='" + MODEL + "')].requests.upstream").value(contains(2)))
+                .andExpect(
+                        jsonPath("$.groups[?(@.label=='" + OTHER_MODEL + "')].requests.upstream").value(contains(1)));
+    }
+
+    @Test
+    @DisplayName("summary groups by calendar month (I15)")
+    void summaryGroupsByMonth() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertPrices();
+        fx.insertUsage(ownKey, "chatcmpl-jul-1", 1_000L, 500L, MODEL, Instant.parse("2026-07-15T10:00:00Z"));
+        fx.insertUsage(ownKey, "chatcmpl-aug-1", 2_000L, 1_000L, MODEL, Instant.parse("2026-08-15T10:00:00Z"));
+
+        // Groups sort by label, so July precedes August.
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "MONTH")
+                .param("from", "2026-07-01T00:00:00Z").param("to", "2026-09-01T00:00:00Z").cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.groups.length()").value(2))
+                .andExpect(jsonPath("$.groups[*].label", containsInAnyOrder("2026-07", "2026-08")))
+                .andExpect(jsonPath("$.groups[0].label").value("2026-07"))
+                .andExpect(jsonPath("$.groups[0].tokens.input").value(1_000))
+                .andExpect(jsonPath("$.groups[1].tokens.input").value(2_000));
+    }
+
+    @Test
+    @DisplayName("day buckets follow tzOffsetMinutes, and an out-of-range offset is rejected (#1050)")
+    void dayBucketsFollowTheCallersOffset() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertPrices();
+        // 2026-09-03 in UTC; 2026-09-04 00:30 at +08 — the row the console used to draw
+        // a day early,
+        // because the request log beside the chart prints local timestamps.
+        fx.insertUsage(ownKey, "chatcmpl-tz-1", 1_000L, 500L, MODEL, Instant.parse("2026-09-03T16:30:00Z"));
+
+        String from = "2026-09-01T00:00:00Z";
+        String to = "2026-09-10T00:00:00Z";
+
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "DAY").param("from", from).param("to", to)
+                .cookie(adminSession)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups[*].label", contains("2026-09-03")));
+
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "DAY").param("tzOffsetMinutes", "480")
+                .param("from", from).param("to", to).cookie(adminSession)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups[*].label", contains("2026-09-04")));
+
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "DAY").param("tzOffsetMinutes", "1081")
+                .param("from", from).param("to", to).cookie(adminSession)).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("TZ_OFFSET_INVALID"));
+    }
+
+    @Test
+    @DisplayName("#1200: groupBy=cache_level is served — each hit lands in its own L1/L2 group")
+    void cacheLevelGroupingValuesEachHitOnce() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertPrices();
+        // Two cached responses, one hit each: L1 on the first (1000/500 tokens),
+        // L2 on the second (2000/1000). Before #1200 this request died on the hits
+        // SQL: the GROUP BY carried a bare 'HIT' literal, which PostgreSQL rejects.
+        fx.insertCacheHits(ownKey, 1_000L, 500L, 1, 0);
+        fx.insertCacheHits(ownKey, 2_000L, 1_000L, 0, 1);
+
+        MvcResult r = mockMvc
+                .perform(get("/api/v1/admin/usage/summary").param("groupBy", "cache_level").cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.groupBy").value("cache_level"))
+                .andExpect(jsonPath("$.groups.length()").value(2))
+                .andExpect(jsonPath("$.groups[*].label", containsInAnyOrder("L1_HIT", "L2_HIT")))
+                .andExpect(jsonPath("$.groups[?(@.label=='L1_HIT')].requests.l1Hit").value(contains(1)))
+                .andExpect(jsonPath("$.groups[?(@.label=='L1_HIT')].requests.l2Hit").value(contains(0)))
+                .andExpect(jsonPath("$.groups[?(@.label=='L2_HIT')].requests.l1Hit").value(contains(0)))
+                .andExpect(jsonPath("$.groups[?(@.label=='L2_HIT')].requests.l2Hit").value(contains(1))).andReturn();
+        JsonNode groups = objectMapper.readTree(r.getResponse().getContentAsString()).path("groups");
+        // Exact, not approximate: 1000×1.00/1e6 + 500×2.00/1e6 and
+        // 2000×1.00/1e6 + 1000×2.00/1e6.
+        Assertions.assertThat(savedByGatewayCache(groups, "L1_HIT")).isEqualByComparingTo("0.002");
+        Assertions.assertThat(savedByGatewayCache(groups, "L2_HIT")).isEqualByComparingTo("0.004");
+
+        // The issue's own acceptance bar: the same fixture cut by PROJECT carries
+        // the same totals — same source, differently cut.
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "PROJECT").cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totals.requests.l1Hit").value(1))
+                .andExpect(jsonPath("$.totals.requests.l2Hit").value(1))
+                .andExpect(jsonPath("$.totals.cost.savedByGatewayCache").value(0.006));
+    }
+
+    @Test
+    @DisplayName("#1200: the usage-event half of cache_level keeps grouping by the real cache_level column")
+    void cacheLevelGroupingKeepsTheEventsSideUnchanged() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertPrices();
+        // Forwarded call plus a cache hit: one request fills both halves of the
+        // dimension. The usage_event half groups by ue.cache_level (the real
+        // column, untouched by #1200); the cache-hit half folds L1/L2 in Java.
+        fx.insertUsage(ownKey, "chatcmpl-up-1", 1_000L, 500L);
+        fx.insertCacheHits(ownKey, 1_000L, 500L, 1, 0);
+
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "cache_level").cookie(adminSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups[*].label", containsInAnyOrder("UPSTREAM", "L1_HIT")))
+                .andExpect(jsonPath("$.groups[?(@.label=='UPSTREAM')].requests.upstream").value(contains(1)))
+                .andExpect(jsonPath("$.groups[?(@.label=='UPSTREAM')].tokens.input").value(contains(1_000)))
+                .andExpect(jsonPath("$.groups[?(@.label=='L1_HIT')].requests.l1Hit").value(contains(1)));
+    }
+
+    /**
+     * The cache-saving figure of the group with {@code label}, exact-comparable.
+     */
+    private static BigDecimal savedByGatewayCache(JsonNode groups, String label) {
+        for (JsonNode group : groups) {
+            if (label.equals(group.path("label").asText())) {
+                return group.path("cost").path("savedByGatewayCache").decimalValue();
+            }
+        }
+        throw new AssertionError("no group labelled " + label + " in " + groups);
     }
 }

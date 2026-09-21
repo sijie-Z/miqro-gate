@@ -1,0 +1,639 @@
+<script setup lang="ts">
+/**
+ * NextAdminWebhooksView — /app/webhooks v2 admin page (U2 ops batch).
+ * Behaviour parity with the legacy webhooks page: register HMAC-signed alert
+ * delivery endpoints, enable/disable, one-click signature test, gated delete
+ * and a delivery-history drawer (recent 20 attempts per endpoint).
+ */
+import { computed, onMounted, ref } from 'vue';
+import * as api from '@/api';
+import { countWhenLoaded } from '@/utils/load-state';
+import { ApiError } from '@/api/http';
+import {
+  UiButton,
+  UiDonut,
+  UiDialog,
+  UiDrawer,
+  UiInput,
+  UiStatusBadge,
+  UiTable,
+  toast,
+} from '@/ui';
+import { CHART_TONE_COLORS } from '@/lib/chart-palette';
+import type { WebhookEndpointView, WebhookDelivery } from '@/types/generated-api';
+
+const webhooks = ref<WebhookEndpointView[]>([]);
+const loading = ref(true);
+const loadError = ref('');
+const loadRequestId = ref('');
+/** Recent-20 delivery success summary per endpoint (absent = no attempts yet). */
+const rate = ref<Record<string, { ok: number; total: number }>>({});
+
+const columns = [
+  { key: 'name', title: '名称', minWidth: '170px' },
+  { key: 'url', title: '回调地址', minWidth: '260px' },
+  { key: 'status', title: '状态', width: '110px' },
+  { key: 'rate', title: '近 20 次投递成功率', width: '150px' },
+  { key: 'createdAt', title: '创建时间', width: '170px' },
+  { key: 'actions', title: '操作', width: '250px' },
+];
+
+const deliveryColumns = [
+  { key: 'attempt', title: '次', width: '70px', align: 'right' as const },
+  { key: 'httpStatus', title: 'HTTP', width: '90px', align: 'right' as const },
+  { key: 'nextRetryAt', title: '下次重试', minWidth: '170px' },
+  { key: 'errorMessage', title: '错误', minWidth: '180px' },
+];
+
+// Create form
+const creating = ref(false);
+const form = ref({ name: '', url: '', secret: '', timeoutMs: '5000' });
+const showSecret = ref(false);
+const formError = ref('');
+const submitting = ref(false);
+
+// Deliveries drawer
+const deliveriesOpen = ref(false);
+const deliveriesEndpoint = ref<WebhookEndpointView | null>(null);
+const deliveries = ref<WebhookDelivery[]>([]);
+const deliveriesLoading = ref(false);
+const deliveriesError = ref('');
+
+const confirmState = ref<{
+  title: string;
+  body: string;
+  confirmLabel: string;
+  tone: 'danger' | 'primary';
+  run: () => Promise<void>;
+} | null>(null);
+
+async function load() {
+  loading.value = true;
+  loadError.value = '';
+  try {
+    webhooks.value = await api.listWebhooks();
+    await loadRates(webhooks.value);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      loadError.value = error.message;
+      loadRequestId.value = error.requestId ?? '';
+    }
+  } finally {
+    loading.value = false;
+  }
+}
+
+/** Summarises the recent-20 delivery history per endpoint (best-effort). */
+async function loadRates(endpoints: WebhookEndpointView[]) {
+  await Promise.all(
+    endpoints.map(async (endpoint) => {
+      try {
+        // list rows always carry ids
+        const deliveries = await api.webhookDeliveries(endpoint.id!);
+        if (!deliveries || deliveries.length === 0) return;
+        const ok = deliveries.filter(
+          (d) => (d.httpStatus ?? 0) >= 200 && d.httpStatus! < 300,
+        ).length;
+        rate.value[endpoint.id!] = { ok, total: deliveries.length };
+      } catch {
+        // rate stays absent when the history call fails; the table shows '—'
+      }
+    }),
+  );
+}
+
+/** Aggregate last-20 delivery outcome across endpoints (donut centre = rate). */
+const deliverySummary = computed(() => {
+  const entries = Object.values(rate.value);
+  const ok = entries.reduce((sum, e) => sum + e.ok, 0);
+  const total = entries.reduce((sum, e) => sum + e.total, 0);
+  return { ok, fail: Math.max(0, total - ok), total };
+});
+
+const deliverySegments = computed(() => {
+  const { ok, fail } = deliverySummary.value;
+  const rows = [];
+  if (ok > 0) rows.push({ label: '成功', value: ok, color: CHART_TONE_COLORS.success });
+  if (fail > 0) rows.push({ label: '失败', value: fail, color: CHART_TONE_COLORS.danger });
+  return rows;
+});
+
+function rateOf(endpoint: WebhookEndpointView): { ok: number; total: number } | null {
+  // list rows always carry ids
+  return rate.value[endpoint.id!] ?? null;
+}
+
+function rateLabel(endpoint: WebhookEndpointView): string {
+  const r = rateOf(endpoint);
+  return r ? `${r.ok}/${r.total}` : '—';
+}
+
+function rateTone(endpoint: WebhookEndpointView): 'success' | 'warning' | 'danger' | 'neutral' {
+  const r = rateOf(endpoint);
+  if (!r) return 'neutral';
+  if (r.ok === r.total) return 'success';
+  return r.ok > 0 ? 'warning' : 'danger';
+}
+
+async function createWebhook() {
+  if (!form.value.name.trim() || !form.value.url.trim() || !form.value.secret.trim()) {
+    formError.value = '名称、URL 与签名密钥必填。';
+    return;
+  }
+  submitting.value = true;
+  formError.value = '';
+  try {
+    await api.createWebhook({
+      name: form.value.name.trim(),
+      url: form.value.url.trim(),
+      secret: form.value.secret,
+      timeoutMs: Number(form.value.timeoutMs) || 5000,
+    });
+    creating.value = false;
+    form.value = { name: '', url: '', secret: '', timeoutMs: '5000' };
+    toast.success('Webhook 已创建');
+    await load();
+  } catch (error) {
+    formError.value = error instanceof ApiError ? error.message : '创建失败，请稍后重试。';
+  } finally {
+    submitting.value = false;
+  }
+}
+
+async function toggle(endpoint: WebhookEndpointView) {
+  try {
+    // list rows always carry ids
+    await api.updateWebhook(endpoint.id!, { enabled: !endpoint.enabled });
+    toast.success(endpoint.enabled ? 'Webhook 已停用' : 'Webhook 已启用');
+    await load();
+  } catch (error) {
+    if (error instanceof ApiError) {
+      toast.error(error.message);
+    }
+  }
+}
+
+async function test(endpoint: WebhookEndpointView) {
+  try {
+    // list rows always carry ids
+    const result = await api.testWebhook(endpoint.id!);
+    if (result.httpStatus) {
+      toast.success(`测试投递成功（HTTP ${result.httpStatus}）`);
+    } else {
+      toast.error(`测试投递失败：${result.errorMessage ?? '未知错误'}`);
+    }
+  } catch (error) {
+    if (error instanceof ApiError) {
+      toast.error(error.message);
+    }
+  }
+}
+
+// I21: a blocked delete (still referenced) shows the dependency list instead
+// of a bare error — release the references (or repoint the rules) first.
+const inUseState = ref<{
+  title: string;
+  body: string;
+  dependencies: Array<{ type: string; id: string; name?: string; detail?: string }>;
+} | null>(null);
+
+function requestRemove(endpoint: WebhookEndpointView) {
+  confirmState.value = {
+    title: `删除 Webhook「${endpoint.name}」`,
+    body: '删除后告警将不再投递到该端点；若仍被告警规则引用，将先提示解除引用。',
+    confirmLabel: '删除',
+    tone: 'danger',
+    run: async () => {
+      try {
+        // list rows always carry ids
+        await api.deleteWebhook(endpoint.id!);
+        toast.success('Webhook 已删除');
+        await load();
+      } catch (error) {
+        if (error instanceof ApiError && error.code === 'RESOURCE_IN_USE') {
+          inUseState.value = {
+            title: `无法删除「${endpoint.name}」`,
+            body: error.message,
+            dependencies: error.dependencies ?? [],
+          };
+        } else if (error instanceof ApiError) {
+          toast.error(error.message);
+        }
+      }
+    },
+  };
+}
+
+async function confirmAndRun() {
+  const state = confirmState.value;
+  if (!state) return;
+  confirmState.value = null;
+  await state.run();
+}
+
+// #407：目标切换的过期响应防护（#399 序号守卫模式）。
+let deliveriesRequestSeq = 0;
+
+async function openDeliveries(endpoint: WebhookEndpointView) {
+  deliveriesEndpoint.value = endpoint;
+  deliveries.value = [];
+  deliveriesError.value = '';
+  deliveriesOpen.value = true;
+  deliveriesLoading.value = true;
+  const seq = ++deliveriesRequestSeq;
+  try {
+    // list rows always carry ids
+    const list = await api.webhookDeliveries(endpoint.id!);
+    if (seq !== deliveriesRequestSeq) {
+      return;
+    }
+    deliveries.value = list;
+  } catch (error) {
+    if (seq !== deliveriesRequestSeq) {
+      return;
+    }
+    deliveriesError.value = error instanceof ApiError ? error.message : '加载投递记录失败。';
+  } finally {
+    if (seq === deliveriesRequestSeq) {
+      deliveriesLoading.value = false;
+    }
+  }
+}
+
+function formatTime(iso?: string): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+onMounted(load);
+</script>
+
+<template>
+  <div class="ui-page next-webhooks">
+    <header class="ui-page-header">
+      <div>
+        <h1 class="ui-page-title">Webhook 端点</h1>
+        <p class="ui-page-desc">告警投递端点：HMAC-SHA256 签名，失败指数退避重试。</p>
+      </div>
+      <div class="ui-page-actions">
+        <UiButton variant="primary" data-testid="webhook-create-open" @click="creating = !creating">
+          {{ creating ? '收起表单' : '创建 Webhook' }}
+        </UiButton>
+      </div>
+    </header>
+
+    <div v-if="loadError" class="ui-alert ui-alert--error">
+      {{ loadError
+      }}<span v-if="loadRequestId" class="ui-request-id"> requestId: {{ loadRequestId }}</span>
+    </div>
+
+    <section
+      v-if="creating"
+      class="ui-panel next-webhooks__create"
+      data-testid="webhook-create-form"
+    >
+      <div class="ui-panel-head">
+        <h2 class="ui-panel-title">创建 Webhook</h2>
+      </div>
+      <div class="ui-panel-body">
+        <div class="next-webhooks__grid">
+          <UiInput
+            v-model="form.name"
+            label="名称"
+            required
+            placeholder="例如 ops-alerts"
+            data-testid="webhook-create-name"
+          />
+          <UiInput
+            v-model="form.url"
+            label="回调地址"
+            required
+            placeholder="https://…"
+            data-testid="webhook-create-url"
+          />
+          <UiInput
+            v-model="form.secret"
+            label="签名密钥"
+            required
+            :type="showSecret ? 'text' : 'password'"
+            placeholder="用于校验 X-Signature 的共享密钥"
+            data-testid="webhook-create-secret"
+          >
+            <template #suffix>
+              <button
+                type="button"
+                class="next-webhooks__reveal"
+                :aria-label="showSecret ? '隐藏密钥' : '显示密钥'"
+                data-testid="webhook-secret-toggle"
+                @click="showSecret = !showSecret"
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path
+                    v-if="!showSecret"
+                    d="M1.5 8S3.8 4 8 4s6.5 4 6.5 4-2.3 4-6.5 4S1.5 8 1.5 8Z"
+                    stroke="currentColor"
+                    stroke-width="1.4"
+                  />
+                  <circle
+                    v-if="!showSecret"
+                    cx="8"
+                    cy="8"
+                    r="1.8"
+                    stroke="currentColor"
+                    stroke-width="1.4"
+                  />
+                  <path
+                    v-else
+                    d="M2 2 14 14M6.2 6.2a2.2 2.2 0 0 0 3.6 3.6M4.6 4.7C2.9 5.7 1.5 8 1.5 8s2.3 4 6.5 4c1.1 0 2.1-.3 3-.7M8.9 4.1c.2 0 .4 0 .6.1M12.2 6.1c1 1 1.8 1.9 1.8 1.9"
+                    stroke="currentColor"
+                    stroke-width="1.4"
+                    stroke-linecap="round"
+                  />
+                </svg>
+              </button>
+            </template>
+          </UiInput>
+          <UiInput
+            v-model="form.timeoutMs"
+            label="超时（毫秒）"
+            placeholder="5000"
+            data-testid="webhook-create-timeout"
+          />
+          <p v-if="formError" class="ui-form-error">{{ formError }}</p>
+          <div class="next-webhooks__actions">
+            <UiButton
+              variant="primary"
+              :loading="submitting"
+              data-testid="webhook-create-submit"
+              @click="createWebhook"
+              >创建 Webhook</UiButton
+            >
+            <UiButton variant="ghost" @click="creating = false">取消</UiButton>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section
+      v-if="deliverySegments.length"
+      class="ui-panel next-webhooks__summary"
+      data-testid="webhook-rate-dist"
+    >
+      <div class="ui-panel-head">
+        <div>
+          <h2 class="ui-panel-title">投递成功率</h2>
+          <span class="ui-panel-sub">全部端点近 20 次投递聚合</span>
+        </div>
+      </div>
+      <div class="ui-panel-body next-webhooks__summary-body">
+        <UiDonut
+          :segments="deliverySegments"
+          :center-text="`${Math.round((deliverySummary.ok / Math.max(1, deliverySummary.total)) * 100)}%`"
+          data-testid="webhook-rate-donut"
+        />
+        <div class="ui-legend">
+          <div v-for="seg in deliverySegments" :key="seg.label" class="ui-legend-row">
+            <span class="ui-legend-dot" :style="{ background: seg.color }" />
+            <span class="ui-legend-label">{{ seg.label }}</span>
+            <span class="ui-legend-pct ui-num"
+              >{{ ((seg.value / Math.max(1, deliverySummary.total)) * 100).toFixed(0) }}%</span
+            >
+            <span class="ui-legend-value ui-num">{{ seg.value }}</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="ui-panel">
+      <div class="ui-panel-toolbar">
+        <span class="ui-panel-sub"
+          >共 {{ countWhenLoaded(loadError, webhooks.length) }} 个端点</span
+        >
+      </div>
+      <UiTable
+        :columns="columns"
+        :data="webhooks"
+        :loading="loading"
+        row-key="id"
+        empty-title="还没有 Webhook 端点"
+        empty-description="创建端点后，告警与审批通知将经其签名投递。"
+        data-testid="webhooks-table"
+        :error="loadError"
+        @retry="load"
+      >
+        <template #name="{ row }">
+          <span class="next-webhooks__name">{{ (row as WebhookEndpointView).name }}</span>
+        </template>
+        <template #url="{ row }">
+          <span class="ui-mono next-webhooks__url">{{ (row as WebhookEndpointView).url }}</span>
+        </template>
+        <template #status="{ row }">
+          <UiStatusBadge
+            :tone="(row as WebhookEndpointView).enabled ? 'success' : 'neutral'"
+            :label="(row as WebhookEndpointView).enabled ? '已启用' : '已停用'"
+          />
+        </template>
+        <template #rate="{ row }">
+          <span
+            v-if="rateOf(row as WebhookEndpointView)"
+            :data-testid="`webhook-rate-${(row as WebhookEndpointView).id}`"
+          >
+            <UiStatusBadge
+              :tone="rateTone(row as WebhookEndpointView)"
+              :label="rateLabel(row as WebhookEndpointView)"
+            />
+          </span>
+          <span v-else class="ui-muted">—</span>
+        </template>
+        <template #createdAt="{ row }">{{
+          formatTime((row as WebhookEndpointView).createdAt)
+        }}</template>
+        <template #actions="{ row }">
+          <div class="next-webhooks__actions">
+            <UiButton
+              variant="link"
+              size="sm"
+              data-testid="webhook-test"
+              @click="test(row as WebhookEndpointView)"
+              >测试</UiButton
+            >
+            <UiButton
+              variant="link"
+              size="sm"
+              data-testid="webhook-deliveries"
+              @click="openDeliveries(row as WebhookEndpointView)"
+              >投递</UiButton
+            >
+            <UiButton variant="link" size="sm" @click="toggle(row as WebhookEndpointView)">{{
+              (row as WebhookEndpointView).enabled ? '停用' : '启用'
+            }}</UiButton>
+            <UiButton
+              variant="link-danger"
+              size="sm"
+              data-testid="webhook-delete"
+              @click="requestRemove(row as WebhookEndpointView)"
+              >删除</UiButton
+            >
+          </div>
+        </template>
+      </UiTable>
+    </section>
+
+    <!-- Delivery history for one endpoint -->
+    <UiDrawer
+      :open="deliveriesOpen"
+      :title="deliveriesEndpoint ? `投递记录 · ${deliveriesEndpoint.name}` : '投递记录'"
+      width="620px"
+      @update:open="deliveriesOpen = false"
+    >
+      <div v-if="deliveriesError" class="ui-alert ui-alert--error">{{ deliveriesError }}</div>
+      <UiTable
+        :columns="deliveryColumns"
+        :data="deliveries"
+        :loading="deliveriesLoading"
+        row-key="id"
+        empty-title="暂无投递记录"
+        empty-description="端点创建后的投递尝试会出现在这里。"
+        data-testid="deliveries-table"
+      >
+        <template #attempt="{ row }">
+          <span class="ui-num">{{ (row as WebhookDelivery).attempt }}</span>
+        </template>
+        <template #httpStatus="{ row }">
+          <span class="ui-num">{{ (row as WebhookDelivery).httpStatus ?? '—' }}</span>
+        </template>
+        <template #nextRetryAt="{ row }">{{
+          formatTime((row as WebhookDelivery).nextRetryAt)
+        }}</template>
+        <template #errorMessage="{ row }">{{
+          (row as WebhookDelivery).errorMessage || '—'
+        }}</template>
+      </UiTable>
+    </UiDrawer>
+
+    <UiDialog
+      v-if="confirmState"
+      :open="true"
+      :title="confirmState.title"
+      :description="confirmState.body"
+      width="440px"
+      @update:open="confirmState = null"
+    >
+      <template #footer>
+        <UiButton variant="ghost" @click="confirmState = null">取消</UiButton>
+        <UiButton
+          :variant="confirmState.tone === 'danger' ? 'danger' : 'primary'"
+          @click="confirmAndRun"
+        >
+          {{ confirmState.confirmLabel }}
+        </UiButton>
+      </template>
+    </UiDialog>
+
+    <!-- I21: blocked delete — dependency list with release guidance -->
+    <UiDialog
+      v-if="inUseState"
+      :open="true"
+      :title="inUseState.title"
+      :description="inUseState.body"
+      width="560px"
+      data-testid="webhook-in-use-dialog"
+      @update:open="inUseState = null"
+    >
+      <ul
+        v-if="inUseState.dependencies.length"
+        class="next-webhooks__deps"
+        data-testid="webhook-in-use-deps"
+      >
+        <li v-for="dep in inUseState.dependencies" :key="dep.id">
+          <span class="ui-mono">{{ dep.type }}</span> · {{ dep.name ?? dep.id }}
+          <span v-if="dep.detail">（{{ dep.detail }}）</span>
+        </li>
+      </ul>
+      <template #footer>
+        <UiButton variant="primary" @click="inUseState = null">知道了</UiButton>
+      </template>
+    </UiDialog>
+  </div>
+</template>
+
+<style scoped>
+.next-webhooks__deps {
+  margin: 0;
+  padding-left: var(--ui-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-1);
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+}
+.ui-alert {
+  padding: var(--ui-space-3) var(--ui-space-4);
+  margin-bottom: var(--ui-space-4);
+  border-radius: var(--ui-radius-control);
+  font-size: var(--ui-font-size-sm);
+}
+
+.ui-alert--error {
+  background: var(--ui-danger-bg);
+  color: var(--ui-danger-fg);
+}
+
+.next-webhooks__summary {
+  margin-bottom: var(--ui-space-5);
+}
+
+.next-webhooks__summary-body {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-6);
+  flex-wrap: wrap;
+}
+
+.next-webhooks__create {
+  margin-bottom: var(--ui-space-5);
+  max-width: 760px;
+}
+
+.next-webhooks__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ui-space-4) var(--ui-space-6);
+  max-width: 680px;
+}
+
+.next-webhooks__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-1);
+  grid-column: 1 / -1;
+}
+
+.next-webhooks__name {
+  font-weight: var(--ui-weight-medium);
+}
+
+.next-webhooks__url {
+  font-size: var(--ui-font-size-xs);
+  overflow-wrap: anywhere;
+}
+
+.next-webhooks__reveal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--ui-radius-control);
+  background: transparent;
+  color: var(--ui-foreground-faint);
+  cursor: pointer;
+}
+
+.next-webhooks__reveal:hover {
+  color: var(--ui-foreground);
+}
+</style>

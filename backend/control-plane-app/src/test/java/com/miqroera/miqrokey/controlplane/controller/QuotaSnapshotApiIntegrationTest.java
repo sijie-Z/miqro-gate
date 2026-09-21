@@ -1,6 +1,6 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
 import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
@@ -13,7 +13,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -193,9 +193,10 @@ class QuotaSnapshotApiIntegrationTest {
         void reset() {
             for (String table : List.of("quota_snapshots", "usage_event", "cache_hit_event", "price_snapshot",
                     "virtual_key_models", "key_project_binding", "model_approval", "virtual_keys",
-                    "project_provider_grant_models", "project_provider_grants", "upstream_credential_versions",
-                    "upstream_credentials", "plan_seats", "upstream_subscriptions", "project_memberships", "projects",
-                    "provider_products", "providers", "admin_audit_events", "user_sessions", "users")) {
+                    "project_provider_grant_models", "project_provider_grants", "unattributed_policy",
+                    "upstream_credential_versions", "upstream_credentials", "plan_seats", "upstream_subscriptions",
+                    "project_memberships", "project_repositories", "projects", "provider_products", "providers",
+                    "admin_audit_events", "user_sessions", "users")) {
                 try {
                     jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
                 } catch (Exception ignored) {

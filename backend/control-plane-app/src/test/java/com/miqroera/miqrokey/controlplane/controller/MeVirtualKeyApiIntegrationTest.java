@@ -1,6 +1,6 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
 import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
@@ -13,7 +13,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -31,6 +31,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -152,7 +153,7 @@ class MeVirtualKeyApiIntegrationTest {
         // Route snapshot picks up the new key end to end.
         RouteSnapshot snapshot = snapshot();
         assertThat(snapshot.keys()).containsKey(secretPublicKeyId(secret));
-        RouteSnapshot.BindingRecord binding = snapshot.bindings().get(UUID.fromString(id));
+        RouteSnapshot.BindingRecord binding = snapshot.binding(UUID.fromString(id), TAG);
         assertThat(binding).isNotNull();
         assertThat(binding.projectTag()).isEqualTo(TAG);
         assertThat(snapshot.credentials()).containsKey(fx.credentialId);
@@ -175,7 +176,8 @@ class MeVirtualKeyApiIntegrationTest {
         postJson("/api/v1/me/virtual-keys",
                 Map.of("name", "k", "projectId", fx.projectId, "providerProductId", fx.productId, "credentialGrantId",
                         fx.grantId, "purpose", "CLAUDE_CODE"))
-                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("ROUTING_TAG_MISSING"));
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("ROUTING_TAG_MISSING"))
+                .andExpect(jsonPath("$.detail", org.hamcrest.Matchers.containsString("路由标签")));
     }
 
     @Test
@@ -287,6 +289,94 @@ class MeVirtualKeyApiIntegrationTest {
     }
 
     // ------------------------------------------------------------------
+    // disable / enable / rename (#582)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("disable drops the key from the route snapshot; enable restores it intact")
+    void disableAndEnableRoundTrip() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        UUID keyId = createKey(TAG);
+
+        postJson("/api/v1/me/virtual-keys/" + keyId + "/disable", Map.of()).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("DISABLED"));
+        assertThat(jdbc.queryForObject("SELECT status FROM virtual_keys WHERE id = :id",
+                new MapSqlParameterSource("id", keyId), String.class)).isEqualTo("DISABLED");
+
+        // The snapshot drops the disabled key: downstream this is the uniform
+        // unknown-key 404 (anti-enumeration), and bindings/models survive.
+        RouteSnapshot snapshot = snapshot();
+        assertThat(snapshot.keys().values()).extracting(RouteSnapshot.KeyRecord::publicKeyId)
+                .doesNotContain(fx.publicKeyId(keyId));
+        assertThat(jdbc.queryForObject(
+                "SELECT count(*) FROM key_project_binding WHERE virtual_key_id = :id AND status = 'ACTIVE'",
+                new MapSqlParameterSource("id", keyId), Integer.class)).isEqualTo(1);
+
+        // Double disable is a conflict; enable restores routing.
+        postJson("/api/v1/me/virtual-keys/" + keyId + "/disable", Map.of()).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("KEY_NOT_DISABLEABLE"));
+        postJson("/api/v1/me/virtual-keys/" + keyId + "/enable", Map.of()).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
+        RouteSnapshot restored = snapshot();
+        assertThat(restored.keys()).containsKey(fx.publicKeyId(keyId));
+        assertThat(restored.binding(keyId, TAG)).isNotNull();
+
+        postJson("/api/v1/me/virtual-keys/" + keyId + "/enable", Map.of()).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("KEY_NOT_ENABLEABLE"));
+    }
+
+    @Test
+    @DisplayName("disable is rejected for a ROTATING key")
+    void disableRejectsRotatingKey() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        UUID keyId = createKey(TAG);
+        postJson("/api/v1/me/virtual-keys/" + keyId + "/rotate", Map.of()).andExpect(status().isOk());
+
+        postJson("/api/v1/me/virtual-keys/" + keyId + "/disable", Map.of()).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("KEY_NOT_DISABLEABLE"));
+    }
+
+    @Test
+    @DisplayName("rename updates the name, audits from/to, and keeps the key routable")
+    void renameFlows() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        UUID keyId = createKey(TAG);
+
+        patchJson("/api/v1/me/virtual-keys/" + keyId, Map.of("name", "renamed-key")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("renamed-key"));
+        assertThat(jdbc.queryForObject("SELECT name FROM virtual_keys WHERE id = :id",
+                new MapSqlParameterSource("id", keyId), String.class)).isEqualTo("renamed-key");
+        // Audited with both endpoints; routing does not depend on the name.
+        String summary = jdbc.queryForObject(
+                "SELECT change_summary::text FROM admin_audit_events WHERE action = 'VIRTUAL_KEY_RENAME' "
+                        + "AND target_id = :id",
+                new MapSqlParameterSource("id", keyId), String.class);
+        assertThat(summary).contains("claude-code-main").contains("renamed-key");
+        assertThat(snapshot().keys()).containsKey(fx.publicKeyId(keyId));
+
+        // Blank names are rejected by bean validation.
+        patchJson("/api/v1/me/virtual-keys/" + keyId, Map.of("name", "  ")).andExpect(status().isBadRequest());
+
+        // Revoked tombstones cannot be renamed.
+        postJson("/api/v1/me/virtual-keys/" + keyId + "/revoke", Map.of()).andExpect(status().isOk());
+        patchJson("/api/v1/me/virtual-keys/" + keyId, Map.of("name", "too-late")).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("KEY_NOT_RENAMEABLE"));
+    }
+
+    @Test
+    @DisplayName("disable/rename on an unknown key is a uniform 404")
+    void disableAndRenameUnknownKeyAre404() throws Exception {
+        UUID unknown = UUID.randomUUID();
+        postJson("/api/v1/me/virtual-keys/" + unknown + "/disable", Map.of()).andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("KEY_NOT_FOUND"));
+        patchJson("/api/v1/me/virtual-keys/" + unknown, Map.of("name", "x")).andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("KEY_NOT_FOUND"));
+    }
+
+    // ------------------------------------------------------------------
     // grants endpoint
     // ------------------------------------------------------------------
 
@@ -303,6 +393,26 @@ class MeVirtualKeyApiIntegrationTest {
                 .andExpect(jsonPath("$.grants[0].models[0]").value(MODEL_B))
                 .andExpect(jsonPath("$.grants[0].models[1]").value(MODEL_A))
                 .andExpect(jsonPath("$.purposes[0]").isNotEmpty());
+    }
+
+    @Test
+    @DisplayName("#1145: the unattributed bucket is not offered as a bindable project")
+    void grantsEndpointOmitsUnattributedBucket() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        fx.insertSystemProject();
+
+        // What feeds the key-creation picker has to agree with what creation accepts:
+        // requireBindableProject rejects a system project (#647), so listing it here
+        // offers a choice that can only come back 400 PROJECT_NOT_SELECTABLE. An admin
+        // sees every ACTIVE project, so the endpoint serves it with no grant at all —
+        // the fixture above has none. (The dropdown narrows this list to the projects a
+        // grant covers, so the option became *visible* once an admin granted the
+        // bucket;
+        // the response was wrong either way.)
+        mockMvc.perform(get("/api/v1/me/grants").cookie(sessionCookie)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.projects.length()").value(1))
+                .andExpect(jsonPath("$.projects[0].id").value(fx.projectId.toString()));
     }
 
     // ------------------------------------------------------------------
@@ -331,6 +441,11 @@ class MeVirtualKeyApiIntegrationTest {
                 .header("X-CSRF-Token", csrfToken).content(objectMapper.writeValueAsString(payload)));
     }
 
+    private ResultActions patchJson(String path, Object payload) throws Exception {
+        return mockMvc.perform(patch(path).contentType(MediaType.APPLICATION_JSON).cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).content(objectMapper.writeValueAsString(payload)));
+    }
+
     private RouteSnapshot snapshot() {
         return new JdbcRouteSnapshotLoader(jdbc, objectMapper).load(1L, Instant.now());
     }
@@ -355,6 +470,83 @@ class MeVirtualKeyApiIntegrationTest {
     }
 
     /** Direct JDBC fixtures: catalog, project, grant, credential. */
+    // ------------------------------------------------------------------
+    // ADR-0018: single key, multiple projects
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("create with projectIds binds one key to several projects (ADR-0018)")
+    void createBindsMultipleProjects() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        fx.insertSecondProjectWithGrant("qa-tag", "P2");
+
+        MvcResult r = postJson("/api/v1/me/virtual-keys",
+                Map.of("name", "multi-project-key", "projectId", fx.projectId, "projectIds",
+                        List.of(fx.projectId, fx.secondProjectId), "providerProductId", fx.productId,
+                        "credentialGrantId", fx.grantId, "purpose", "CLAUDE_CODE"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.boundProjects.length()").value(2)).andReturn();
+        String keyId = (String) objectMapper.readValue(r.getResponse().getContentAsString(), Map.class).get("id");
+
+        // Both bindings persisted, each with its own grant.
+        Integer bindings = jdbc.queryForObject(
+                "SELECT count(*) FROM key_project_binding WHERE virtual_key_id = :id AND status = 'ACTIVE'",
+                new MapSqlParameterSource("id", UUID.fromString(keyId)), Integer.class);
+        assertThat(bindings).isEqualTo(2);
+
+        // The route snapshot exposes one binding per (key, tag): the presented
+        // label selects the project, credential, product and granted models.
+        RouteSnapshot snapshot = snapshot();
+        RouteSnapshot.BindingRecord primary = snapshot.binding(UUID.fromString(keyId), TAG);
+        RouteSnapshot.BindingRecord secondary = snapshot.binding(UUID.fromString(keyId), "qa-tag");
+        assertThat(primary).isNotNull();
+        assertThat(secondary).isNotNull();
+        assertThat(primary.projectId()).isEqualTo(fx.projectId);
+        assertThat(secondary.projectId()).isEqualTo(fx.secondProjectId);
+        assertThat(secondary.credentialId()).isEqualTo(fx.secondCredentialId);
+        assertThat(secondary.grantId()).isEqualTo(fx.secondGrantId);
+        // An unbound label resolves to nothing (uniform invalid-key path).
+        assertThat(snapshot.binding(UUID.fromString(keyId), "someone-elses-tag")).isNull();
+    }
+
+    @Test
+    @DisplayName("an additional project without a matching grant is refused (ADR-0018)")
+    void additionalProjectWithoutGrantIsRefused() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        fx.insertSecondProjectWithoutGrant("qa-tag", "P2");
+
+        postJson("/api/v1/me/virtual-keys",
+                Map.of("name", "multi-project-key", "projectId", fx.projectId, "projectIds",
+                        List.of(fx.projectId, fx.secondProjectId), "providerProductId", fx.productId,
+                        "credentialGrantId", fx.grantId, "purpose", "CLAUDE_CODE"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("PROJECT_GRANT_MISSING"));
+    }
+
+    @Test
+    @DisplayName("rotation mirrors every project binding (ADR-0018)")
+    void rotateMirrorsAllBindings() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        fx.insertSecondProjectWithGrant("qa-tag", "P2");
+
+        MvcResult created = postJson("/api/v1/me/virtual-keys",
+                Map.of("name", "multi-project-key", "projectId", fx.projectId, "projectIds",
+                        List.of(fx.projectId, fx.secondProjectId), "providerProductId", fx.productId,
+                        "credentialGrantId", fx.grantId, "purpose", "CLAUDE_CODE"))
+                .andExpect(status().isCreated()).andReturn();
+        String keyId = (String) objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id");
+
+        MvcResult rotated = postJson("/api/v1/me/virtual-keys/" + keyId + "/rotate", Map.of())
+                .andExpect(status().isOk()).andReturn();
+        String newKeyId = (String) objectMapper.readValue(rotated.getResponse().getContentAsString(), Map.class)
+                .get("id");
+
+        RouteSnapshot snapshot = snapshot();
+        assertThat(snapshot.binding(UUID.fromString(newKeyId), TAG)).isNotNull();
+        assertThat(snapshot.binding(UUID.fromString(newKeyId), "qa-tag")).isNotNull();
+    }
+
     private final class Fixture {
         final UUID tenantId = UUID.fromString("00000000-0000-0000-0000-000000000001");
         final UUID providerId = UUID.randomUUID();
@@ -364,14 +556,20 @@ class MeVirtualKeyApiIntegrationTest {
         final UUID projectId = UUID.randomUUID();
         final UUID grantId = UUID.randomUUID();
         final UUID adminId = UUID.randomUUID();
+        final UUID secondProjectId = UUID.randomUUID();
+        final UUID secondSubscriptionId = UUID.randomUUID();
+        final UUID secondCredentialId = UUID.randomUUID();
+        final UUID secondGrantId = UUID.randomUUID();
+        final UUID systemProjectId = UUID.randomUUID();
 
         void reset() {
             // Child-first FK order: virtual keys reference grants, credentials,
             // projects and users; grants reference credentials; etc.
             for (String table : List.of("virtual_key_models", "key_project_binding", "model_approval", "virtual_keys",
-                    "project_provider_grant_models", "project_provider_grants", "upstream_credential_versions",
-                    "upstream_credentials", "plan_seats", "upstream_subscriptions", "project_memberships", "projects",
-                    "provider_products", "providers", "admin_audit_events", "user_sessions", "users")) {
+                    "project_provider_grant_models", "project_provider_grants", "unattributed_policy",
+                    "upstream_credential_versions", "upstream_credentials", "plan_seats", "upstream_subscriptions",
+                    "project_memberships", "project_repositories", "projects", "provider_products", "providers",
+                    "admin_audit_events", "user_sessions", "users")) {
                 try {
                     jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
                 } catch (Exception ignored) {
@@ -426,6 +624,63 @@ class MeVirtualKeyApiIntegrationTest {
                         INSERT INTO project_provider_grant_models (tenant_id, grant_id, model_id)
                         VALUES (:tenantId, :grantId, :model)
                         """, new MapSqlParameterSource("tenantId", tenantId).addValue("grantId", grantId)
+                        .addValue("model", model));
+            }
+        }
+
+        /**
+         * The UNATTRIBUTED bucket shape the policy service creates (#647): ACTIVE, no
+         * routing tag, {@code system = true}. An admin's project options come from
+         * every ACTIVE project in the tenant, so this one needs no grant to show up.
+         */
+        void insertSystemProject() {
+            jdbc.update("""
+                    INSERT INTO projects (id, tenant_id, code, name, description, status, project_tag, system, version)
+                    VALUES (:id, :tenantId, 'UNATTRIBUTED', '未归属（系统）', 'CAA 未归属桶', 'ACTIVE', NULL, TRUE, 0)
+                    """, new MapSqlParameterSource("id", systemProjectId).addValue("tenantId", tenantId));
+        }
+
+        void insertSecondProjectWithGrant(String tag, String code) {
+            insertSecondProject(tag, code, true);
+        }
+
+        void insertSecondProjectWithoutGrant(String tag, String code) {
+            insertSecondProject(tag, code, false);
+        }
+
+        private void insertSecondProject(String tag, String code, boolean withGrant) {
+            MapSqlParameterSource p = new MapSqlParameterSource();
+            p.addValue("tenantId", tenantId).addValue("projectId", secondProjectId)
+                    .addValue("subscriptionId", secondSubscriptionId).addValue("credentialId", secondCredentialId)
+                    .addValue("grantId", secondGrantId).addValue("productId", productId).addValue("tag", tag)
+                    .addValue("code", code).addValue("adminId", adminId);
+            jdbc.update("""
+                    INSERT INTO projects (id, tenant_id, code, name, status, project_tag, version)
+                    VALUES (:projectId, :tenantId, :code, 'Project Two', 'ACTIVE', :tag, 0)
+                    """, p);
+            if (!withGrant) {
+                return;
+            }
+            jdbc.update("""
+                    INSERT INTO upstream_subscriptions
+                        (id, tenant_id, provider_product_id, name, billing_mode, status, version)
+                    VALUES (:subscriptionId, :tenantId, :productId, 'Sub2', 'PAYG', 'ACTIVE', 0)
+                    """, p);
+            jdbc.update("""
+                    INSERT INTO upstream_credentials (id, tenant_id, subscription_id, credential_name, status, version)
+                    VALUES (:credentialId, :tenantId, :subscriptionId, 'Cred2', 'ACTIVE', 0)
+                    """, p);
+            jdbc.update("""
+                    INSERT INTO project_provider_grants
+                        (id, tenant_id, project_id, provider_product_id, upstream_credential_id, status, created_by,
+                         version)
+                    VALUES (:grantId, :tenantId, :projectId, :productId, :credentialId, 'ACTIVE', :adminId, 0)
+                    """, p);
+            for (String model : List.of(MODEL_A, MODEL_B)) {
+                jdbc.update("""
+                        INSERT INTO project_provider_grant_models (tenant_id, grant_id, model_id)
+                        VALUES (:tenantId, :grantId, :model)
+                        """, new MapSqlParameterSource("tenantId", tenantId).addValue("grantId", secondGrantId)
                         .addValue("model", model));
             }
         }

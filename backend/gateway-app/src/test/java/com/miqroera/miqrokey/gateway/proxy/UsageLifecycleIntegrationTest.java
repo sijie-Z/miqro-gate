@@ -26,6 +26,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -56,11 +57,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  * </p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
-        "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration,"
-                + "org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration,"
-                + "org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration",
+        "spring.autoconfigure.exclude=org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration,"
+                + "org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration,"
+                + "org.springframework.boot.jdbc.autoconfigure.DataSourceTransactionManagerAutoConfiguration",
         "miqrokey.gateway.persistence.enabled=true", "miqrokey.gateway.route-snapshot.refresh-interval=1h",
         "spring.flyway.enabled=true"})
+@AutoConfigureWebTestClient
 @Import(GatewayAuthTestConfig.class)
 @Tag("integration")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
@@ -73,7 +75,7 @@ class UsageLifecycleIntegrationTest {
 
     static {
         POSTGRES = new PostgreSQLContainer<>(DockerImageName
-                .parse("postgres:17.6-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73")
+                .parse("postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94")
                 .asCompatibleSubstituteFor("postgres")).withDatabaseName("miqrokey_test").withUsername("miqrokey_test")
                 .withPassword("miqrokey_test");
         POSTGRES.start();
@@ -146,6 +148,38 @@ class UsageLifecycleIntegrationTest {
     // -------------------------------------------------------------------
 
     @Test
+    @Order(0)
+    @DisplayName("a context-limit rejection (413) never reaches upstream and writes no lifecycle row")
+    void contextLimitRejectionWritesNoLifecycleRow() throws Exception {
+        // Runs before @Order(8), which closes the mock provider for the rest of
+        // the class. Control request first: the same context does open a row for
+        // a request that reaches upstream, so the zero-row assertion below cannot
+        // pass vacuously.
+        mockProvider.configure(
+                AnthropicMockProvider.ResponseConfig.builder().statusCode(200).contentType("application/json")
+                        .header("x-request-id", "req-lifecycle-000").body(AnthropicFixtures.RESPONSE_BASIC).build());
+        webTestClient.post().uri("/v1/messages").bodyValue(AnthropicFixtures.REQUEST_NON_STREAMING).exchange()
+                .expectStatus().isOk().expectBody().returnResult().getResponseBody();
+        assertThat(awaitLatestLifecycleRow()).containsEntry("request_status", "SUCCEEDED");
+
+        mockProvider.reset();
+        long mark = System.currentTimeMillis();
+
+        // 200001 ASCII characters: over the shipped context-limit default
+        // (200000) yet well inside the 256KB body buffer, so only the pre-check
+        // can reject it (#553).
+        webTestClient.post().uri("/v1/messages").bodyValue(anthropicBodyOfLength(200_001)).exchange().expectStatus()
+                .isEqualTo(413).expectBody().returnResult().getResponseBody();
+
+        usageEventBus.flush();
+        Thread.sleep(500); // a row opened by mistake would be written asynchronously
+        usageEventBus.flush();
+
+        assertThat(countLifecycleRowsSince(mark)).isZero();
+        assertThat(mockProvider.getCapturedRequests()).isEmpty();
+    }
+
+    @Test
     @Order(1)
     @DisplayName("non-streaming 200 finalizes a SUCCEEDED record with parsed usage")
     void nonStreamingSuccessFinalizesSucceededRow() throws Exception {
@@ -196,8 +230,8 @@ class UsageLifecycleIntegrationTest {
         assertThat(row).containsEntry("request_status", "SUCCEEDED");
         assertThat(row).containsEntry("streaming", true);
         assertThat(row).containsEntry("usage_missing", false);
-        // Anthropic SSE carries input/output tokens (merged across message_start
-        // and message_delta) but no OpenAI-style total_tokens field.
+        // Anthropic SSE carries input/output tokens (the cumulative counters of
+        // message_start/message_delta) but no OpenAI-style total_tokens field.
         assertThat(row.get("input_tokens")).isNotNull();
         assertThat(row.get("output_tokens")).isNotNull();
         assertThat(row.get("total_tokens")).isNull();
@@ -206,6 +240,48 @@ class UsageLifecycleIntegrationTest {
 
     @Test
     @Order(3)
+    @DisplayName("streaming usage equals the provider's counters instead of summing them across events")
+    void streamingUsageIsNotDoubleCountedAcrossEvents() throws Exception {
+        // RESPONSE_STREAMING_SSE reports usage TWICE for the same message:
+        // message_start {"input_tokens":10,"output_tokens":0} and message_delta
+        // {"input_tokens":10,"output_tokens":8,...}. Anthropic usage counters are
+        // cumulative within one response, so the record must carry 10/8 — summing
+        // the two events would bill the same input tokens twice.
+        mockProvider.configure(
+                AnthropicMockProvider.ResponseConfig.builder().statusCode(200).contentType("text/event-stream")
+                        .body(AnthropicFixtures.RESPONSE_STREAMING_SSE).streaming(true).build());
+
+        webTestClient.post().uri("/v1/messages").bodyValue(AnthropicFixtures.REQUEST_STREAMING).exchange()
+                .expectStatus().isOk().expectBody().returnResult().getResponseBody();
+
+        Map<String, Object> row = awaitLatestLifecycleRow();
+        assertThat(row).containsEntry("request_status", "SUCCEEDED");
+        assertThat(row).containsEntry("input_tokens", 10L);
+        assertThat(row).containsEntry("output_tokens", 8L);
+    }
+
+    @Test
+    @Order(4)
+    @DisplayName("prompt cache usage (cache_read / cache_creation) lands in the lifecycle row")
+    void promptCacheUsageLandsInLifecycleRow() throws Exception {
+        mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                .contentType("application/json").body(AnthropicFixtures.RESPONSE_CACHE_USAGE).build());
+
+        webTestClient.post().uri("/v1/messages").bodyValue(AnthropicFixtures.REQUEST_WITH_CACHE).exchange()
+                .expectStatus().isOk().expectBody().returnResult().getResponseBody();
+
+        Map<String, Object> row = awaitLatestLifecycleRow();
+        assertThat(row).containsEntry("request_status", "SUCCEEDED");
+        assertThat(row).containsEntry("input_tokens", 5L);
+        assertThat(row).containsEntry("output_tokens", 12L);
+        // Prompt-cache accounting (ADR-0022 §11 D1 / P0): clients are billed on
+        // these two counts, so they must survive the whole pipeline.
+        assertThat(row).containsEntry("cache_creation_input_tokens", 150L);
+        assertThat(row).containsEntry("cache_read_input_tokens", 300L);
+    }
+
+    @Test
+    @Order(5)
     @DisplayName("a 200 without usage fields is explicitly flagged usage_missing")
     void successWithoutUsageIsMarkedUsageMissing() throws Exception {
         mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
@@ -221,7 +297,7 @@ class UsageLifecycleIntegrationTest {
     }
 
     @Test
-    @Order(4)
+    @Order(6)
     @DisplayName("a non-2xx upstream response finalizes UPSTREAM_REJECTED")
     void upstreamRejectionFinalizesRejectedRow() throws Exception {
         mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(429)
@@ -237,7 +313,7 @@ class UsageLifecycleIntegrationTest {
     }
 
     @Test
-    @Order(5)
+    @Order(7)
     @DisplayName("a client disconnect mid-stream finalizes CLIENT_CANCELLED")
     void clientCancellationFinalizesCancelledRow() throws Exception {
         mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
@@ -260,7 +336,7 @@ class UsageLifecycleIntegrationTest {
     }
 
     @Test
-    @Order(6)
+    @Order(8)
     @DisplayName("an unreachable upstream finalizes UPSTREAM_UNAVAILABLE (502 to the client)")
     void upstreamOutageFinalizesUnavailableRow() throws Exception {
         mockProvider.close(); // port stops listening -> connection refused
@@ -302,6 +378,26 @@ class UsageLifecycleIntegrationTest {
             Thread.sleep(100);
         }
         throw new AssertionError("No lifecycle row appeared within 15s");
+    }
+
+    /** Counts fixture-tenant lifecycle rows that started at or after the mark. */
+    private int countLifecycleRowsSince(long mark) {
+        Integer rows = jdbc.queryForObject("""
+                SELECT count(*) FROM request_usage_records
+                WHERE tenant_id = :tenantId AND started_at >= :since
+                """, new MapSqlParameterSource().addValue("tenantId", GatewayTestKeys.TENANT_ID).addValue("since",
+                new java.sql.Timestamp(mark)), Integer.class);
+        return rows == null ? 0 : rows;
+    }
+
+    /** Builds an Anthropic body of exactly {@code chars} ASCII characters. */
+    private static String anthropicBodyOfLength(int chars) {
+        String prefix = "{\"model\":\"claude-sonnet-5-20250915\",\"max_tokens\":1024,"
+                + "\"messages\":[{\"role\":\"user\",\"content\":\"";
+        String suffix = "\"}]}";
+        int filler = chars - prefix.length() - suffix.length();
+        assertThat(filler).isPositive();
+        return prefix + "x".repeat(filler) + suffix;
     }
 
     /** Writes a fresh random 32-byte key file (base64) for the crypto config. */

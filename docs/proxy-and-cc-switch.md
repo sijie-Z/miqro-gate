@@ -18,7 +18,7 @@
 CC Switch 配置 Claude Code / Claude Desktop / Codex
 ```
 
-门户不生成 CC Switch 配置，不提供 Deeplink 或一键导入。
+门户不生成 CC Switch 配置文件；一键导入通过 CC Switch 深链协议（ccswitch://v1/import）预填其导入确认框，由用户在 CC Switch 内确认，门户不直接读写 CC Switch 配置文件。
 
 ## 2. Gateway 与 CC Switch 的职责
 
@@ -165,3 +165,9 @@ Virtual Key 到真实凭证的确定映射可以避免同一会话在多个真�
 | Codex | Provider 配置或本地路由 | Responses SSE、function calls、reasoning、取消、usage |
 
 Claude Desktop 第三方 Provider 当前主要支持 Windows 与 macOS；Linux 不作为首版 Claude Desktop 验收平台。Claude Code 与 Codex 需要覆盖 Windows 开发环境和 Linux 部署访问。
+
+## MCP 与留痕边界注（2026-09-07 增补）
+
+- MCP 调用代理（`/mcpservers/{name}/mcp`，两级 ACL/韧性/元数据日志）与内容留痕旁路（V31，默认关）
+  均在本仓库 gateway/control-plane 应用内实现——见 architecture §10、api-contract §5.21-5.26 与
+  ADR-0013/0014。CC Switch 边界仅剩「协议转换与客户端配置」；其余网关职责不再外置。

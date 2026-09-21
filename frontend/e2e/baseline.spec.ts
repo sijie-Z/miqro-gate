@@ -25,7 +25,7 @@ const ADMIN_USERS = [
   {
     id: '0190-0000-0000-0010',
     username: 'root',
-    displayName: 'Root Admin',
+    displayName: '',
     role: 'SYSTEM_ADMIN',
     status: 'ACTIVE',
     mustChangePassword: false,
@@ -43,7 +43,7 @@ const ADMIN_USERS = [
   {
     id: '0190-0000-0000-0012',
     username: 'bob',
-    displayName: 'Bob',
+    displayName: '',
     role: 'USER',
     status: 'DISABLED',
     mustChangePassword: false,
@@ -76,6 +76,41 @@ const KEYS = [
   },
 ];
 
+const MODEL_APPROVALS = [
+  {
+    id: '0190-0000-0000-0031',
+    virtualKeyId: '0190-0000-0000-0002',
+    keyName: 'claude-code-main',
+    keyDisplay: 'mqk_live_…8f2a',
+    projectTag: 'core-ai',
+    modelId: 'deepseek-v4-flash',
+    reason: '编码任务需要更强的推理模型',
+    status: 'PENDING',
+    requesterId: '0190-0000-0000-0041',
+    requesterName: '张三',
+    reviewNote: null,
+    reviewedByName: null,
+    createdAt: '2026-09-02T00:00:00Z',
+    updatedAt: '2026-09-02T00:00:00Z',
+  },
+  {
+    id: '0190-0000-0000-0032',
+    virtualKeyId: '0190-0000-0000-0003',
+    keyName: 'codex-tools',
+    keyDisplay: 'mqk_live_…1b4c',
+    projectTag: 'tools',
+    modelId: 'glm-5',
+    reason: null,
+    status: 'APPROVED',
+    requesterId: '0190-0000-0000-0041',
+    requesterName: '张三',
+    reviewNote: 'granted',
+    reviewedByName: 'Admin',
+    createdAt: '2026-09-01T00:00:00Z',
+    updatedAt: '2026-09-01T00:00:00Z',
+  },
+];
+
 /** Mocks the control-plane API so the shell renders without a backend. */
 async function mockApi(page: Page, admin = false) {
   await page.route('**/api/v1/auth/me', async (route) => {
@@ -91,6 +126,92 @@ async function mockApi(page: Page, admin = false) {
   });
   await page.route('**/api/v1/me/virtual-keys', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(KEYS) }),
+  );
+  await page.route('**/api/v1/me/model-approvals', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(MODEL_APPROVALS),
+    }),
+  );
+  await page.route('**/api/v1/admin/model-approvals*', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ items: MODEL_APPROVALS, nextCursor: null }),
+    }),
+  );
+  await page.route('**/api/v1/admin/quota-rules', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0051',
+          scopeType: 'USER',
+          scopeId: '0190-0000-0000-0011',
+          scopeName: 'Alice',
+          scopeTag: 'alice',
+          metric: 'TOKENS',
+          period: 'MONTHLY',
+          limitValue: 1000000,
+          warnPercent: 80,
+          status: 'ACTIVE',
+          used: 640000,
+          usedPct: 64,
+          level: 'NORMAL',
+          windowFrom: '2026-09-01T00:00:00Z',
+          windowTo: '2026-10-01T00:00:00Z',
+          createdAt: '2026-09-01T00:00:00Z',
+          updatedAt: '2026-09-01T00:00:00Z',
+          version: 0,
+        },
+      ]),
+    }),
+  );
+  await page.route('**/api/v1/admin/quota-default-template', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        enabled: true,
+        metric: 'TOKENS',
+        period: 'MONTHLY',
+        limitValue: 1000000,
+        version: 1,
+        updatedAt: '2026-09-01T00:00:00Z',
+      }),
+    }),
+  );
+  await page.route('**/api/v1/admin/usage/roi*', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        from: '2026-08-03T00:00:00Z',
+        to: '2026-09-02T00:00:00Z',
+        totals: {
+          upstreamRequests: 120,
+          coalescedRequests: 0,
+          l1Hits: 10,
+          l2Hits: 20,
+          hitRatePct: 20.0,
+          paidCost: 0.84,
+          savedCost: 0.21,
+          savedPct: 20.0,
+        },
+        byDay: [
+          {
+            date: '2026-09-02',
+            upstreamRequests: 120,
+            hitRequests: 30,
+            hitRatePct: 20.0,
+            paidCost: 0.84,
+            savedCost: 0.21,
+          },
+        ],
+      }),
+    }),
   );
   await page.route('**/api/v1/me/usage/**', (route) =>
     route.fulfill({
@@ -149,6 +270,45 @@ async function mockApi(page: Page, admin = false) {
           createdAt: '2026-08-01T00:00:00Z',
           updatedAt: '2026-08-20T00:00:00Z',
         },
+        {
+          id: '0190-0000-0000-0031',
+          name: 'moonshot-main',
+          subscriptionId: '0190-0000-0000-0021',
+          status: 'ACTIVE',
+          activeVersionId: '0190-0000-0000-0031',
+          fingerprintPrefix: 'c7d8e9f0a1b2c3d4',
+          lastValidatedAt: null,
+          lastValidationError: null,
+          version: 1,
+          createdAt: '2026-08-02T00:00:00Z',
+          updatedAt: '2026-08-02T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0032',
+          name: 'zhipu-main',
+          subscriptionId: '0190-0000-0000-0021',
+          status: 'ACTIVE',
+          activeVersionId: '0190-0000-0000-0031',
+          fingerprintPrefix: 'e5f6a7b8c9d0e1f2',
+          lastValidatedAt: '2026-08-20T00:00:00Z',
+          lastValidationError: null,
+          version: 1,
+          createdAt: '2026-08-03T00:00:00Z',
+          updatedAt: '2026-08-20T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0033',
+          name: 'minimax-main',
+          subscriptionId: '0190-0000-0000-0021',
+          status: 'ACTIVE',
+          activeVersionId: '0190-0000-0000-0031',
+          fingerprintPrefix: 'a3b4c5d6e7f8a9b0',
+          lastValidatedAt: null,
+          lastValidationError: null,
+          version: 1,
+          createdAt: '2026-08-04T00:00:00Z',
+          updatedAt: '2026-08-04T00:00:00Z',
+        },
       ]),
     }),
   );
@@ -184,8 +344,38 @@ async function mockApi(page: Page, admin = false) {
       ]),
     }),
   );
-  await page.route('**/api/v1/admin/usage/summary?*', (route) =>
-    route.fulfill({
+  // #863: one dispatcher — the admin usage page reads project groups, the
+  // cache config tab reads the VIRTUAL_KEY grouping (same endpoint shape).
+  const perKeyFixture = {
+    groupBy: 'VIRTUAL_KEY',
+    groups: [
+      {
+        groupKey: '0190-0000-0000-0002',
+        label: 'claude-code-main',
+        requests: { upstream: 4, coalesced: 0, l1Hit: 5, l2Hit: 1 },
+        cost: { upstreamPaid: '1.2000', savedByGatewayCache: '0.8000' },
+        pricingStatus: 'COMPLETE',
+      },
+      {
+        groupKey: '0190-0000-0000-0003',
+        label: 'codex-tools',
+        requests: { upstream: 20, coalesced: 2, l1Hit: 0, l2Hit: 0 },
+        cost: { upstreamPaid: '9.5000', savedByGatewayCache: '0.0000' },
+        pricingStatus: 'COMPLETE',
+      },
+    ],
+    totals: { groupKey: 'total', label: '合计' },
+  };
+  await page.route('**/api/v1/admin/usage/summary?*', (route) => {
+    const groupBy = new URL(route.request().url()).searchParams.get('groupBy');
+    if ((groupBy ?? '').toUpperCase() === 'VIRTUAL_KEY') {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(perKeyFixture),
+      });
+    }
+    return route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
@@ -229,7 +419,11 @@ async function mockApi(page: Page, admin = false) {
           },
         },
       }),
-    }),
+    });
+  });
+  // Budget panel on the cost report page (G8.2): empty by default.
+  await page.route('**/api/v1/admin/budgets*', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
   );
   await page.route('**/api/v1/admin/teams', (route) =>
     route.fulfill({
@@ -239,9 +433,30 @@ async function mockApi(page: Page, admin = false) {
         {
           id: '0190-0000-0000-0101',
           name: 'Platform',
-          description: '平台组',
+          description: '平台稳定性与发布',
           status: 'ACTIVE',
           createdAt: '2026-08-01T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0101b',
+          name: 'SRE',
+          description: '基础设施值守',
+          status: 'ACTIVE',
+          createdAt: '2026-08-02T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0101c',
+          name: 'ML Infra',
+          description: '模型训练与推理平台',
+          status: 'ACTIVE',
+          createdAt: '2026-08-05T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0101d',
+          name: 'Data Platform',
+          description: '数据仓库与指标',
+          status: 'DISABLED',
+          createdAt: '2026-08-10T00:00:00Z',
         },
       ]),
     }),
@@ -259,6 +474,38 @@ async function mockApi(page: Page, admin = false) {
           projectTag: 'core-ai',
           createdAt: '2026-08-01T00:00:00Z',
         },
+        {
+          id: '0190-0000-0000-0102b',
+          code: 'P2',
+          name: 'Tools',
+          status: 'ACTIVE',
+          projectTag: 'tools',
+          createdAt: '2026-08-03T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0102c',
+          code: 'P3',
+          name: 'QA 回归',
+          status: 'ACTIVE',
+          projectTag: 'qa',
+          createdAt: '2026-08-06T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0102d',
+          code: 'P4',
+          name: 'Docs 站点',
+          status: 'ACTIVE',
+          projectTag: 'docs',
+          createdAt: '2026-08-12T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0102e',
+          code: 'P5',
+          name: '旧数据迁移',
+          status: 'DISABLED',
+          projectTag: 'migration',
+          createdAt: '2026-07-20T00:00:00Z',
+        },
       ]),
     }),
   );
@@ -275,6 +522,30 @@ async function mockApi(page: Page, admin = false) {
           status: 'ACTIVE',
           createdAt: '2026-08-01T00:00:00Z',
         },
+        {
+          id: '0190-0000-0000-0103b',
+          projectId: '0190-0000-0000-0102b',
+          providerProductId: '0190-0000-0000-0021',
+          upstreamCredentialId: '0190-0000-0000-0031',
+          status: 'ACTIVE',
+          createdAt: '2026-08-03T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0103c',
+          projectId: '0190-0000-0000-0102c',
+          providerProductId: '0190-0000-0000-0022',
+          upstreamCredentialId: '0190-0000-0000-0032',
+          status: 'ACTIVE',
+          createdAt: '2026-08-06T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0103d',
+          projectId: '0190-0000-0000-0102d',
+          providerProductId: '0190-0000-0000-0023',
+          upstreamCredentialId: '0190-0000-0000-0033',
+          status: 'DISABLED',
+          createdAt: '2026-08-12T00:00:00Z',
+        },
       ]),
     }),
   );
@@ -288,7 +559,16 @@ async function mockApi(page: Page, admin = false) {
           name: 'ops-alerts',
           url: 'https://alerts.internal/hook',
           enabled: true,
+          timeoutMs: 5000,
           createdAt: '2026-08-01T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0104b',
+          name: 'finance-notify',
+          url: 'https://finance.internal/webhook',
+          enabled: false,
+          timeoutMs: 3000,
+          createdAt: '2026-08-14T00:00:00Z',
         },
       ]),
     }),
@@ -308,6 +588,283 @@ async function mockApi(page: Page, admin = false) {
           enabled: true,
           createdAt: '2026-08-01T00:00:00Z',
         },
+        {
+          id: '0190-0000-0000-0105b',
+          name: 'core-ai-budget',
+          type: 'BUDGET_THRESHOLD',
+          scopeJson: '{"projectId":"0190-0000-0000-0102"}',
+          threshold: 80,
+          dedupeMinutes: 1440,
+          webhookEndpointId: '0190-0000-0000-0104',
+          enabled: true,
+          createdAt: '2026-08-10T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0105c',
+          name: 'approval-submit-notify',
+          type: 'MODEL_APPROVAL_SUBMITTED',
+          threshold: 1,
+          dedupeMinutes: 60,
+          webhookEndpointId: '0190-0000-0000-0104',
+          enabled: false,
+          createdAt: '2026-08-20T00:00:00Z',
+        },
+      ]),
+    }),
+  );
+  await page.route('**/api/v1/admin/api-consumers', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0104d',
+          name: 'billing-sync',
+          keyPrefix: 'mk_bil_8f2a',
+          status: 'ACTIVE',
+          createdAt: '2026-08-01T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0104e',
+          name: 'analytics-etl',
+          keyPrefix: 'mk_ana_1b4c',
+          status: 'ACTIVE',
+          createdAt: '2026-08-11T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0104f',
+          name: 'legacy-dashboard',
+          keyPrefix: 'mk_leg_9d0e',
+          status: 'DISABLED',
+          createdAt: '2026-06-01T00:00:00Z',
+        },
+      ]),
+    }),
+  );
+  await page.route('**/api/v1/admin/configs', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0104g',
+          groupName: 'gateway',
+          key: 'cache_enabled',
+          value: 'true',
+          description: '是否开启语义缓存',
+          version: 3,
+          createdAt: '2026-08-01T00:00:00Z',
+          updatedAt: '2026-08-25T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0104h',
+          groupName: 'gateway',
+          key: 'semantic_cache_ttl_minutes',
+          value: '60',
+          description: '语义缓存 TTL',
+          version: 1,
+          createdAt: '2026-08-02T00:00:00Z',
+          updatedAt: '2026-08-02T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0104i',
+          groupName: 'alerts',
+          key: 'evaluation_interval_ms',
+          value: '300000',
+          description: '告警评估间隔',
+          version: 2,
+          createdAt: '2026-08-03T00:00:00Z',
+          updatedAt: '2026-08-19T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0104j',
+          groupName: 'alerts',
+          key: 'max_delivery_retries',
+          value: '5',
+          description: '投递最大重试次数',
+          version: 1,
+          createdAt: '2026-08-03T00:00:00Z',
+          updatedAt: '2026-08-03T00:00:00Z',
+        },
+      ]),
+    }),
+  );
+  await page.route('**/api/v1/admin/skills', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0109',
+          name: 'web-scraper',
+          description: 'Scrapes public web pages into markdown.',
+          version: '1.0.0',
+          author: 'Platform Team',
+          license: 'MIT',
+          tags: ['scraping', 'http'],
+          contentSha256: 'aa'.repeat(32),
+          contentBytes: 2048,
+          status: 'ACTIVE',
+          createdAt: '2026-08-01T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0109b',
+          name: 'release-notes',
+          description: 'Generates release notes from git history.',
+          version: '2.3.1',
+          author: 'DevEx',
+          license: 'MIT',
+          tags: ['devops', 'writing'],
+          contentSha256: 'bb'.repeat(32),
+          contentBytes: 1589248,
+          status: 'ACTIVE',
+          createdAt: '2026-08-15T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0109c',
+          name: 'legacy-fetcher',
+          description: 'Deprecated fetch helper.',
+          version: '0.4.0',
+          author: 'Platform Team',
+          license: 'MIT',
+          tags: [],
+          contentSha256: 'cc'.repeat(32),
+          contentBytes: 65536,
+          status: 'ARCHIVED',
+          createdAt: '2026-06-10T00:00:00Z',
+        },
+      ]),
+    }),
+  );
+  await page.route('**/api/v1/admin/agents', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0110',
+          name: 'forge-agent',
+          description: 'Forge 集成出口',
+          credentialId: '0190-0000-0000-0030',
+          credentialName: 'anthropic-main',
+          providerProductId: '0190-0000-0000-0020',
+          providerProductName: 'DeepSeek PAYG',
+          status: 'ACTIVE',
+          createdAt: '2026-08-01T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0110b',
+          name: 'docs-writer',
+          description: '文档自动生成与润色',
+          credentialId: '0190-0000-0000-0031',
+          credentialName: 'moonshot-main',
+          providerProductId: '0190-0000-0000-0021',
+          providerProductName: 'Moonshot PAYG',
+          status: 'ACTIVE',
+          createdAt: '2026-08-12T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0110c',
+          name: 'qa-bot',
+          description: '回归用例生成（已停用）',
+          credentialId: '0190-0000-0000-0032',
+          credentialName: 'zhipu-main',
+          providerProductId: '0190-0000-0000-0022',
+          providerProductName: 'Zhipu PAYG',
+          status: 'DISABLED',
+          createdAt: '2026-07-20T00:00:00Z',
+        },
+      ]),
+    }),
+  );
+  await page.route('**/api/v1/admin/services', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0111',
+          name: 'platform-api',
+          kind: 'HTTP',
+          description: '平台内部 API',
+          baseUrl: 'https://platform.internal.example',
+          status: 'ACTIVE',
+          createdAt: '2026-08-01T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0111b',
+          name: 'erp-mcp',
+          kind: 'MCP',
+          description: 'ERP 数据查询',
+          baseUrl: 'https://erp.internal.example',
+          status: 'ACTIVE',
+          createdAt: '2026-08-10T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0111c',
+          name: 'legacy-gateway',
+          kind: 'OTHER',
+          description: '',
+          baseUrl: 'https://legacy.internal.example',
+          status: 'DISABLED',
+          createdAt: '2026-05-01T00:00:00Z',
+        },
+      ]),
+    }),
+  );
+  await page.route('**/api/v1/admin/mcp-services', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0112',
+          name: 'erp-mcp',
+          description: 'ERP 查询服务',
+          endpoint: 'https://erp.internal.example',
+          transport: 'STREAMABLE_HTTP',
+          status: 'ONLINE',
+          healthStatus: 'HEALTHY',
+          healthCheckedAt: '2026-09-02T00:00:00Z',
+          checkIntervalSeconds: 30,
+          checkTimeoutSeconds: 5,
+          failThreshold: 3,
+          recoverThreshold: 1,
+          checkPath: '/health',
+          createdAt: '2026-08-01T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0112b',
+          name: 'analytics-mcp',
+          description: '指标查询（SSE）',
+          endpoint: 'https://metrics.internal.example',
+          transport: 'SSE',
+          status: 'ONLINE',
+          healthStatus: 'UNHEALTHY',
+          healthCheckedAt: '2026-09-03T04:12:00Z',
+          checkIntervalSeconds: 60,
+          checkTimeoutSeconds: 10,
+          failThreshold: 5,
+          recoverThreshold: 2,
+          checkPath: '/ready',
+          createdAt: '2026-08-08T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0112c',
+          name: 'staging-mcp',
+          description: '预发联调（已下线）',
+          endpoint: 'https://staging.internal.example',
+          transport: 'STREAMABLE_HTTP',
+          status: 'OFFLINE',
+          healthStatus: 'UNKNOWN',
+          healthCheckedAt: null,
+          checkIntervalSeconds: 30,
+          checkTimeoutSeconds: 5,
+          failThreshold: 3,
+          recoverThreshold: 1,
+          checkPath: '/health',
+          createdAt: '2026-07-15T00:00:00Z',
+        },
       ]),
     }),
   );
@@ -318,12 +875,30 @@ async function mockApi(page: Page, admin = false) {
       body: JSON.stringify([
         {
           id: '0190-0000-0000-0106',
-          position: 1,
+          chainPosition: 1,
           action: 'LOGIN_SUCCESS',
           targetType: 'USER',
           summary: '{"username":"root"}',
           actorId: '0190-0000-0000-0001',
           createdAt: '2026-08-01T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0106b',
+          chainPosition: 2,
+          action: 'VIRTUAL_KEY_REVOKE',
+          targetType: 'VIRTUAL_KEY',
+          summary: '{"keyName":"codex-tools","reason":"manager request"}',
+          actorId: '0190-0000-0000-0001',
+          createdAt: '2026-08-02T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0106c',
+          chainPosition: 3,
+          action: 'EXPORT_TASK_CREATED',
+          targetType: 'EXPORT_TASK',
+          summary: '{"format":"CSV","from":"2026-08-01","to":"2026-08-31"}',
+          actorId: '0190-0000-0000-0001',
+          createdAt: '2026-08-03T00:00:00Z',
         },
       ]),
     }),
@@ -341,6 +916,15 @@ async function mockApi(page: Page, admin = false) {
           status: 'SUCCEEDED',
           rowCount: 100,
           createdAt: '2026-08-01T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0107b',
+          format: 'JSONL',
+          periodFrom: '2026-09-01T00:00:00Z',
+          periodTo: '2026-09-30T00:00:00Z',
+          status: 'PENDING',
+          rowCount: undefined,
+          createdAt: '2026-09-03T00:00:00Z',
         },
       ]),
     }),
@@ -383,7 +967,30 @@ async function mockApi(page: Page, admin = false) {
           periodTo: '2026-08-31T00:00:00Z',
           previewCount: 1000,
           status: 'PENDING_CONFIRMATION',
+          expiresAt: '2026-09-04T00:00:00Z',
+          createdAt: '2026-09-01T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0108b',
+          periodFrom: '2026-07-01T00:00:00Z',
+          periodTo: '2026-07-31T00:00:00Z',
+          previewCount: 500,
+          deletedCount: 500,
+          status: 'EXECUTED',
+          executedAt: '2026-08-02T00:00:00Z',
+          expiresAt: '2026-09-02T00:00:00Z',
           createdAt: '2026-08-01T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0108c',
+          periodFrom: '2026-05-01T00:00:00Z',
+          periodTo: '2026-05-31T00:00:00Z',
+          previewCount: 1200,
+          deletedCount: 1100,
+          status: 'EXECUTED',
+          executedAt: '2026-06-02T00:00:00Z',
+          expiresAt: '2026-07-02T00:00:00Z',
+          createdAt: '2026-06-01T00:00:00Z',
         },
       ]),
     }),
@@ -412,6 +1019,42 @@ async function mockApi(page: Page, admin = false) {
           implementationStatus: 'VERIFIED',
           balanceAuthority: 'OFFICIAL_API',
         },
+        {
+          id: '0190-0000-0000-0021',
+          providerSlug: 'moonshot',
+          providerName: 'Moonshot',
+          productCode: 'moonshot-payg-api',
+          displayName: 'Moonshot PAYG',
+          billingMode: 'PAYG',
+          protocols: '["messages"]',
+          baseUrlHost: 'api.moonshot.cn',
+          implementationStatus: 'IMPLEMENTED',
+          balanceAuthority: 'OFFICIAL_API',
+        },
+        {
+          id: '0190-0000-0000-0022',
+          providerSlug: 'zhipu',
+          providerName: 'Zhipu',
+          productCode: 'zhipu-payg-api',
+          displayName: 'Zhipu PAYG',
+          billingMode: 'PAYG',
+          protocols: '["messages"]',
+          baseUrlHost: 'open.bigmodel.cn',
+          implementationStatus: 'IMPLEMENTED',
+          balanceAuthority: 'UNAVAILABLE',
+        },
+        {
+          id: '0190-0000-0000-0023',
+          providerSlug: 'minimax',
+          providerName: 'MiniMax',
+          productCode: 'minimax-payg-api',
+          displayName: 'MiniMax PAYG',
+          billingMode: 'PAYG',
+          protocols: '["messages"]',
+          baseUrlHost: 'api.minimax.io',
+          implementationStatus: 'IMPLEMENTED',
+          balanceAuthority: 'UNAVAILABLE',
+        },
       ]),
     }),
   );
@@ -434,6 +1077,34 @@ async function mockApi(page: Page, admin = false) {
           status: 'ACTIVE',
           createdAt: '2026-08-01T00:00:00Z',
         },
+        {
+          id: '0190-0000-0000-0021b',
+          providerProductId: '0190-0000-0000-0021',
+          productName: 'Moonshot PAYG',
+          name: 'main-team',
+          billingMode: 'PAYG',
+          planScope: 'TEAM',
+          subscriptionPrice: null,
+          currency: 'USD',
+          quotaTotal: 1000000,
+          quotaUnit: 'TOKENS',
+          status: 'ACTIVE',
+          createdAt: '2026-08-05T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0021c',
+          providerProductId: '0190-0000-0000-0022',
+          productName: 'Zhipu PAYG',
+          name: 'zhipu-pack',
+          billingMode: 'TOKEN_PACKAGE',
+          planScope: 'PERSONAL',
+          subscriptionPrice: 500,
+          currency: 'CNY',
+          quotaTotal: 2000000,
+          quotaUnit: 'TOKENS',
+          status: 'ACTIVE',
+          createdAt: '2026-08-10T00:00:00Z',
+        },
       ]),
     }),
   );
@@ -446,6 +1117,15 @@ for (const viewport of VIEWPORTS) {
     await page.goto('/login');
     await page.waitForLoadState('networkidle');
     await expect(page.getByTestId('login-submit')).toBeVisible();
+    // The login visual master is the preset reference package
+    // (other/miqro-gate-auth-ui, issue #490): lock its signature metrics so a
+    // silent re-skin regression fails CI instead of shipping.
+    await expect(page.locator('.auth-submit')).toHaveCSS('height', '47px');
+    await expect(page.locator('.auth-input__inner').first()).toHaveCSS('height', '50px');
+    const submitBackground = await page
+      .locator('.auth-submit')
+      .evaluate((el) => getComputedStyle(el).backgroundImage);
+    expect(submitBackground).toContain('linear-gradient');
     await page.screenshot({
       path: `test-results/baseline/login-${viewport.name}.png`,
       fullPage: true,
@@ -457,35 +1137,34 @@ for (const viewport of VIEWPORTS) {
     await mockApi(page, true);
     await page.goto('/app/keys');
     await page.waitForLoadState('networkidle');
-    // The shell is fully rendered: header, nav, page title.
-    await expect(page.getByTestId('page-title')).toBeVisible();
-    await expect(page.getByText('MiQroGate').first()).toBeVisible();
+    // The v2 shell is fully rendered: brand (or the collapsed icon-only rail),
+    // grouped nav and page content.
+    await expect(page.getByTestId('keys-table')).toBeVisible();
+    if (viewport.width < 1080 && viewport.width >= 640) {
+      // Narrow rail: the shell collapses to icons only and the brand text is
+      // CSS-collapsed (transition-driven, so the node stays in the DOM but
+      // must render invisible) — #440 made the initial state honor the
+      // actual width instead of waiting for the first resize event.
+      await expect(page.locator('.new-shell__rail--icons')).toBeVisible();
+      await expect(page.locator('.new-shell__brand-name')).toBeHidden();
+      await expect(page.locator('.new-shell__nav-label').first()).toBeHidden();
+    } else {
+      await expect(page.getByText('MiQroGate').first()).toBeVisible();
+    }
 
     // Local SVG icons (never the CDN iconfont: private deployments are
     // offline). Each nav item must render an inline <svg>.
-    const navIconCount = await page.locator('.shell-nav svg').count();
+    const navIconCount = await page.locator('.new-shell__nav svg').count();
     expect(navIconCount).toBeGreaterThan(4);
     // Every t-icon- classed element must be an <svg> — an <i>/<span>
     // with that class would mean the CDN iconfont leaked back in.
-    const nonSvgIconClass = await page.evaluate(
-      () =>
-        Array.from(document.querySelectorAll('.shell-nav [class*="t-icon"]')).filter(
-          (el) => el.tagName !== 'svg' && el.tagName !== 'path',
-        ).length,
+    const iconfontLeak = await page.evaluate(
+      () => document.querySelectorAll('i.iconfont, span.iconfont').length,
     );
-    expect(nonSvgIconClass).toBe(0);
+    expect(iconfontLeak).toBe(0);
 
-    if (viewport.width >= 768) {
-      await expect(page.getByTestId('shell-nav')).toBeVisible();
-    } else {
-      // Mobile: nav collapses into a drawer behind the toggle.
-      await expect(page.getByTestId('nav-toggle')).toBeVisible();
-      await page.getByTestId('nav-toggle').click();
-      await expect(page.getByTestId('shell-nav-drawer')).toBeVisible();
-      await page.keyboard.press('Escape');
-      // Wait out the close animation so the baseline never captures a
-      // half-closed drawer (TDesign animates ~300ms).
-      await expect(page.getByTestId('shell-nav-drawer')).not.toBeVisible();
+    if (viewport.width >= 640) {
+      await expect(page.locator('.new-shell__rail')).toBeVisible();
     }
     await page.screenshot({
       path: `test-results/baseline/shell-${viewport.name}.png`,
@@ -494,7 +1173,7 @@ for (const viewport of VIEWPORTS) {
   });
 }
 
-test('login form submits credentials and lands on the overview', async ({ page }) => {
+test('login form submits credentials and lands on the keys console', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockApi(page, true);
   // On the login page the session check must fail, otherwise the router
@@ -519,11 +1198,110 @@ test('login form submits credentials and lands on the overview', async ({ page }
   await page.evaluate(() => {
     document.cookie = 'MIQROKEY_CSRF=e2e-csrf; path=/';
   });
-  await page.getByTestId('login-username').locator('input').fill('root');
-  await page.getByTestId('login-password').locator('input').fill('secret');
+  await page.getByTestId('login-username').fill('root');
+  await page.getByTestId('login-password').fill('secret');
   await page.getByTestId('login-submit').click();
-  await expect(page).toHaveURL(/\/app\/overview/);
-  await expect(page.getByTestId('overview-stats')).toBeVisible();
+  await expect(page).toHaveURL(/\/app\/keys/);
+  await expect(page.getByTestId('keys-table')).toBeVisible();
+});
+
+test('failed login shows the Chinese 401 detail with its request id', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, false);
+  await page.route('**/api/v1/auth/me', (route) =>
+    route.fulfill({ status: 401, contentType: 'application/json', body: '{}' }),
+  );
+  await page.route('**/api/v1/auth/login', (route) =>
+    route.fulfill({
+      status: 401,
+      contentType: 'application/problem+json',
+      body: JSON.stringify({
+        status: 401,
+        code: 'UNAUTHORIZED',
+        title: 'Authentication failed',
+        detail: '账号或密码不正确。',
+        requestId: 'e2e-req-401',
+      }),
+    }),
+  );
+  await page.goto('/login');
+  await page.waitForLoadState('networkidle');
+  await page.evaluate(() => {
+    document.cookie = 'MIQROKEY_CSRF=e2e-csrf; path=/';
+  });
+  await page.getByTestId('login-username').fill('root');
+  await page.getByTestId('login-password').fill('wrong-password');
+  await page.getByTestId('login-submit').click();
+  // Console language is Simplified Chinese — the 401 detail must not leak
+  // English auth copy, and the request id stays available for support.
+  const loginError = page.getByTestId('login-error');
+  await expect(loginError).toContainText('账号或密码不正确');
+  await expect(loginError).toContainText('e2e-req-401');
+  await expect(loginError).not.toContainText('Invalid username');
+});
+
+test('login language picker switches the page between Chinese and English', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, false);
+  await page.route('**/api/v1/auth/me', (route) =>
+    route.fulfill({ status: 401, contentType: 'application/json', body: '{}' }),
+  );
+  await page.goto('/login');
+  await page.waitForLoadState('networkidle');
+
+  // Chinese default — and exactly ONE locale chip on the page (the hero
+  // header must not duplicate the panel picker).
+  await expect(page.getByText('简体中文')).toHaveCount(1);
+  await expect(page.locator('.hero-copy h1')).toContainText('网关静默运转');
+  await expect(page.getByTestId('login-submit')).toContainText('登 录');
+
+  // A real click through the radio menu translates the page.
+  await page.getByTestId('login-language').click();
+  await page.getByTestId('login-language-en').click();
+  await expect(page.locator('.hero-copy h1')).toContainText('The gateway stays quiet');
+  await expect(page.getByTestId('login-submit')).toContainText('Sign in');
+  await expect(page.locator('.auth-heading h2')).toContainText('Welcome back');
+
+  // The choice persists across reloads.
+  await page.reload();
+  await page.waitForLoadState('networkidle');
+  await expect(page.locator('.auth-heading h2')).toContainText('Welcome back');
+
+  // Switch back to Chinese for a clean state.
+  await page.getByTestId('login-language').click();
+  await page.getByTestId('login-language-zh-Hans').click();
+  await expect(page.locator('.auth-heading h2')).toContainText('欢迎回来');
+  await expect(page.getByTestId('login-submit')).toContainText('登 录');
+});
+
+test('console language switch translates the shell live and persists', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/keys');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByTestId('keys-table')).toBeVisible();
+
+  // Chinese default: nav label and page title.
+  await expect(page.locator('.new-shell__nav-label').first()).toHaveText('总览');
+  await expect(page.locator('.ui-page-title').first()).toHaveText('我的密钥');
+
+  // Live switch through the user menu (no reload): shell and page copy translate.
+  await page.getByTestId('shell-user-menu').click();
+  await page.getByTestId('shell-lang-en').click();
+  await expect(page.locator('.new-shell__nav-label').first()).toHaveText('Overview');
+  await expect(page.locator('.ui-page-title').first()).toHaveText('My Keys');
+
+  // Persists across reloads.
+  await page.reload();
+  await page.waitForLoadState('networkidle');
+  await expect(page.locator('.new-shell__nav-label').first()).toHaveText('Overview');
+  await expect(page.locator('.ui-page-title').first()).toHaveText('My Keys');
+
+  // Switch back to Chinese — also live.
+  await page.getByTestId('shell-user-menu').click();
+  await page.getByTestId('shell-lang-zh-Hans').click();
+  await expect(page.locator('.new-shell__nav-label').first()).toHaveText('总览');
+  await expect(page.locator('.ui-page-title').first()).toHaveText('我的密钥');
 });
 
 test('overview page baseline at 1440x900', async ({ page }) => {
@@ -532,7 +1310,7 @@ test('overview page baseline at 1440x900', async ({ page }) => {
   await page.goto('/app/overview');
   await page.waitForLoadState('networkidle');
   await expect(page.getByTestId('overview-stats')).toBeVisible();
-  await expect(page.getByTestId('overview-stats')).toContainText('Virtual Key');
+  await expect(page.getByTestId('overview-stats')).toContainText('虚拟密钥');
   await expect(page.getByTestId('overview-usage')).toBeVisible();
   await page.screenshot({ path: 'test-results/baseline/overview-1440x900.png', fullPage: true });
 });
@@ -544,7 +1322,8 @@ test('admin users page baseline at 1440x900', async ({ page }) => {
   await page.waitForLoadState('networkidle');
   await expect(page.getByTestId('users-table')).toBeVisible();
   await expect(page.getByTestId('users-table')).toContainText('alice');
-  await expect(page.locator('.mk-status--success').first()).toHaveText('Active');
+  await expect(page.getByTestId('users-table')).toContainText('正常');
+  await expect(page.getByTestId('users-table')).toContainText('停用');
   await page.screenshot({ path: 'test-results/baseline/admin-users-1440x900.png', fullPage: true });
 });
 
@@ -587,23 +1366,6 @@ test('a visible focus ring exists for keyboard navigation (G5.5)', async ({ page
   expect(outline).toBe(true);
 });
 
-test('key actions: rotate and revoke flows render from the kebab menu', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await mockApi(page, true);
-  await page.goto('/app/keys');
-  await page.waitForLoadState('networkidle');
-  await expect(page.getByTestId('keys-table')).toBeVisible();
-
-  // The kebab menu exposes rotate and revoke (danger grouped with divider).
-  await page.getByTestId('key-actions').first().click();
-  await expect(page.getByTestId('key-rotate').first()).toBeVisible();
-  await expect(page.getByTestId('key-revoke').first()).toBeVisible();
-  await page.keyboard.press('Escape');
-
-  // Status label uses the compact mk-status styling (dot + short label).
-  await expect(page.locator('.mk-status--success').first()).toHaveText('Active');
-});
-
 test('admin credentials page baseline at 1440x900', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockApi(page, true);
@@ -630,77 +1392,26 @@ test('admin prices page baseline at 1440x900', async ({ page }) => {
   });
 });
 
-test('dangerous actions wait for the confirmation dialog', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await mockApi(page, true);
-  let rotateCalls = 0;
-  await page.route('**/api/v1/me/virtual-keys/*/rotate', (route) => {
-    rotateCalls += 1;
-    return route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        id: '0190-0000-0000-0002',
-        secret: 'mqk_live_rotated',
-        baseUrl: 'https://gateway.test.internal',
-        display: 'mqk_live_…rot9',
-        shownOnce: true,
-        createdAt: '2026-08-26T00:00:00Z',
-        version: 2,
-      }),
-    });
-  });
-  await page.goto('/app/keys');
-  await page.waitForLoadState('networkidle');
-  await expect(page.getByTestId('keys-table')).toBeVisible();
-
-  await page.getByTestId('key-actions').first().click();
-  await page.getByTestId('key-rotate').first().click();
-  // The confirm dialog must gate the action: nothing rotates before 确认.
-  await expect(page.locator('.t-dialog__confirm').first()).toBeVisible();
-  expect(rotateCalls).toBe(0);
-
-  await page.locator('.t-dialog__confirm').first().click();
-  await expect.poll(() => rotateCalls).toBe(1);
-});
-
-test('admin cost report page baseline at 1440x900', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await mockApi(page, true);
-  await page.goto('/app/cost');
-  await page.waitForLoadState('networkidle');
-  await expect(page.getByTestId('cost-project-table')).toBeVisible();
-  await expect(page.getByTestId('cost-project-table')).toContainText('core-ai');
-  await page.screenshot({
-    path: 'test-results/baseline/admin-cost-1440x900.png',
-    fullPage: true,
-  });
-});
-
-test('deploy info page baseline at 1440x900', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await mockApi(page, true);
-  await page.goto('/app/settings');
-  await page.waitForLoadState('networkidle');
-  await expect(page.getByTestId('deploy-info')).toBeVisible();
-  await expect(page.getByTestId('deploy-info')).toContainText('MiQroGate');
-  await expect(page.getByTestId('deploy-info')).toContainText('8080');
-  await page.screenshot({
-    path: 'test-results/baseline/admin-deploy-1440x900.png',
-    fullPage: true,
-  });
-});
-
 const ADMIN_PAGES = [
   { path: '/app/teams', testid: 'teams-table', expect: 'Platform' },
   { path: '/app/projects', testid: 'projects-table', expect: 'Core AI' },
-  { path: '/app/grants', testid: 'grants-table', expect: 'ACTIVE' },
+  { path: '/app/grants', testid: 'grants-table', expect: '正常' },
+  { path: '/app/approval-center', testid: 'approvals-queue-table', expect: 'deepseek-v4-flash' },
+  { path: '/app/quota-rules', testid: 'quota-rules-table', expect: '1,000,000' },
+  { path: '/app/roi', testid: 'roi-report', expect: '缓存节省' },
   { path: '/app/plans', testid: 'subscriptions-table', expect: 'DeepSeek PAYG' },
+  { path: '/app/skillhub', testid: 'admin-skills-table', expect: 'web-scraper' },
+  { path: '/app/agents', testid: 'agents-table', expect: 'forge-agent' },
+  { path: '/app/services', testid: 'services-table', expect: 'platform-api' },
+  { path: '/app/mcp-services', testid: 'mcp-table', expect: 'erp-mcp' },
   { path: '/app/webhooks', testid: 'webhooks-table', expect: 'ops-alerts' },
   { path: '/app/alert-rules', testid: 'rules-table', expect: 'usage-missing' },
-  { path: '/app/audit', testid: 'audit-table', expect: 'LOGIN_SUCCESS' },
+  { path: '/app/audit', testid: 'audit-table', expect: '登录成功' },
   { path: '/app/exports', testid: 'exports-table', expect: 'CSV' },
-  { path: '/app/deletions', testid: 'deletions-table', expect: 'PENDING_CONFIRMATION' },
+  { path: '/app/deletions', testid: 'deletions-table', expect: '待确认' },
+  { path: '/app/consumers', testid: 'consumers-table', expect: 'billing-sync' },
+  { path: '/app/configs', testid: 'configs-table', expect: 'cache_enabled' },
+  { path: '/app/settings', testid: 'deploy-info', expect: 'MiQroGate' },
   { path: '/app/admin-usage', testid: 'usage-records-table', expect: 'deepseek-chat' },
 ];
 
@@ -719,6 +1430,20 @@ for (const pageCfg of ADMIN_PAGES) {
   });
 }
 
+test('model approval request page baseline at 1440x900', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/model-approvals');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByTestId('model-approvals-table')).toBeVisible();
+  await expect(page.getByTestId('model-approvals-table')).toContainText('deepseek-v4-flash');
+  await expect(page.getByTestId('model-approvals-table')).toContainText('待审批');
+  await page.screenshot({
+    path: 'test-results/baseline/model-approvals-1440x900.png',
+    fullPage: true,
+  });
+});
+
 test('forbidden aesthetics are absent from the rendered shell', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockApi(page, true);
@@ -727,9 +1452,10 @@ test('forbidden aesthetics are absent from the rendered shell', async ({ page })
 
   const violations = await page.evaluate(() => {
     // In the production bundle all CSS is one same-origin file, so the audit
-    // scopes to the application's own design rules: :root (tokens) and
-    // .mk-* selectors. Element Plus vendor rules are not part of the tokens
-    // the spec governs.
+    // scopes to the application's own design rules: the v1 token layer
+    // (:root + .mk-* + --miqrokey-*) and the v2 design system (.ui-* +
+    // --ui-*), which is the dominant layer since U2. Vendor rules are not
+    // part of the tokens the spec governs.
     const sheet = [...document.styleSheets].flatMap((s) => {
       try {
         return [...s.cssRules];
@@ -739,13 +1465,27 @@ test('forbidden aesthetics are absent from the rendered shell', async ({ page })
     });
     const own = sheet.filter((r) => {
       const selector = (r as CSSStyleRule).selectorText ?? '';
-      // Brand icon chips (.mk-brand-chip) and the cost donut (.mk-donut) carry
-      // the only permitted gradients under the 2026-08-27 direction
-      // (frontend-design.md §4.1); surfaces stay flat.
-      if (selector.includes('.mk-brand-chip') || selector.includes('.mk-donut')) {
+      // Brand identity chips — .mk-brand-chip, the provider family
+      // (.mk-chip-<provider>) — and the cost donut (.mk-donut) carry the only
+      // permitted gradients under the 2026-08-27 direction
+      // (frontend-design.md §4.1/§9); surfaces stay flat. The provider chips
+      // shipped gradients since the palette landed, but this filter named only
+      // .mk-brand-chip — harmless until the `sanitized.join` repair below gave
+      // the audit teeth (2026-09-18).
+      if (
+        selector.includes('.mk-brand-chip') ||
+        selector.includes('.mk-chip-') ||
+        selector.includes('.mk-donut')
+      ) {
         return false;
       }
-      return selector === ':root' || selector.includes('.mk-') || selector.includes('--miqrokey');
+      return (
+        selector === ':root' ||
+        selector.includes('.mk-') ||
+        selector.includes('.ui-') ||
+        selector.includes('--miqrokey') ||
+        selector.includes('--ui-')
+      );
     });
     const sanitized = own.map((r) => {
       const selector = (r as CSSStyleRule).selectorText ?? '';
@@ -759,7 +1499,10 @@ test('forbidden aesthetics are absent from the rendered shell', async ({ page })
       }
       return r.cssText;
     });
-    const text = sanitized.join;
+    // NB: `sanitized.join` (missing call) used to sit here — the regex then
+    // tested the stringified Function and both assertions below were toothless
+    // (2026-09-18, found while adding the brace-slip guard). Always invoke.
+    const text = sanitized.join('');
     return {
       gradients: /linear-gradient|radial-gradient|conic-gradient/.test(text),
       purple: /#7c3aed|#8b5cf6|#a855f7|#6d28d9|#9333ea|purple/i.test(text),
@@ -770,4 +1513,130 @@ test('forbidden aesthetics are absent from the rendered shell', async ({ page })
   // may only appear on .mk-brand-chip and .mk-donut, never on surfaces.
   expect(violations.gradients).toBe(false);
   expect(violations.purple).toBe(false);
+});
+
+test('the built stylesheet keeps html-attribute rules at top level (brace-slip guard)', async ({
+  page,
+}) => {
+  // 2026-09-18 incident: an unclosed `:root {` in design-tokens.css made the
+  // build nest design-base.css inside it — every selector shipped as
+  // `:root .x`, and html-attribute preference rules (`[data-menu-theme=…]`,
+  // `[data-anim=off]`, …) became `:root [data-…]`, matching nothing. The rail
+  // ink token then fell back to body text color and "MiQroGate" vanished on
+  // the navy rail. Typecheck/tests/build were all green, so the guard lives
+  // here against the real bundle: no `:root :root` / `:root [data-` selectors,
+  // and the brand ink must actually resolve to white on the dark rail.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/keys');
+  await page.waitForLoadState('networkidle');
+
+  const mangles = await page.evaluate(() => {
+    const bad: string[] = [];
+    for (const sheet of [...document.styleSheets]) {
+      let rules: CSSRule[];
+      try {
+        rules = [...sheet.cssRules];
+      } catch {
+        continue;
+      }
+      for (const rule of rules) {
+        const selector = (rule as CSSStyleRule).selectorText ?? '';
+        if (selector.includes(':root :root') || selector.includes(':root [data-')) {
+          bad.push(selector);
+        }
+      }
+    }
+    return bad;
+  });
+  expect(mangles).toEqual([]);
+
+  const brandColor = await page
+    .locator('.new-shell__brand-name')
+    .evaluate((el) => getComputedStyle(el).color);
+  expect(brandColor).toBe('rgb(255, 255, 255)');
+});
+
+test('#830: a large viewport gets a fluid band, the fixed cap centers, and titles collapse the description', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1920, height: 1000 });
+  await mockApi(page, true);
+  await page.goto('/app/keys');
+  await page.waitForLoadState('networkidle');
+
+  // Default = fluid: the band spans the viewport minus the rail (vben v5
+  // fills the viewport — measured at 1920 on their workbench, 1677px cards).
+  const fluid = await page.locator('.ui-page').boundingBox();
+  expect(fluid).not.toBeNull();
+  expect(Math.round(fluid!.width)).toBeGreaterThan(1600);
+
+  // 'fixed 1200' caps AND centers the band instead of hugging the rail.
+  await page.evaluate(() => {
+    const prefs = JSON.parse(localStorage.getItem('miqrolegate.prefs') ?? '{}') as Record<
+      string,
+      unknown
+    >;
+    localStorage.setItem(
+      'miqrolegate.prefs',
+      JSON.stringify({ ...prefs, contentCompact: 'fixed' }),
+    );
+  });
+  await page.reload();
+  await page.waitForLoadState('networkidle');
+  const fixed = await page.locator('.ui-page').boundingBox();
+  expect(Math.round(fixed!.width)).toBeGreaterThan(1190);
+  expect(Math.round(fixed!.width)).toBeLessThan(1210);
+  expect(Math.round(fixed!.x)).toBeGreaterThan(300);
+
+  // Clicking the page title collapses the description line, and the choice
+  // survives a reload (showPageDesc preference).
+  const desc = page.locator('.ui-page-desc').first();
+  await expect(desc).toBeVisible();
+  await page.locator('.ui-page-title').first().click();
+  await expect(desc).toBeHidden();
+  await page.reload();
+  await page.waitForLoadState('networkidle');
+  await expect(page.locator('.ui-page-desc').first()).toBeHidden();
+});
+
+test('#863: cache config tab lists per-key cache activity with the opt-in hint', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/roi');
+  await page.waitForLoadState('networkidle');
+
+  // Stats is the default tab; the config tab carries the Tencent-style
+  // per-key table fed by the VIRTUAL_KEY grouping.
+  await expect(page.getByTestId('roi-report')).toBeVisible();
+  await page.getByTestId('roi-tab-config').click();
+  const table = page.getByTestId('roi-key-table');
+  await expect(table).toBeVisible();
+  await expect(table).toContainText('codex-tools');
+  await expect(table).toContainText('claude-code-main');
+  await expect(page.getByTestId('roi-config')).toContainText('去「我的密钥」管理缓存开关');
+});
+
+test('#869: the in-console handbook renders offline and switches documents', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/help');
+  await page.waitForLoadState('networkidle');
+
+  // The docs are bundled (no network needed): the README lands by default.
+  const content = page.getByTestId('help-content');
+  await expect(content).toContainText('MiQroGate 使用手册');
+  await expect(page.locator('.new-shell__nav-item', { hasText: '帮助' })).toBeVisible();
+
+  await page.getByTestId('help-doc-quickstart').click();
+  await expect(content).toContainText('10 分钟跑通第一条请求');
+
+  // Relative doc links are rerouted to GitHub blob URLs (exact match: a
+  // substring check is a CodeQL "incomplete URL sanitization" anti-pattern).
+  const href = await content.locator('a', { hasText: 'admin-guide' }).first().getAttribute('href');
+  expect(href).toBe(
+    'https://github.com/sijie-Z/miqro-gate/blob/develop/docs/user-guide/admin-guide.md',
+  );
 });

@@ -1,16 +1,17 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
 import com.miqroera.miqrokey.controlplane.dto.LoginRequest;
 import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
+import com.miqroera.miqrokey.controlplane.dto.RegisterRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -42,6 +43,9 @@ class AuthIntegrationTest {
 
     /** Default CSRF cookie name used by production and most test classes. */
     static final String DEFAULT_CSRF_NAME = "MIQROKEY_CSRF";
+
+    /** Policy-compliant password for register-based fixtures (F-REG). */
+    static final String STRONG_PASSWORD = "StrongPass2026!";
 
     // Shared singleton container — see AbstractControlPlaneIntegrationTest
     static {
@@ -274,6 +278,68 @@ class AuthIntegrationTest {
         mockMvc.perform(get("/api/v1/auth/me").cookie(session2)).andExpect(status().isUnauthorized());
     }
 
+    // ---- Self-service logout of other sessions (#597) ----
+
+    @Test
+    @DisplayName("logout-others revokes other sessions, keeps the calling one")
+    void logoutOthersRevokesOtherSessions() throws Exception {
+        String username = uniqueUser("lor");
+        MvcResult regR = register(username, STRONG_PASSWORD);
+        Cookie session1 = getCookie(regR, "MIQROKEY_SESSION");
+        String csrf = getCsrfToken(regR);
+        assertThat(session1).isNotNull();
+
+        Cookie session2 = getCookie(login(username, STRONG_PASSWORD).andReturn(), "MIQROKEY_SESSION");
+        Cookie session3 = getCookie(login(username, STRONG_PASSWORD).andReturn(), "MIQROKEY_SESSION");
+        assertThat(session2).isNotNull();
+        assertThat(session3).isNotNull();
+
+        mockMvc.perform(post("/api/v1/auth/logout-others").cookie(session1).header("X-CSRF-Token", csrf))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.message").isNotEmpty());
+
+        // The calling session survives; the other two are revoked.
+        mockMvc.perform(get("/api/v1/auth/me").cookie(session1)).andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/auth/me").cookie(session2)).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/auth/me").cookie(session3)).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("logout-others: unauthenticated 401, missing CSRF 403, LOGOUT_OTHERS audit row")
+    void logoutOthersGuardsAndAudit() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/logout-others")).andExpect(status().isUnauthorized());
+
+        String username = uniqueUser("log");
+        MvcResult regR = register(username, STRONG_PASSWORD);
+        Cookie session = getCookie(regR, "MIQROKEY_SESSION");
+        String csrf = getCsrfToken(regR);
+
+        mockMvc.perform(post("/api/v1/auth/logout-others").cookie(session)).andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("CSRF_INVALID"));
+
+        mockMvc.perform(post("/api/v1/auth/logout-others").cookie(session).header("X-CSRF-Token", csrf))
+                .andExpect(status().isOk());
+
+        UUID userId = jdbc.queryForObject("SELECT id FROM users WHERE username = :u",
+                new org.springframework.jdbc.core.namedparam.MapSqlParameterSource("u", username), UUID.class);
+        Integer audited = jdbc.queryForObject(
+                "SELECT count(*) FROM admin_audit_events WHERE action = 'LOGOUT_OTHERS' AND actor_id = :id"
+                        + " AND target_type = 'USER' AND target_id = :id",
+                new org.springframework.jdbc.core.namedparam.MapSqlParameterSource("id", userId), Integer.class);
+        assertThat(audited).isPositive();
+    }
+
+    @Test
+    @DisplayName("logout-others is gated for forced-password-change sessions")
+    void logoutOthersGatedByMustChangePassword() throws Exception {
+        String username = uniqueUser("lom");
+        MvcResult bootR = bootstrap(username);
+        Cookie session = getCookie(bootR, "MIQROKEY_SESSION");
+        String csrf = getCsrfToken(bootR);
+
+        mockMvc.perform(post("/api/v1/auth/logout-others").cookie(session).header("X-CSRF-Token", csrf))
+                .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("PASSWORD_CHANGE_REQUIRED"));
+    }
+
     // ---- Origin validation ----
 
     @Test
@@ -379,6 +445,13 @@ class AuthIntegrationTest {
     private ResultActions login(String username, String password) throws Exception {
         return mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(new LoginRequest(username, password))));
+    }
+
+    private MvcResult register(String username, String password) throws Exception {
+        return mockMvc
+                .perform(post("/api/v1/auth/register").contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new RegisterRequest(username, "Test", password))))
+                .andReturn();
     }
 
     private Cookie getCookie(MvcResult r, String name) {

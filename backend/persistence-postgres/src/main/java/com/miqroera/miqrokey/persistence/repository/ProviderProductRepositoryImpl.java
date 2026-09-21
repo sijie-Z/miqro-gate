@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.persistence.repository;
 
 import com.miqroera.miqrokey.domain.model.*;
 import com.miqroera.miqrokey.domain.repository.ProviderProductRepository;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -84,11 +85,15 @@ public class ProviderProductRepositoryImpl implements ProviderProductRepository 
     public ProviderProduct update(ProviderProduct product) {
         long expectedVersion = product.version() - 1;
         var params = toParams(product).addValue("expectedVersion", expectedVersion);
+        // Full-replace semantics (#1151): every mutable column the entity carries
+        // belongs in this SET. A missing one is dropped in silence while the call
+        // still reports success. id/provider_id/created_at stay out — they are
+        // immutable.
         int rows = jdbc.update(
-                "UPDATE provider_products SET product_code = :productCode, display_name = :displayName, billing_mode = :billingMode, plan_scope = :planScope, credential_topology = :credentialTopology, quota_topology = :quotaTopology, implementation_status = :implementationStatus, version = version + 1, updated_at = :updatedAt WHERE id = :id AND version = :expectedVersion",
+                "UPDATE provider_products SET product_code = :productCode, display_name = :displayName, billing_mode = :billingMode, plan_scope = :planScope, credential_topology = :credentialTopology, quota_topology = :quotaTopology, supported_wire_protocols = :supportedWireProtocols::jsonb, base_url_templates = :baseUrlTemplates::jsonb, auth_scheme = :authScheme::jsonb, model_catalog_strategy = :modelCatalogStrategy, plan_status_strategy = :planStatusStrategy, balance_authority = :balanceAuthority, implementation_status = :implementationStatus, catalog_version = :catalogVersion, version = version + 1, updated_at = :updatedAt WHERE id = :id AND version = :expectedVersion",
                 params);
         if (rows != 1)
-            throw new IllegalStateException("Optimistic lock failure: product " + product.id());
+            throw new OptimisticLockingFailureException("Optimistic lock failure: product " + product.id());
         return product;
     }
 

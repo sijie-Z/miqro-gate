@@ -1,0 +1,100 @@
+/**
+ * Conversation watermark → TurnDelta (CAA Spec v1.1 §3.2, R1: history is
+ * NEVER current-turn evidence).
+ *
+ * The agent sees every proxied request; each request re-sends the whole
+ * conversation. The watermark remembers how many messages of a conversation
+ * have been seen; the delta is what is new. Evidence is only extracted from
+ * the delta (plus the current request's own `system` block), so a tool result
+ * that mentioned repository A three turns ago can never pollute the
+ * attribution of a turn that is about repository B.
+ */
+import { createHash } from "node:crypto";
+
+export type ConversationWatermark = {
+  conversationKey: string;
+  messageCount: number;
+};
+
+export type TurnDelta = {
+  conversationKey: string;
+  messages: unknown[];
+  /** True when this request starts a new conversation (or a rewrite/shift). */
+  isNewConversation: boolean;
+  /** True when the message count shrank (compaction) — delta is turn-tail only. */
+  compacted: boolean;
+  nextWatermark: ConversationWatermark;
+};
+
+type Message = { role?: string; content?: unknown };
+
+function textOfContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    const parts: string[] = [];
+    for (const block of content) {
+      if (typeof block === "string") parts.push(block);
+      else if (block && typeof block === "object") {
+        const b = block as Record<string, unknown>;
+        if (typeof b["text"] === "string") parts.push(b["text"]);
+        if (typeof b["content"] === "string") parts.push(b["content"]);
+      }
+    }
+    return parts.join("\n");
+  }
+  return "";
+}
+
+/**
+ * Conversation identity: the token-stable prefix of the system prompt plus
+ * the first user message. Both survive message growth (and tool-result
+ * churn), so successive requests of one session map to one key.
+ */
+export function conversationKeyOf(systemText: string, messages: Message[]): string {
+  const firstUser = messages.find((m) => m.role === "user");
+  const basis = `${systemText.slice(0, 2048)}\u0000${textOfContent(firstUser?.content).slice(0, 2048)}`;
+  return createHash("sha256").update(basis).digest("hex").slice(0, 16);
+}
+
+function lastUserIndex(messages: Message[]): number {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === "user") return i;
+  }
+  return 0;
+}
+
+/**
+ * Compute the current-turn delta.
+ *
+ * - new conversation (or no watermark): the whole body is the delta;
+ * - known conversation, grown: the messages after the watermark;
+ * - known conversation, shrunk (compaction/rewrite): turn-tail only — the
+ *   messages from the last user message on, so stale history cannot leak in.
+ */
+export function computeTurnDelta(
+  systemText: string,
+  messages: Message[],
+  watermark?: ConversationWatermark,
+): TurnDelta {
+  const conversationKey = conversationKeyOf(systemText, messages);
+  const nextWatermark: ConversationWatermark = { conversationKey, messageCount: messages.length };
+  if (!watermark || watermark.conversationKey !== conversationKey) {
+    return { conversationKey, messages, isNewConversation: true, compacted: false, nextWatermark };
+  }
+  if (messages.length >= watermark.messageCount) {
+    return {
+      conversationKey,
+      messages: messages.slice(watermark.messageCount),
+      isNewConversation: false,
+      compacted: false,
+      nextWatermark,
+    };
+  }
+  return {
+    conversationKey,
+    messages: messages.slice(lastUserIndex(messages)),
+    isNewConversation: false,
+    compacted: true,
+    nextWatermark,
+  };
+}

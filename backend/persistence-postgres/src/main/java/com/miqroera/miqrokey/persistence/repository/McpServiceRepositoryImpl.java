@@ -1,0 +1,200 @@
+package com.miqroera.miqrokey.persistence.repository;
+
+import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
+import com.miqroera.miqrokey.domain.model.McpService;
+import com.miqroera.miqrokey.domain.repository.McpServiceRepository;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.sql.Timestamp;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+@Repository
+@Transactional(readOnly = true)
+public class McpServiceRepositoryImpl implements McpServiceRepository {
+
+    private static final RowMapper<McpService> ROW_MAPPER = (rs, rowNum) -> new McpService((UUID) rs.getObject("id"),
+            (UUID) rs.getObject("tenant_id"), rs.getString("name"), rs.getString("description"),
+            rs.getString("endpoint"), rs.getString("transport"), rs.getString("status"), rs.getString("health_status"),
+            rs.getTimestamp("health_checked_at") != null ? rs.getTimestamp("health_checked_at").toInstant() : null,
+            rs.getInt("consecutive_failures"), rs.getInt("consecutive_successes"), rs.getInt("check_interval_seconds"),
+            rs.getInt("check_timeout_seconds"), rs.getInt("fail_threshold"), rs.getInt("recover_threshold"),
+            rs.getString("check_path"), rs.getLong("version"), (UUID) rs.getObject("created_by"),
+            rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant(),
+            rs.getString("backend_auth_mode"),
+            rs.getTimestamp("backend_secret_updated_at") != null
+                    ? rs.getTimestamp("backend_secret_updated_at").toInstant()
+                    : null,
+            rs.getInt("upstream_timeout_ms"), rs.getString("check_mode"));
+
+    private final NamedParameterJdbcTemplate jdbc;
+
+    public McpServiceRepositoryImpl(NamedParameterJdbcTemplate jdbc) {
+        this.jdbc = jdbc;
+    }
+
+    @Override
+    @Transactional
+    public McpService insert(McpService service) {
+        jdbc.update("""
+                INSERT INTO mcp_services
+                    (id, tenant_id, name, description, endpoint, transport, status, health_status,
+                     health_checked_at, consecutive_failures, consecutive_successes, check_interval_seconds,
+                     check_timeout_seconds, fail_threshold, recover_threshold, check_path, upstream_timeout_ms,
+                     check_mode, version, created_by, created_at, updated_at)
+                VALUES (:id, :tenantId, :name, :description, :endpoint, :transport, :status, :healthStatus,
+                        :checkedAt, 0, 0, :interval, :timeout, :failThreshold, :recoverThreshold, :checkPath,
+                        :upstreamTimeoutMs, :checkMode, 0, :createdBy, now(), now())
+                """, params(service));
+        return service;
+    }
+
+    @Override
+    public Optional<McpService> findByIdAndTenantId(UUID id, UUID tenantId) {
+        try {
+            return Optional.ofNullable(
+                    jdbc.queryForObject("SELECT * FROM mcp_services WHERE id = :id AND tenant_id = :tenantId",
+                            new MapSqlParameterSource("id", id).addValue("tenantId", tenantId), ROW_MAPPER));
+        } catch (org.springframework.dao.EmptyResultDataAccessException e) {
+            return Optional.empty();
+        }
+    }
+
+    @Override
+    public List<McpService> findAllByTenantId(UUID tenantId) {
+        return jdbc.query("SELECT * FROM mcp_services WHERE tenant_id = :tenantId ORDER BY created_at",
+                new MapSqlParameterSource("tenantId", tenantId), ROW_MAPPER);
+    }
+
+    @Override
+    public List<McpService> findAllOnlineByTenantId(UUID tenantId) {
+        return jdbc.query(
+                "SELECT * FROM mcp_services WHERE tenant_id = :tenantId AND status = 'ONLINE' ORDER BY created_at",
+                new MapSqlParameterSource("tenantId", tenantId), ROW_MAPPER);
+    }
+
+    @Override
+    @Transactional
+    public McpService updateHealth(UUID tenantId, UUID serviceId, String healthStatus, Instant checkedAt,
+            int consecutiveFailures, int consecutiveSuccesses) {
+        jdbc.update("""
+                UPDATE mcp_services
+                SET health_status = :healthStatus, health_checked_at = :checkedAt,
+                    consecutive_failures = :failures, consecutive_successes = :successes, updated_at = now()
+                WHERE id = :id AND tenant_id = :tenantId
+                """,
+                new MapSqlParameterSource("healthStatus", healthStatus).addValue("id", serviceId)
+                        .addValue("tenantId", tenantId).addValue("checkedAt", java.sql.Timestamp.from(checkedAt))
+                        .addValue("failures", consecutiveFailures).addValue("successes", consecutiveSuccesses));
+        return findByIdAndTenantId(serviceId, tenantId).orElseThrow();
+    }
+
+    @Override
+    @Transactional
+    public McpService updateStatus(UUID tenantId, UUID serviceId, String status) {
+        // #475: narrow write — health columns stay untouched (the previous
+        // full-row write replayed a stale read over a newer probe result).
+        jdbc.update("""
+                UPDATE mcp_services
+                SET status = :status, version = version + 1, updated_at = now()
+                WHERE id = :id AND tenant_id = :tenantId
+                """,
+                new MapSqlParameterSource("status", status).addValue("id", serviceId).addValue("tenantId", tenantId));
+        return findByIdAndTenantId(serviceId, tenantId).orElseThrow();
+    }
+
+    @Override
+    @Transactional
+    public McpService update(McpService service, long expectedVersion) {
+        int rows = jdbc.update("""
+                UPDATE mcp_services
+                SET description = :description, endpoint = :endpoint, transport = :transport, status = :status,
+                    health_status = :healthStatus, health_checked_at = :checkedAt,
+                    consecutive_failures = :failures, consecutive_successes = :successes,
+                    check_interval_seconds = :interval, check_timeout_seconds = :timeout,
+                    fail_threshold = :failThreshold, recover_threshold = :recoverThreshold, check_path = :checkPath,
+                    upstream_timeout_ms = :upstreamTimeoutMs, check_mode = :checkMode,
+                    version = version + 1, updated_at = now()
+                WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion
+                """, params(service).addValue("expectedVersion", expectedVersion));
+        if (rows != 1) {
+            throw new OptimisticLockingFailureException("Optimistic lock failure: mcp service " + service.id());
+        }
+        return findByIdAndTenantId(service.id(), service.tenantId()).orElseThrow();
+    }
+
+    @Override
+    @Transactional
+    public McpService updateBackendAuth(UUID id, UUID tenantId, String mode, EncryptedSecret encryptedSecret) {
+        int rows = jdbc.update("""
+                UPDATE mcp_services
+                SET backend_auth_mode = :mode,
+                    backend_secret_ciphertext = :ciphertext,
+                    backend_secret_nonce = :nonce,
+                    backend_secret_key_version = :keyVersion,
+                    backend_secret_updated_at = :updatedAt,
+                    version = version + 1, updated_at = now()
+                WHERE id = :id AND tenant_id = :tenantId
+                """,
+                new MapSqlParameterSource("id", id).addValue("tenantId", tenantId).addValue("mode", mode)
+                        .addValue("ciphertext", encryptedSecret != null ? encryptedSecret.ciphertext() : null)
+                        .addValue("nonce", encryptedSecret != null ? encryptedSecret.nonce() : null)
+                        .addValue("keyVersion", encryptedSecret != null ? encryptedSecret.keyVersion() : null).addValue(
+                                "updatedAt", encryptedSecret != null ? Timestamp.from(java.time.Instant.now()) : null));
+        if (rows != 1) {
+            throw new IllegalStateException("MCP service not found for backend-auth update: " + id);
+        }
+        return findByIdAndTenantId(id, tenantId).orElseThrow();
+    }
+
+    @Override
+    @Transactional
+    public McpService updateUpstreamTimeout(UUID id, UUID tenantId, int upstreamTimeoutMs) {
+        int rows = jdbc.update("""
+                UPDATE mcp_services
+                SET upstream_timeout_ms = :timeout, version = version + 1, updated_at = now()
+                WHERE id = :id AND tenant_id = :tenantId
+                """, new MapSqlParameterSource("id", id).addValue("tenantId", tenantId).addValue("timeout",
+                upstreamTimeoutMs));
+        if (rows != 1) {
+            throw new IllegalStateException("MCP service not found for upstream timeout update: " + id);
+        }
+        return findByIdAndTenantId(id, tenantId).orElseThrow();
+    }
+
+    @Override
+    public Optional<EncryptedSecret> findBackendSecret(UUID id, UUID tenantId) {
+        List<EncryptedSecret> secrets = jdbc.query("""
+                SELECT backend_secret_ciphertext, backend_secret_nonce, backend_secret_key_version
+                FROM mcp_services WHERE id = :id AND tenant_id = :tenantId
+                """, new MapSqlParameterSource("id", id).addValue("tenantId", tenantId), (rs, rowNum) -> {
+            byte[] ciphertext = rs.getBytes("backend_secret_ciphertext");
+            if (ciphertext == null) {
+                return null;
+            }
+            return new EncryptedSecret(ciphertext, rs.getBytes("backend_secret_nonce"),
+                    rs.getString("backend_secret_key_version"));
+        });
+        return secrets.isEmpty() || secrets.get(0) == null ? Optional.empty() : Optional.of(secrets.get(0));
+    }
+
+    private static MapSqlParameterSource params(McpService s) {
+        return new MapSqlParameterSource("id", s.id()).addValue("tenantId", s.tenantId()).addValue("name", s.name())
+                .addValue("description", s.description()).addValue("endpoint", s.endpoint())
+                .addValue("transport", s.transport()).addValue("status", s.status())
+                .addValue("healthStatus", s.healthStatus())
+                .addValue("checkedAt", s.healthCheckedAt() != null ? Timestamp.from(s.healthCheckedAt()) : null)
+                .addValue("failures", s.consecutiveFailures()).addValue("successes", s.consecutiveSuccesses())
+                .addValue("interval", s.checkIntervalSeconds()).addValue("timeout", s.checkTimeoutSeconds())
+                .addValue("failThreshold", s.failThreshold()).addValue("recoverThreshold", s.recoverThreshold())
+                .addValue("checkPath", s.checkPath()).addValue("upstreamTimeoutMs", s.upstreamTimeoutMs())
+                .addValue("checkMode", s.checkMode()).addValue("createdBy", s.createdBy());
+    }
+}

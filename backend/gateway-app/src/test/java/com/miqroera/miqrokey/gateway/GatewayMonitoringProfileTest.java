@@ -9,7 +9,7 @@ import org.testcontainers.utility.DockerImageName;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
+import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -30,7 +30,7 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 class GatewayMonitoringProfileTest {
 
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(DockerImageName
-            .parse("postgres:17.6-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73")
+            .parse("postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94")
             .asCompatibleSubstituteFor("postgres")).withDatabaseName("miqrokey_test").withUsername("miqrokey_test")
             .withPassword("miqrokey_test");
     static final Path ENC_KEY_FILE;
@@ -79,6 +79,7 @@ class GatewayMonitoringProfileTest {
                 .consumeWith(result -> {
                     String body = result.getResponseBody();
                     org.assertj.core.api.Assertions.assertThat(body).contains("miqrokey_gateway_requests_total");
+                    org.assertj.core.api.Assertions.assertThat(body).contains("miqrokey_gateway_ttfb");
                     org.assertj.core.api.Assertions.assertThat(body).contains("jvm_memory_used_bytes");
                 });
     }

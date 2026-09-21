@@ -1,10 +1,11 @@
 package com.miqroera.miqrokey.gateway.proxy;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.cache.CachedResponse;
 import com.miqroera.miqrokey.cache.GatewayResponseCache;
 import com.miqroera.miqrokey.domain.cache.CacheKey;
+import com.miqroera.miqrokey.domain.model.McpCircuitBreaker;
 import com.miqroera.miqrokey.domain.usage.CacheHitEvent;
 import com.miqroera.miqrokey.domain.usage.CacheLevel;
 import com.miqroera.miqrokey.domain.usage.RequestCompletedEvent;
@@ -13,6 +14,8 @@ import com.miqroera.miqrokey.domain.usage.RequestStatus;
 import com.miqroera.miqrokey.domain.usage.TokenBucket;
 import com.miqroera.miqrokey.domain.usage.UsageEvent;
 import com.miqroera.miqrokey.domain.security.UpstreamTargetValidator;
+import com.miqroera.miqrokey.gateway.retention.RetentionSidecar;
+import com.miqroera.miqrokey.gateway.observability.GatewayTtfbMetrics;
 import com.miqroera.miqrokey.gateway.vkey.AuthContext;
 import com.miqroera.miqrokey.domain.route.RouteSnapshot;
 import com.miqroera.miqrokey.adapters.catalog.ProviderCatalog;
@@ -24,6 +27,7 @@ import com.miqroera.miqrokey.spi.RouteContext;
 import com.miqroera.miqrokey.spi.TargetRequest;
 
 import com.miqroera.miqrokey.gateway.vkey.AuthFailureException;
+import com.miqroera.miqrokey.gateway.vkey.QuotaGate;
 import com.miqroera.miqrokey.gateway.vkey.VirtualKeyResolver;
 import com.miqroera.miqrokey.queue.RequestCoalescer;
 import com.miqroera.miqrokey.queue.UsageEventBus;
@@ -49,6 +53,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.SignalType;
 import reactor.core.scheduler.Scheduler;
+import reactor.netty.http.client.PrematureCloseException;
 import reactor.util.retry.Retry;
 
 import java.io.ByteArrayOutputStream;
@@ -59,6 +64,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.LongConsumer;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -134,6 +140,26 @@ public class ProxyController {
     private final Scheduler credentialDecryptScheduler;
     private final BuiltInAdapterRegistry adapterRegistry;
     private final ProviderCatalog providerCatalog;
+    private final RetentionSidecar retentionSidecar;
+    private final ClientAddressResolver clientAddressResolver;
+    /** TTFB metric hook (#486): observation per attempt that sees a first byte. */
+    private final GatewayTtfbMetrics ttfbMetrics;
+    /**
+     * Context-limit pre-check (#553): rejects oversized bodies before the upstream
+     * call.
+     */
+    private final ContextLimitGuard contextLimitGuard;
+    /**
+     * LLM-side circuit breaker (#741, default off): per (product × credential)
+     * fast-fail while an upstream keeps failing.
+     */
+    private final LlmCircuitBreakerRegistry circuitBreaker;
+    private final UpstreamErrorClassifier upstreamErrorClassifier;
+    /**
+     * Content-filter shadow (#740, default off): local-vocabulary observation of
+     * the request/reply bytes — counts and a content-free log line only.
+     */
+    private final ContentFilterShadow contentFilterShadow;
 
     public ProxyController(VirtualKeyResolver keyResolver, CredentialInjector credentialInjector,
             GatewayResponseCache responseCache, ObjectProvider<RequestCoalescer> coalescerProvider,
@@ -141,7 +167,17 @@ public class ProxyController {
             CacheKeyFactory cacheKeyFactory, SseReplayEngine sseReplayEngine, WebClient proxyWebClient, Clock clock,
             ObjectMapper objectMapper, ProxyTargetProperties properties,
             UpstreamTargetValidator upstreamTargetValidator, Scheduler credentialDecryptScheduler,
-            BuiltInAdapterRegistry adapterRegistry, ProviderCatalog providerCatalog) {
+            BuiltInAdapterRegistry adapterRegistry, ProviderCatalog providerCatalog, RetentionSidecar retentionSidecar,
+            GatewayTtfbMetrics ttfbMetrics, ClientAddressResolver clientAddressResolver,
+            ContextLimitGuard contextLimitGuard, LlmCircuitBreakerRegistry circuitBreaker,
+            UpstreamErrorClassifier upstreamErrorClassifier, ContentFilterShadow contentFilterShadow) {
+        this.retentionSidecar = retentionSidecar;
+        this.clientAddressResolver = clientAddressResolver;
+        this.ttfbMetrics = ttfbMetrics;
+        this.contextLimitGuard = contextLimitGuard;
+        this.circuitBreaker = circuitBreaker;
+        this.upstreamErrorClassifier = upstreamErrorClassifier;
+        this.contentFilterShadow = contentFilterShadow;
         this.keyResolver = keyResolver;
         this.credentialInjector = credentialInjector;
         this.responseCache = responseCache;
@@ -216,6 +252,7 @@ public class ProxyController {
         long startMillis = clock.millis();
         try {
             AuthContext ctx = keyResolver.resolve(exchange.getRequest());
+            QuotaGate.requireNotExceeded(ctx); // #684: 429 before any body work
             return handleAuthenticated(exchange, ctx, requestId, startMillis);
         } catch (AuthFailureException e) {
             return writeError(exchange, e);
@@ -225,6 +262,13 @@ public class ProxyController {
     private Mono<Void> handleAuthenticated(ServerWebExchange exchange, AuthContext ctx, String requestId,
             long startMillis) {
         return bufferBody(exchange).flatMap(body -> {
+            // Compliance retention side-channel (ADR-0014, default off):
+            // best-effort, never affects the forwarded outcome.
+            retentionSidecar.capture(exchange.getRequest().getPath().value(), body, ctx, requestId);
+            // #740 shadow v1 (ADR-0027, default off): local-vocabulary observation
+            // of the buffered request body — counts and a content-free log line only.
+            // Read-only: the bytes forwarded below are exactly `body`.
+            contentFilterShadow.observeInput(body);
             JsonNode root = parseQuietly(body);
             String modelName = root != null && root.has("model") && root.get("model").isTextual()
                     ? root.get("model").asText()
@@ -233,16 +277,41 @@ public class ProxyController {
             boolean streaming = root != null && root.has("stream") && root.get("stream").asBoolean(false);
 
             java.util.Set<String> allowed = ctx.models();
-            java.util.Set<String> grantModels = ctx.snapshot().grantModels(ctx.key().grantId());
-            if (grantModels != null) {
-                // Grant is the authorization authority: shrinking the grant's
-                // model scope must revoke the model for every existing key of
-                // the project (same semantics as /v1/models).
-                allowed = allowed.stream().filter(grantModels::contains).collect(java.util.stream.Collectors.toSet());
+            if ("POLICY_ROUTED".equals(ctx.context().resolutionStatus())) {
+                // #647: unattributed requests run under the tenant policy's
+                // dedicated credential — never a project grant. Model scope =
+                // policy scope (empty = the product's ACTIVE upstream catalog),
+                // intersected with the key's own allowance (plan Q2).
+                RouteSnapshot.UnattributedPolicyRecord policy = ctx.snapshot().unattributedPolicy(ctx.tenantId());
+                java.util.Set<String> scope = policy != null && !policy.models().isEmpty()
+                        ? policy.models()
+                        : ctx.snapshot().upstreamModels(ctx.binding().productId());
+                allowed = allowed.stream().filter(scope::contains).collect(java.util.stream.Collectors.toSet());
+            } else {
+                // ADR-0018: the request's binding decides the grant (multi-project keys).
+                java.util.Set<String> grantModels = ctx.snapshot().grantModels(ctx.binding().grantId());
+                if (grantModels != null) {
+                    // Grant is the authorization authority: shrinking the grant's
+                    // model scope must revoke the model for every existing key of
+                    // the project (same semantics as /v1/models).
+                    allowed = allowed.stream().filter(grantModels::contains)
+                            .collect(java.util.stream.Collectors.toSet());
+                }
             }
             if (modelName != null && !allowed.contains(modelName)) {
                 return writeError(exchange, new AuthFailureException(HttpStatus.FORBIDDEN, "model_not_allowed",
                         "Model '" + modelName + "' is not allowed for this virtual key"));
+            }
+
+            // #553: context-limit pre-check. Runs after authentication and model
+            // authorization (a caller never learns the size verdict for a resource
+            // it may not use) and before the cache lookup and the upstream call, so
+            // an oversized context can never reach a provider. Read-only: the
+            // accepted body is forwarded byte-identically.
+            AuthFailureException contextLimit = contextLimitGuard.check(body, exchange.getRequest().getURI().getPath(),
+                    requestId);
+            if (contextLimit != null) {
+                return writeError(exchange, contextLimit);
             }
 
             boolean cacheable = CacheEligibility.isCacheable(ctx,
@@ -250,20 +319,33 @@ public class ProxyController {
                     hasToolFields);
             CacheKey cacheKey = cacheable ? cacheKeyFactory.compute(ctx, modelName, body) : null;
 
-            if (cacheKey != null) {
-                GatewayResponseCache.Lookup lookup = responseCache.get(ctx.tenantId(), cacheKey);
-                if (lookup.response().isPresent()) {
-                    publishCacheHit(lookup.level(), ctx, cacheKey, requestId);
-                    return sseReplayEngine.replay(lookup.response().get(), exchange.getResponse(), requestId,
-                            hitLevelName(lookup.level()));
-                }
-            }
+            // #444: the cache lookup is blocking I/O (L2 hits PostgreSQL) — it
+            // must never run on the event loop. Reads go through the bounded
+            // scheduler; the cached-replay path continues on its thread.
+            Mono<Void> pipeline = cacheKey != null
+                    ? Mono.fromCallable(() -> responseCache.get(ctx.tenantId(), cacheKey))
+                            .subscribeOn(credentialDecryptScheduler).flatMap(lookup -> {
+                                if (lookup.response().isPresent()) {
+                                    publishCacheHit(lookup.level(), ctx, cacheKey, requestId);
+                                    return sseReplayEngine.replay(lookup.response().get(), exchange.getResponse(),
+                                            requestId, hitLevelName(lookup.level()));
+                                }
+                                return forward(exchange, ctx, body, modelName, cacheKey, requestId, startMillis,
+                                        streaming);
+                            })
+                    : forward(exchange, ctx, body, modelName, cacheKey, requestId, startMillis, streaming);
 
-            return forward(exchange, ctx, body, modelName, cacheKey, requestId, startMillis, streaming)
-                    .onErrorResume(AuthFailureException.class, e -> writeError(exchange, e))
+            // #1000: every upstream failure has to end in an envelope here instead
+            // of escaping to the container's default 500 document. The clauses stay
+            // deliberately typed (no catch-all) so that control-plane errors keep
+            // their own mapping; a premature close after the status line matched
+            // none of them and leaked as a 500.
+            return pipeline.onErrorResume(AuthFailureException.class, e -> writeError(exchange, e))
                     .onErrorResume(WebClientRequestException.class,
-                            e -> writeError(exchange, new AuthFailureException(HttpStatus.BAD_GATEWAY,
-                                    "upstream_unavailable", "Upstream provider is unreachable")));
+                            e -> writeError(exchange,
+                                    new AuthFailureException(HttpStatus.BAD_GATEWAY, "upstream_unavailable",
+                                            "Upstream provider is unreachable")))
+                    .onErrorResume(PrematureCloseException.class, e -> upstreamClosedBeforeFirstByte(exchange, e));
         }).onErrorResume(DataBufferLimitException.class,
                 e -> writeError(exchange, new AuthFailureException(HttpStatus.PAYLOAD_TOO_LARGE, "payload_too_large",
                         "Request body exceeds the gateway buffer limit")));
@@ -298,7 +380,8 @@ public class ProxyController {
         }
         // Waiter: replay the leader's response byte-identically, or fall back.
         return flight.shared().flatMap(cached -> {
-            publishCoalescedUsage(ctx, cached, cacheKey, requestId);
+            publishCoalescedUsage(ctx, modelName, cached, cacheKey, requestId,
+                    clientAddressResolver.resolve(exchange.getRequest()));
             return sseReplayEngine.replay(cached, exchange.getResponse(), requestId, "coalesced");
         }).onErrorResume(e -> {
             log.debug("Coalescer wait failed (requestId={}); falling back to own upstream call: {}", requestId,
@@ -356,15 +439,40 @@ public class ProxyController {
             CredentialInjector.InjectedCredential cred, String modelName, CacheKey cacheKey, String requestId,
             long startMillis, boolean streaming) {
         ServerHttpResponse clientResponse = exchange.getResponse();
-        URI upstreamUri = buildUpstreamUri(exchange, cred.baseUrl());
-        HttpHeaders filteredHeaders = HeaderFilters.filterInboundHeaders(exchange.getRequest().getHeaders());
+        // G3.x relay wiring: resolve the target through the product adapter so a
+        // per-protocol base URL applies (/v1/messages may target the provider's
+        // Anthropic entry while chat targets its OpenAI one); products without
+        // an adapter keep the credential's single base and a verbatim splice.
+        String wireProtocol = wireProtocolOf(exchange);
+        ResolvedTarget target = resolveTarget(exchange, ctx, cred, wireProtocol);
+        URI upstreamUri = target.uri();
+        HttpHeaders filteredHeaders;
+        if (target.headers() != null) {
+            // Adapter headers still pass the gateway's single sanitizer: the
+            // adapter-side strip set only removes credential headers, so
+            // hop-by-hop/Host/Content-Length (rebuilt by the client) must be
+            // dropped here or the upstream sees a stale Host (DeepSeek WAF 418).
+            HttpHeaders adapterHeaders = new HttpHeaders();
+            target.headers().forEach(adapterHeaders::set);
+            filteredHeaders = HeaderFilters.filterInboundHeaders(adapterHeaders);
+        } else {
+            filteredHeaders = HeaderFilters.filterInboundHeaders(exchange.getRequest().getHeaders());
+        }
         filteredHeaders.set(cred.headerName(), cred.headerValue());
+
+        // #741 LLM-side circuit breaker (default off): a rejected call fails
+        // fast and never opens a lifecycle row — the same accounting rule as
+        // every other gateway rejection; the upstream is never contacted.
+        if (circuitBreaker.beforeCall(ctx.productId(), ctx.binding().credentialId(),
+                requestId) == McpCircuitBreaker.Decision.REJECTED) {
+            return Mono.error(new AuthFailureException(HttpStatus.SERVICE_UNAVAILABLE, "circuit_open",
+                    "Upstream failure rate is too high; calls are rejected until it recovers"));
+        }
 
         // Lifecycle start: only requests that actually reach upstream open a
         // record (auth failures and cache hits emit no lifecycle row). The
         // credential is resolved once before any attempt — a retry reuses
         // the same credential (no cross-credential failover).
-        String wireProtocol = wireProtocolOf(exchange);
         Instant startedAt = clock.instant();
         publishLifecycleStart(ctx, modelName, requestId, startedAt, streaming, wireProtocol);
 
@@ -377,7 +485,7 @@ public class ProxyController {
         return Mono.defer(() -> {
             attempts.incrementAndGet();
             UpstreamAttempt attempt = new UpstreamAttempt(requestId, startMillis, clock, objectMapper,
-                    maxProxyBufferBytes);
+                    maxProxyBufferBytes, ttfbMetrics::record);
             attemptRef.set(attempt);
             return callUpstreamOnce(exchange, ctx, cred, body, upstreamUri, filteredHeaders, cacheKey, modelName,
                     requestId, startMillis, streaming, attempt);
@@ -406,7 +514,19 @@ public class ProxyController {
                                     && attempt.upstreamError.get() == null);
                     TokenBucket tokens = attempt.observedTokens.get() != null
                             ? attempt.observedTokens.get()
-                            : mergeObservations(attempt.usageObserver);
+                            : latestObservation(attempt.usageObserver);
+                    // #741: the single terminal point feeds the LLM breaker —
+                    // one outcome per gateway request (retried attempts are not
+                    // separately counted), client cancels skipped.
+                    if (!clientCancelled) {
+                        circuitBreaker.afterCall(ctx.productId(), ctx.binding().credentialId(),
+                                attempt.httpStatus.get(), attempt.upstreamError.get() != null,
+                                clock.millis() - startMillis);
+                    }
+                    // #623: lifecycle events still need the id when the stream
+                    // ended without the response-completion block (client
+                    // cancels); the usage event path resolves it earlier.
+                    effectiveProviderRequestId(attempt);
                     publishLifecycleComplete(ctx, modelName, requestId, startedAt, streaming, wireProtocol, signal,
                             attempt.httpStatus.get(), attempt.providerRequestId.get(), attempt.upstreamError.get(),
                             attempt.ttfb, tokens, clientCancelled, attempts.get() - 1);
@@ -459,7 +579,7 @@ public class ProxyController {
 
                     return clientResponse.writeWith(observed).then(Mono.fromSupplier(() -> {
                         // The stream was fully written to the client.
-                        TokenBucket tokens = mergeObservations(attempt.usageObserver);
+                        TokenBucket tokens = latestObservation(attempt.usageObserver);
                         if (!isSse && tokens.isEmpty()) {
                             // Non-streaming JSON: usage lives in the response
                             // body, not SSE events. Only counts are extracted —
@@ -468,24 +588,50 @@ public class ProxyController {
                         }
                         attempt.observedTokens.set(tokens);
                         boolean successful = status >= 200 && status < 300;
+                        if (!successful) {
+                            // ADR-0024 option B (#770): observation only — count the
+                            // SHAPE of the upstream failure and log the class. The
+                            // request was not retried, not rewritten, and the response
+                            // reaches the client byte-for-byte as received.
+                            upstreamErrorClassifier.observe(status, attempt.collector.bytes(),
+                                    attempt.collector.overflow());
+                        }
                         long latencyMs = clock.millis() - startMillis;
-                        publishUsageEvent(ctx, modelName, cacheKey, tokens, status, upstreamRequestId, requestId,
-                                latencyMs, true, successful && tokens.isEmpty());
+                        publishUsageEvent(ctx, modelName, cacheKey, tokens, status, effectiveProviderRequestId(attempt),
+                                requestId, latencyMs, true, successful && tokens.isEmpty(),
+                                clientAddressResolver.resolve(exchange.getRequest()));
+                        // Retention (ADR-0014 增补): the reply is fully written —
+                        // capture its text on the compliance side channel
+                        // (best-effort; disabled unless the tenant opted in).
+                        retentionSidecar.captureOutput(exchange.getRequest().getURI().getPath(),
+                                attempt.collector.bytes(), isSse, ctx, requestId, attempt.collector.overflow());
+                        // #740 shadow v1 (ADR-0027, default off): observe the fully
+                        // written reply bytes (same bounded collector, same overflow
+                        // rule) — observation only; the client already received the
+                        // response byte-for-byte.
+                        contentFilterShadow.observeOutput(attempt.collector.bytes(), attempt.collector.overflow());
 
                         CachedResponse cached = null;
                         boolean cacheableResponse = cacheKey != null && successful && !attempt.collector.overflow()
                                 && !attempt.collector.containsToolCall();
                         if (cacheableResponse) {
                             String contentType = outHeaders.getFirst(HttpHeaders.CONTENT_TYPE);
-                            cached = new CachedResponse(status, contentType, outHeaders, attempt.collector.bytes(),
-                                    tokens, true);
-                            responseCache.put(cacheKey, ctx.tenantId(), ctx.key().keyId(), ctx.projectId(),
-                                    ctx.productId(), modelName, cached);
+                            cached = new CachedResponse(status, contentType, outHeaders.asMultiValueMap(),
+                                    attempt.collector.bytes(), tokens, true);
+                            // #444: the fill is best-effort and blocking I/O — run it
+                            // on the bounded scheduler, never on the response-writing
+                            // event loop; a failed fill only logs (the client already
+                            // has its response).
+                            CachedResponse toStore = cached;
+                            Mono.fromRunnable(() -> responseCache.put(cacheKey, ctx.tenantId(), ctx.key().keyId(),
+                                    ctx.projectId(), ctx.productId(), modelName, toStore))
+                                    .subscribeOn(credentialDecryptScheduler).subscribe(null,
+                                            error -> log.warn("aigw.cache.put_failed: {}", error.getMessage()));
                         }
                         return cached != null
                                 ? cached
-                                : new CachedResponse(status, null, new HttpHeaders(), new byte[0], TokenBucket.EMPTY,
-                                        false);
+                                : new CachedResponse(status, null, new HttpHeaders().asMultiValueMap(), new byte[0],
+                                        TokenBucket.EMPTY, false);
                     }));
                 });
     }
@@ -505,8 +651,8 @@ public class ProxyController {
         final AtomicReference<TokenBucket> observedTokens = new AtomicReference<>();
 
         UpstreamAttempt(String requestId, long startMillis, Clock clock, ObjectMapper objectMapper,
-                int maxProxyBufferBytes) {
-            this.ttfb = new TtfbRecorder(requestId, startMillis, clock);
+                int maxProxyBufferBytes, LongConsumer firstByteListener) {
+            this.ttfb = new TtfbRecorder(requestId, startMillis, clock, firstByteListener);
             this.usageObserver = new SseUsageObserver(objectMapper, maxProxyBufferBytes);
             this.collector = new BodyCollector(maxProxyBufferBytes);
         }
@@ -534,26 +680,52 @@ public class ProxyController {
     // -------------------------------------------------------------------
 
     private void publishUsageEvent(AuthContext ctx, String modelName, CacheKey cacheKey, TokenBucket tokens, int status,
-            String providerRequestId, String requestId, long latencyMs, boolean complete, boolean usageMissing) {
+            String providerRequestId, String requestId, long latencyMs, boolean complete, boolean usageMissing,
+            String clientIp) {
+        if (modelName == null) {
+            // usage_event.model_id is NOT NULL: a transparently forwarded body
+            // without a usable "model" field (unparseable JSON, or a protocol
+            // that carries the model in the path) has no billable fact to
+            // record. The lifecycle records still capture the request; a null
+            // model here used to abort — and endlessly re-enqueue — the whole
+            // usage write batch.
+            log.warn("Usage event skipped: no model name in request (requestId={}, status={})", requestId, status);
+            return;
+        }
         try {
             usageEventBus.publish(new UsageEvent(UUID.randomUUID(), ctx.tenantId(), providerRequestId,
                     ctx.key().keyId(), ctx.projectId(), ctx.productId(), ctx.binding().credentialId(), modelName,
                     CacheLevel.UPSTREAM, tokens, latencyMs, status, cacheKey != null ? cacheKey.sha256() : null,
-                    complete, usageMissing, requestId, clock.instant()));
+                    complete, usageMissing, requestId, clock.instant(), clientIp, attributionOf(ctx)));
         } catch (RuntimeException e) {
             log.warn("Failed to publish usage event (requestId={}): {}", requestId, e.getMessage());
         }
     }
 
-    private void publishCoalescedUsage(AuthContext ctx, CachedResponse cached, CacheKey cacheKey, String requestId) {
+    private void publishCoalescedUsage(AuthContext ctx, String modelName, CachedResponse cached, CacheKey cacheKey,
+            String requestId, String clientIp) {
+        if (modelName == null) {
+            log.warn("Coalesced usage event skipped: no model name in request (requestId={})", requestId);
+            return;
+        }
         try {
             usageEventBus.publish(new UsageEvent(UUID.randomUUID(), ctx.tenantId(), null, ctx.key().keyId(),
-                    ctx.projectId(), ctx.productId(), ctx.binding().credentialId(), null, CacheLevel.COALESCED,
+                    ctx.projectId(), ctx.productId(), ctx.binding().credentialId(), modelName, CacheLevel.COALESCED,
                     cached.usage(), null, null, cacheKey != null ? cacheKey.sha256() : null, true,
-                    cached.usage().isEmpty(), requestId, clock.instant()));
+                    cached.usage().isEmpty(), requestId, clock.instant(), clientIp, attributionOf(ctx)));
         } catch (RuntimeException e) {
             log.warn("Failed to publish coalesced usage event (requestId={}): {}", requestId, e.getMessage());
         }
+    }
+
+    /** CAA attribution snapshot for the usage row; null without context. */
+    private static UsageEvent.ContextAttribution attributionOf(AuthContext ctx) {
+        var c = ctx.context();
+        return c == null
+                ? null
+                : new UsageEvent.ContextAttribution(c.sessionId(), c.activityId(), c.claimedProjectId(),
+                        c.resolutionStatus(), c.resolutionCandidates(), c.claimSource(), c.claimConfidence(),
+                        ctx.binding().projectTag());
     }
 
     private void publishCacheHit(GatewayResponseCache.LookupLevel level, AuthContext ctx, CacheKey cacheKey,
@@ -670,20 +842,28 @@ public class ProxyController {
         };
     }
 
-    private TokenBucket mergeObservations(SseUsageObserver observer) {
-        TokenBucket merged = TokenBucket.EMPTY;
+    /**
+     * Collapses the usage frames observed for one response into a single bucket.
+     * Provider counters are cumulative within a response, so each later frame
+     * supersedes the earlier values per field — never sums them
+     * ({@link TokenBucket#overlay}).
+     */
+    private TokenBucket latestObservation(SseUsageObserver observer) {
+        TokenBucket latest = TokenBucket.EMPTY;
         for (SseUsageObserver.UsageObservation obs : observer.getObservations()) {
-            merged = merged.merge(new TokenBucket(obs.inputTokens(), obs.outputTokens(), obs.cacheCreationInputTokens(),
-                    obs.cacheReadInputTokens(), obs.promptTokens(), obs.completionTokens(), obs.totalTokens(),
-                    obs.reasoningTokens()));
+            latest = latest.overlay(new TokenBucket(obs.inputTokens(), obs.outputTokens(),
+                    obs.cacheCreationInputTokens(), obs.cacheReadInputTokens(), obs.promptTokens(),
+                    obs.completionTokens(), obs.totalTokens(), obs.reasoningTokens()));
         }
-        return merged;
+        return latest;
     }
 
     /**
      * The provider's request id (dedup anchor for usage writes): OpenAI exposes
      * {@code x-request-id}, Anthropic {@code request-id}. Truncated to the column
-     * width; null when absent.
+     * width; null when absent. When both headers are missing, the terminal stage
+     * falls back to the response-body id ({@link UpstreamRequestIdExtractor},
+     * #623).
      */
     private static String pickProviderRequestId(
             org.springframework.web.reactive.function.client.ClientResponse response) {
@@ -695,6 +875,23 @@ public class ProxyController {
             return null;
         }
         return id.length() > 128 ? id.substring(0, 128) : id;
+    }
+
+    /**
+     * Headers first ({@link #pickProviderRequestId}); when both are absent the
+     * observed response prefix is scanned for the body {@code "id"} (#623 —
+     * DeepSeek and other OpenAI-compatible providers only carry the id in the
+     * body). The first resolution wins for the whole attempt: the usage event is
+     * published at response-completion, before the terminal lifecycle record, so it
+     * must not depend on the later doFinally stage.
+     */
+    private static String effectiveProviderRequestId(UpstreamAttempt attempt) {
+        String id = attempt.providerRequestId.get();
+        if (id == null) {
+            id = UpstreamRequestIdExtractor.fromBodyPrefix(attempt.collector.bytes());
+            attempt.providerRequestId.set(id);
+        }
+        return id;
     }
 
     private JsonNode parseQuietly(byte[] body) {
@@ -709,10 +906,42 @@ public class ProxyController {
     // Error envelopes (protocol-compatible)
     // -------------------------------------------------------------------
 
+    /**
+     * Maps an upstream that closed the connection before delivering a complete
+     * response onto the same {@code upstream_unavailable} envelope as an
+     * unreachable provider.
+     *
+     * <p>
+     * reactor-netty reports a close after the upstream status line — but before any
+     * body byte — as {@link PrematureCloseException}, which extends
+     * {@link java.io.IOException} and is therefore neither a
+     * {@link WebClientRequestException} (the mapping above) nor a timeout: without
+     * this clause it escapes the controller and the container renders its own 500
+     * error document, which is not the protocol envelope clients parse. Nothing has
+     * been relayed downstream at that point, so the envelope can still be written.
+     * </p>
+     *
+     * <p>
+     * Once a body byte has been relayed the response is committed and no error
+     * document can follow it — the truncated framing is then the client's only
+     * signal, so the failure is propagated unchanged.
+     * </p>
+     */
+    private Mono<Void> upstreamClosedBeforeFirstByte(ServerWebExchange exchange, PrematureCloseException error) {
+        if (exchange.getResponse().isCommitted()) {
+            return Mono.error(error);
+        }
+        return writeError(exchange, new AuthFailureException(HttpStatus.BAD_GATEWAY, "upstream_unavailable",
+                "Upstream provider closed the connection before sending a response body"));
+    }
+
     private Mono<Void> writeError(ServerWebExchange exchange, AuthFailureException e) {
         ServerHttpResponse response = exchange.getResponse();
         response.setStatusCode(HttpStatusCode.valueOf(e.status()));
         response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
+        if (e.retryAfterSeconds() != null) {
+            response.getHeaders().set(HttpHeaders.RETRY_AFTER, String.valueOf(e.retryAfterSeconds()));
+        }
         byte[] bytes = ErrorEnvelopes.body(e, exchange.getRequest().getURI().getPath())
                 .getBytes(StandardCharsets.UTF_8);
         return response.writeWith(Mono.just(response.bufferFactory().wrap(bytes)));
@@ -734,19 +963,30 @@ public class ProxyController {
                 ProtocolFamily family = ProtocolFamily.valueOf(wireProtocol);
                 RouteSnapshot.CredentialRecord credential = ctx.snapshot().credential(ctx.binding().credentialId());
                 URI baseUrl = credential != null ? credential.baseUrl(family.name()) : null;
-                if (baseUrl != null) {
-                    var request = exchange.getRequest();
-                    RouteContext route = new RouteContext(ctx.key().tenantId(), ctx.binding().productId(),
-                            ctx.binding().projectId(), family, baseUrl);
-                    InboundRequest inbound = new InboundRequest(request.getMethod().name(), request.getURI().getPath(),
-                            decodeQuery(request.getURI().getRawQuery()), request.getHeaders());
-                    TargetRequest target = adapter.resolve(route, inbound);
-                    StringBuilder sb = new StringBuilder(target.origin().toString());
-                    sb.append(target.path());
-                    if (target.query() != null && !target.query().isEmpty()) {
-                        sb.append('?').append(target.query());
+                // RouteContext enforces https (SPI-level SSRF boundary); plain-http
+                // upstreams (local mocks, allowed-cidrs private deployments) keep
+                // the legacy verbatim splice below.
+                if (baseUrl != null && "https".equalsIgnoreCase(baseUrl.getScheme())) {
+                    try {
+                        var request = exchange.getRequest();
+                        RouteContext route = new RouteContext(ctx.key().tenantId(), ctx.binding().productId(),
+                                ctx.binding().projectId(), family, baseUrl);
+                        InboundRequest inbound = new InboundRequest(request.getMethod().name(),
+                                request.getURI().getPath(), decodeQuery(request.getURI().getRawQuery()),
+                                request.getHeaders().asMultiValueMap());
+                        TargetRequest target = adapter.resolve(route, inbound);
+                        StringBuilder sb = new StringBuilder(target.origin().toString());
+                        sb.append(target.path());
+                        if (target.query() != null && !target.query().isEmpty()) {
+                            sb.append('?').append(target.query());
+                        }
+                        return new ResolvedTarget(URI.create(sb.toString()), target.headers());
+                    } catch (RuntimeException e) {
+                        // A broken adapter must never take the relay down: fall
+                        // back to the legacy splice and leave a breadcrumb.
+                        log.warn("Adapter target resolution failed (product={}): {}; using single base", productCode,
+                                e.getMessage());
                     }
-                    return new ResolvedTarget(URI.create(sb.toString()), target.headers());
                 }
             }
         }

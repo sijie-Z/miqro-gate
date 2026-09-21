@@ -1,9 +1,7 @@
 package com.miqroera.miqrokey.persistence;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.autoconfigure.web.servlet.ServletWebServerFactoryAutoConfiguration;
-import org.springframework.boot.autoconfigure.web.reactive.ReactiveWebServerFactoryAutoConfiguration;
 import org.springframework.context.annotation.Bean;
 
 /**
@@ -17,8 +15,7 @@ import org.springframework.context.annotation.Bean;
  * the {@code UsageStatsRepositoryImpl} constructor injection.
  * </p>
  */
-@SpringBootApplication(exclude = {ServletWebServerFactoryAutoConfiguration.class,
-        ReactiveWebServerFactoryAutoConfiguration.class})
+@SpringBootApplication
 public class PersistenceTestApplication {
 
     @Bean

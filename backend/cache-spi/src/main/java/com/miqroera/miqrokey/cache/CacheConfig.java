@@ -36,7 +36,7 @@ public class CacheConfig {
 
     @Bean
     public GatewayResponseCache gatewayResponseCache(ObjectProvider<javax.sql.DataSource> dataSource,
-            com.fasterxml.jackson.databind.ObjectMapper objectMapper, CacheProperties props) {
+            tools.jackson.databind.ObjectMapper objectMapper, CacheProperties props) {
         PostgresCacheProvider l2 = null;
         if (props.l2Enabled() && dataSource.getIfAvailable() != null) {
             l2 = new PostgresCacheProvider(new NamedParameterJdbcTemplate(dataSource.getIfAvailable()), objectMapper,

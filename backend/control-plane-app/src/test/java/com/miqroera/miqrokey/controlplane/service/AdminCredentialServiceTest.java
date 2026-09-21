@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.controlplane.service;
 
+import com.miqroera.miqrokey.controlplane.client.ProviderClientFactory;
 import com.miqroera.miqrokey.controlplane.config.AuthProperties;
 import com.miqroera.miqrokey.controlplane.dto.AdminCredentialCreateRequest;
 import com.miqroera.miqrokey.controlplane.dto.CredentialDetailView;
@@ -11,10 +12,19 @@ import com.miqroera.miqrokey.controlplane.service.credential.FormatCredentialVal
 import com.miqroera.miqrokey.domain.crypto.CredentialFingerprint;
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider;
+import com.miqroera.miqrokey.domain.repository.AgentRepository;
+import com.miqroera.miqrokey.domain.repository.ProviderProductRepository;
+import com.miqroera.miqrokey.domain.model.Agent;
 import com.miqroera.miqrokey.domain.model.BillingMode;
+import com.miqroera.miqrokey.spi.AdapterRegistry;
+import com.miqroera.miqrokey.spi.CredentialCheck;
+import com.miqroera.miqrokey.controlplane.client.HttpProviderClient;
+import com.miqroera.miqrokey.spi.ProviderProductAdapter;
 import com.miqroera.miqrokey.domain.model.CredentialStatus;
 import com.miqroera.miqrokey.domain.model.CredentialVersionStatus;
 import com.miqroera.miqrokey.domain.model.PlanScope;
+import com.miqroera.miqrokey.domain.model.ProviderProduct;
+import reactor.core.publisher.Mono;
 import com.miqroera.miqrokey.domain.model.StatusSource;
 import com.miqroera.miqrokey.domain.model.SubscriptionStatus;
 import com.miqroera.miqrokey.domain.model.UpstreamCredential;
@@ -34,6 +44,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -48,6 +59,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -77,6 +90,16 @@ class AdminCredentialServiceTest {
     private KeyEncryptionProvider keyEncryptionProvider;
     @Mock
     private AuditService auditService;
+    @Mock
+    private AdapterRegistry adapterRegistry;
+    @Mock
+    private ProviderClientFactory clientFactory;
+    @Mock
+    private ProviderProductRepository productRepository;
+    @Mock
+    private AgentRepository agentRepository;
+    @Mock
+    private org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate jdbc;
 
     private final AuthProperties authProperties = new AuthProperties();
     private AdminCredentialService service;
@@ -86,7 +109,7 @@ class AdminCredentialServiceTest {
     void setUp() {
         service = new AdminCredentialService(credentialRepository, versionRepository, subscriptionRepository,
                 keyEncryptionProvider, new FormatCredentialValidator(), auditService, authProperties,
-                RouteRefreshPublisher.NONE);
+                RouteRefreshPublisher.NONE, adapterRegistry, clientFactory, productRepository, jdbc, agentRepository);
         admin = new User(UUID.randomUUID(), TENANT, "admin", "Admin", new byte[32], UserRole.SYSTEM_ADMIN,
                 UserStatus.ACTIVE, false, 0, null, null, 0L, Instant.now(), Instant.now());
     }
@@ -101,8 +124,8 @@ class AdminCredentialServiceTest {
         when(keyEncryptionProvider.encrypt(any(), eq(TENANT), any()))
                 .thenReturn(new EncryptedSecret(new byte[]{1, 2, 3}, new byte[]{4, 5}, "v1"));
 
-        CredentialView view = service.create(admin, new AdminCredentialCreateRequest("prod-key", SUBSCRIPTION, SECRET),
-                "req-1");
+        CredentialView view = service.create(admin,
+                new AdminCredentialCreateRequest("prod-key", SUBSCRIPTION, SECRET, null), "req-1");
 
         assertThat(view.status()).isEqualTo("ACTIVE");
         assertThat(view.name()).isEqualTo("prod-key");
@@ -134,10 +157,9 @@ class AdminCredentialServiceTest {
     void createWithInvalidSecretWritesNothing() {
         when(subscriptionRepository.findById(SUBSCRIPTION)).thenReturn(Optional.of(subscription()));
 
-        assertThatThrownBy(
-                () -> service.create(admin, new AdminCredentialCreateRequest("k", SUBSCRIPTION, "short"), "req-1"))
-                .isInstanceOfSatisfying(ApiException.class,
-                        e -> assertThat(e.getCode()).isEqualTo("CREDENTIAL_INVALID"));
+        assertThatThrownBy(() -> service.create(admin,
+                new AdminCredentialCreateRequest("k", SUBSCRIPTION, "short", null), "req-1")).isInstanceOfSatisfying(
+                        ApiException.class, e -> assertThat(e.getCode()).isEqualTo("CREDENTIAL_INVALID"));
 
         verifyNoInteractions(credentialRepository, versionRepository, keyEncryptionProvider, auditService);
     }
@@ -150,7 +172,7 @@ class AdminCredentialServiceTest {
         when(subscriptionRepository.findById(SUBSCRIPTION)).thenReturn(Optional.of(foreign));
 
         assertThatThrownBy(
-                () -> service.create(admin, new AdminCredentialCreateRequest("k", SUBSCRIPTION, SECRET), "req-1"))
+                () -> service.create(admin, new AdminCredentialCreateRequest("k", SUBSCRIPTION, SECRET, null), "req-1"))
                 .isInstanceOfSatisfying(ApiException.class,
                         e -> assertThat(e.getCode()).isEqualTo("SUBSCRIPTION_NOT_FOUND"));
         verifyNoInteractions(credentialRepository, versionRepository, keyEncryptionProvider, auditService);
@@ -272,6 +294,25 @@ class AdminCredentialServiceTest {
     }
 
     @Test
+    void rotateRejectsCredentialBoundToActiveAgent() {
+        UpstreamCredential credential = credential();
+        when(credentialRepository.findByIdForUpdate(credential.id())).thenReturn(Optional.of(credential));
+        when(agentRepository.findActiveByCredentialId(TENANT, credential.id()))
+                .thenReturn(Optional.of(agent("客服助手", credential.id(), "ACTIVE")));
+
+        assertThatThrownBy(() -> service.rotate(admin, credential.id(), new RotateCredentialRequest(SECRET), "req-1"))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(e.getCode()).isEqualTo("CREDENTIAL_REFERENCED_BY_AGENT");
+                    assertThat(e.getMessage()).contains("客服助手").contains("不能轮换");
+                });
+        verify(versionRepository, never()).update(any());
+        verify(versionRepository, never()).insert(any());
+        verify(credentialRepository, never()).update(any());
+        verifyNoInteractions(keyEncryptionProvider, auditService);
+    }
+
+    @Test
     void rotateRejectsForeignTenantCredential() {
         when(credentialRepository.findByIdForUpdate(any())).thenReturn(Optional.of(credentialOfTenant(OTHER_TENANT)));
 
@@ -311,6 +352,40 @@ class AdminCredentialServiceTest {
                 ApiException.class, e -> assertThat(e.getCode()).isEqualTo("CREDENTIAL_NOT_DISABLEABLE"));
         verify(versionRepository, never()).update(any());
         verify(credentialRepository, never()).update(any());
+    }
+
+    @Test
+    void disableRejectsCredentialBoundToActiveAgent() {
+        UpstreamCredential credential = credential();
+        when(credentialRepository.findByIdForUpdate(credential.id())).thenReturn(Optional.of(credential));
+        when(agentRepository.findActiveByCredentialId(TENANT, credential.id()))
+                .thenReturn(Optional.of(agent("客服助手", credential.id(), "ACTIVE")));
+
+        assertThatThrownBy(() -> service.disable(admin, credential.id(), "req-1"))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(e.getCode()).isEqualTo("CREDENTIAL_REFERENCED_BY_AGENT");
+                    assertThat(e.getMessage()).contains("客服助手").contains("不能停用");
+                });
+        verify(versionRepository, never()).update(any());
+        verify(credentialRepository, never()).update(any());
+        verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void disableProceedsWhenTheBindingAgentIsDisabled() {
+        UpstreamCredential credential = credential();
+        when(credentialRepository.findByIdForUpdate(credential.id())).thenReturn(Optional.of(credential));
+        // findActiveByCredentialId filters status = ACTIVE, so a disabled binding
+        // agent yields empty and the credential is mutable again.
+        when(agentRepository.findActiveByCredentialId(TENANT, credential.id())).thenReturn(Optional.empty());
+
+        service.disable(admin, credential.id(), "req-1");
+
+        // The guard is consulted (empty result, not skipped) and the credential
+        // still goes through the normal disable path.
+        verify(agentRepository).findActiveByCredentialId(TENANT, credential.id());
+        verify(credentialRepository).update(argThat(u -> u.status() == CredentialStatus.DISABLED));
     }
 
     // ------------------------------------------------------------------
@@ -370,9 +445,96 @@ class AdminCredentialServiceTest {
                 Instant.now());
     }
 
+    private static Agent agent(String name, UUID credentialId, String status) {
+        return new Agent(UUID.randomUUID(), TENANT, name, null, credentialId, status, 0L, UUID.randomUUID(),
+                Instant.now(), Instant.now());
+    }
+
     private static UpstreamCredentialVersion version(CredentialVersionStatus status, byte[] fingerprint,
             Instant validFrom, Instant retiredAt) {
         return new UpstreamCredentialVersion(UUID.randomUUID(), TENANT, UUID.randomUUID(), new byte[]{1, 2, 3},
                 new byte[]{4}, "v1", fingerprint, status, validFrom, retiredAt, Instant.now());
+    }
+
+    private static ProviderProduct productFor(UUID productId) {
+        return new ProviderProduct(productId, UUID.randomUUID(), "deepseek-payg-api", "DeepSeek PAYG", BillingMode.PAYG,
+                PlanScope.NONE, null, null, "[\"messages\"]", "[{\"url\":\"https://api.deepseek.com\"}]", "bearer",
+                "OFFICIAL_API", "OFFICIAL_API", com.miqroera.miqrokey.domain.model.BalanceAuthority.OFFICIAL_API,
+                com.miqroera.miqrokey.domain.model.ImplementationStatus.IMPLEMENTED, "1", 0, Instant.now(),
+                Instant.now());
+    }
+
+    @Test
+    void validateProbesProviderWhenSecretMatches() {
+        UpstreamCredential credential = credentialOfStatus(CredentialStatus.ACTIVE);
+        UpstreamSubscription subscription = subscription();
+        ProviderProduct product = productFor(subscription.providerProductId());
+        ProviderProductAdapter adapter = mock(ProviderProductAdapter.class);
+        HttpProviderClient client = mock(HttpProviderClient.class);
+        when(credentialRepository.findById(credential.id())).thenReturn(java.util.Optional.of(credential));
+        when(versionRepository.findActiveByCredentialId(credential.id())).thenReturn(
+                java.util.Optional.of(version(com.miqroera.miqrokey.domain.model.CredentialVersionStatus.ACTIVE,
+                        CredentialFingerprint.sha256(SECRET), Instant.now(), null)));
+        when(subscriptionRepository.findById(credential.subscriptionId()))
+                .thenReturn(java.util.Optional.of(subscription));
+        when(productRepository.findById(subscription.providerProductId())).thenReturn(java.util.Optional.of(product));
+        when(adapterRegistry.findById("deepseek-payg-api")).thenReturn(java.util.Optional.of(adapter));
+        when(clientFactory.create(any(), any(), any())).thenReturn(client);
+        when(adapter.validateCredential(client)).thenReturn(Mono.just(CredentialCheck.valid(Instant.now())));
+
+        ValidateCredentialResponse response = service.validate(admin, credential.id(),
+                new ValidateCredentialRequest(SECRET), "req");
+
+        assertThat(response.matchesActive()).isTrue();
+        assertThat(response.providerStatus()).isEqualTo("VALID");
+    }
+
+    @Test
+    void validateReportsProviderRejection() {
+        UpstreamCredential credential = credentialOfStatus(CredentialStatus.ACTIVE);
+        UpstreamSubscription subscription = subscription();
+        ProviderProduct product = productFor(subscription.providerProductId());
+        ProviderProductAdapter adapter = mock(ProviderProductAdapter.class);
+        HttpProviderClient client = mock(HttpProviderClient.class);
+        when(credentialRepository.findById(credential.id())).thenReturn(java.util.Optional.of(credential));
+        when(versionRepository.findActiveByCredentialId(credential.id())).thenReturn(
+                java.util.Optional.of(version(com.miqroera.miqrokey.domain.model.CredentialVersionStatus.ACTIVE,
+                        CredentialFingerprint.sha256(SECRET), Instant.now(), null)));
+        when(subscriptionRepository.findById(credential.subscriptionId()))
+                .thenReturn(java.util.Optional.of(subscription));
+        when(productRepository.findById(subscription.providerProductId())).thenReturn(java.util.Optional.of(product));
+        when(adapterRegistry.findById("deepseek-payg-api")).thenReturn(java.util.Optional.of(adapter));
+        when(clientFactory.create(any(), any(), any())).thenReturn(client);
+        when(adapter.validateCredential(client))
+                .thenReturn(Mono.just(CredentialCheck.invalid("credential rejected", Instant.now())));
+
+        ValidateCredentialResponse response = service.validate(admin, credential.id(),
+                new ValidateCredentialRequest(SECRET), "req");
+
+        assertThat(response.matchesActive()).isTrue();
+        assertThat(response.providerStatus()).isEqualTo("REJECTED");
+    }
+
+    @Test
+    void validateMarksUnreachableWhenProviderCallFails() {
+        UpstreamCredential credential = credentialOfStatus(CredentialStatus.ACTIVE);
+        UpstreamSubscription subscription = subscription();
+        ProviderProduct product = productFor(subscription.providerProductId());
+        when(credentialRepository.findById(credential.id())).thenReturn(java.util.Optional.of(credential));
+        when(versionRepository.findActiveByCredentialId(credential.id())).thenReturn(
+                java.util.Optional.of(version(com.miqroera.miqrokey.domain.model.CredentialVersionStatus.ACTIVE,
+                        CredentialFingerprint.sha256(SECRET), Instant.now(), null)));
+        when(subscriptionRepository.findById(credential.subscriptionId()))
+                .thenReturn(java.util.Optional.of(subscription));
+        when(productRepository.findById(subscription.providerProductId())).thenReturn(java.util.Optional.of(product));
+        when(adapterRegistry.findById("deepseek-payg-api"))
+                .thenReturn(java.util.Optional.of(mock(ProviderProductAdapter.class)));
+        when(clientFactory.create(any(), any(), any())).thenThrow(new RuntimeException("boom"));
+
+        ValidateCredentialResponse response = service.validate(admin, credential.id(),
+                new ValidateCredentialRequest(SECRET), "req");
+
+        assertThat(response.matchesActive()).isTrue();
+        assertThat(response.providerStatus()).isEqualTo("UNREACHABLE");
     }
 }

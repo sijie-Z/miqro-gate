@@ -48,7 +48,9 @@ public class SessionFilter implements Filter {
     private final AuthProperties authProperties;
 
     /** Public paths that do not require authentication. */
-    private static final String[] PUBLIC_PATHS = {"/api/v1/auth/login", "/api/v1/auth/bootstrap"};
+    private static final String[] PUBLIC_PATHS = {"/api/v1/auth/login", "/api/v1/auth/bootstrap",
+            "/api/v1/auth/register", "/api/v1/auth/registration-status", "/api/v1/auth/oauth/providers",
+            "/api/v1/auth/oauth/start", "/api/v1/auth/oauth/callback"};
 
     public SessionFilter(SessionService sessionService, UserRepository userRepository, UserContext userContext,
             AuthProperties authProperties) {
@@ -63,7 +65,7 @@ public class SessionFilter implements Filter {
             throws IOException, ServletException {
         HttpServletRequest httpReq = (HttpServletRequest) request;
         HttpServletResponse httpRes = (HttpServletResponse) response;
-        String path = httpReq.getRequestURI();
+        String path = RequestPaths.lookupPath(httpReq);
 
         // Skip public paths
         if (isPublicPath(path)) {
@@ -79,6 +81,14 @@ public class SessionFilter implements Filter {
 
         String rawToken = sessionService.extractSessionToken(httpReq);
         if (rawToken == null) {
+            // Machine channels authenticate without a session: the external-system
+            // channel (/api/v1/billing) via ApiKeyAuthFilter and the open admin
+            // surface (/api/v1/admin-api, ADR-0015) via AdminApiKeyAuthFilter —
+            // let both through here, they enforce their own credentials.
+            if (path.startsWith(ApiKeyAuthFilter.BILLING_PATH) || path.startsWith(AdminApiKeyAuthFilter.OPEN_PATH)) {
+                chain.doFilter(httpReq, httpRes);
+                return;
+            }
             sendUnauthorized(httpRes, "Authentication required", "UNAUTHORIZED");
             return;
         }
@@ -104,15 +114,27 @@ public class SessionFilter implements Filter {
             // Revoke the session so it cannot be replayed
             try {
                 sessionService.revokeSession(session.id());
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                // PH45: the 401 is still the right answer to this request, but a
+                // revocation that failed leaves the session usable although the
+                // account is disabled — that must not happen silently.
+                LOG.error("Session revocation failed for a DISABLED account [userId={}, sessionId={}]", user.id(),
+                        session.id(), e);
             }
             sendUnauthorized(httpRes, "Account disabled", "UNAUTHORIZED");
             return;
         }
-        if (user.status() == UserStatus.LOCKED && user.lockedUntil() != null && now.isBefore(user.lockedUntil())) {
+        // #445: LOCKED with a null deadline is an indefinite admin lock; the
+        // old condition only recognized timed (auto-lock) entries and let an
+        // admin-locked account keep using its session.
+        if (user.status() == UserStatus.LOCKED && (user.lockedUntil() == null || now.isBefore(user.lockedUntil()))) {
             try {
                 sessionService.revokeSession(session.id());
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                // PH45: same as the DISABLED branch — an unrevoked session of a
+                // locked account stays replayable, so the failure is recorded.
+                LOG.error("Session revocation failed for a LOCKED account [userId={}, sessionId={}]", user.id(),
+                        session.id(), e);
             }
             sendUnauthorized(httpRes, "Account locked", "UNAUTHORIZED");
             return;
@@ -153,9 +175,7 @@ public class SessionFilter implements Filter {
         try {
             httpRes.setStatus(401);
             httpRes.setContentType("application/problem+json");
-            httpRes.getWriter().write(String.format(
-                    "{\"type\":\"about:blank\",\"title\":\"%s\",\"status\":401,\"code\":\"%s\",\"requestId\":\"%s\"}",
-                    escapeJson(title), escapeJson(code), escapeJson(requestId)));
+            httpRes.getWriter().write(ProblemJson.of(401, title, code, null, requestId));
         } catch (Exception e) {
             LOG.error("Failed to write unauthorized response", e);
         }
@@ -167,37 +187,6 @@ public class SessionFilter implements Filter {
                 return true;
         }
         return false;
-    }
-
-    private static String escapeJson(String s) {
-        if (s == null)
-            return "null";
-        StringBuilder sb = new StringBuilder(s.length() + 8);
-        for (char c : s.toCharArray()) {
-            switch (c) {
-                case '"':
-                    sb.append("\\\"");
-                    break;
-                case '\\':
-                    sb.append("\\\\");
-                    break;
-                case '\n':
-                    sb.append("\\n");
-                    break;
-                case '\r':
-                    sb.append("\\r");
-                    break;
-                case '\t':
-                    sb.append("\\t");
-                    break;
-                default:
-                    if (c < 0x20)
-                        sb.append(String.format("\\u%04x", (int) c));
-                    else
-                        sb.append(c);
-            }
-        }
-        return sb.toString();
     }
 
     @Override

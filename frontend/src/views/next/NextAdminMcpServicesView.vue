@@ -1,0 +1,3721 @@
+<script setup lang="ts">
+/**
+ * NextAdminMcpServicesView — /app/mcp-services v2 admin page (U2 ops batch).
+ * Behaviour parity with the legacy MCP console: register Streamable HTTP/SSE
+ * servers, manual online/offline (gated), health-check config, tool registry
+ * with enable/disable and the two-level access control (Tencent doc 134890):
+ * server mode (open/allowlist/denylist) + per-tool overrides while the server
+ * stays fully open. Multi-selects render as checkbox groups (the v2 select is
+ * single-value; consumer lists stay short at console scale).
+ */
+import { computed, onMounted, ref } from 'vue';
+import * as api from '@/api';
+import { countWhenLoaded } from '@/utils/load-state';
+import { ApiError } from '@/api/http';
+import {
+  UiButton,
+  UiCheckbox,
+  UiDialog,
+  UiDrawer,
+  UiInput,
+  UiRadio,
+  UiSelect,
+  UiStatusBadge,
+  UiTable,
+  toast,
+} from '@/ui';
+import type { McpAclMode } from '@/types/api';
+import type {
+  McpRouteRule,
+  McpToolRevisionRow,
+  ToolImportResult,
+  UpsertMcpRouteRuleRequest,
+} from '@/types/generated-api';
+import type {
+  ApiConsumerView,
+  McpAccessView,
+  McpServiceAccessView,
+  McpServiceView,
+  McpServiceVerifyView,
+  McpToolView,
+  McpResiliencePolicy,
+} from '@/types/generated-api';
+import type { McpResilienceDraft, McpServiceTraffic } from '@/api';
+
+const services = ref<McpServiceView[]>([]);
+const loading = ref(true);
+const loadError = ref('');
+const loadRequestId = ref('');
+
+const columns = [
+  { key: 'name', title: '名称', minWidth: '170px' },
+  { key: 'endpoint', title: '接入地址', minWidth: '220px' },
+  { key: 'transport', title: '传输', width: '130px' },
+  { key: 'backendAuthMode', title: '后端鉴权', width: '100px' },
+  { key: 'status', title: '状态', width: '100px' },
+  { key: 'healthStatus', title: '健康', width: '100px' },
+  { key: 'healthCheckedAt', title: '最近检查', width: '170px' },
+  { key: 'actions', title: '操作', width: '280px' },
+];
+
+const transportOptions = [
+  { value: 'STREAMABLE_HTTP', label: 'Streamable HTTP' },
+  { value: 'SSE', label: 'SSE' },
+];
+
+const methodOptions = [
+  { value: 'GET', label: 'GET' },
+  { value: 'POST', label: 'POST' },
+  { value: 'PUT', label: 'PUT' },
+  { value: 'DELETE', label: 'DELETE' },
+  { value: 'PATCH', label: 'PATCH' },
+];
+
+const modeOptions: { value: string; label: string }[] = [
+  { value: '', label: '继承服务规则' },
+  { value: 'ALLOW', label: '仅名单内可调用' },
+  { value: 'DENY', label: '名单内禁止' },
+];
+
+// #674 onboarding guide: visible until dismissed (per-page localStorage
+// memory); mirrors the Tencent MCP guide-card pattern with our own
+// capabilities only.
+const MCP_GUIDE_KEY = 'miqrogate.mcp-guide.hidden';
+const guideOpen = ref(localStorage.getItem(MCP_GUIDE_KEY) !== '1');
+
+function dismissGuide() {
+  guideOpen.value = false;
+  localStorage.setItem(MCP_GUIDE_KEY, '1');
+}
+
+const registering = ref(false);
+const form = ref({
+  name: '',
+  description: '',
+  endpoint: '',
+  transport: 'STREAMABLE_HTTP',
+  upstreamTimeoutMs: '',
+});
+const formError = ref('');
+const submitting = ref(false);
+
+// Health config dialog
+const configService = ref<McpServiceView | null>(null);
+const configVisible = ref(false);
+const configForm = ref({
+  checkIntervalSeconds: '30',
+  checkTimeoutSeconds: '5',
+  failThreshold: '3',
+  recoverThreshold: '1',
+  checkPath: '/health',
+  checkMode: 'HEALTH_PATH',
+});
+
+// #387: probe shapes — HTTP health path (default) or JSON-RPC initialize.
+const probeModeOptions = [
+  { value: 'HEALTH_PATH', label: '健康路径' },
+  { value: 'JSONRPC_INITIALIZE', label: 'JSON-RPC initialize' },
+];
+const configSaving = ref(false);
+const configError = ref('');
+
+// #397 被动健康：窗口真实流量（与主动探测互补；只读展示，不阻断）。
+const trafficHours = ref('24');
+const traffic = ref<McpServiceTraffic | null>(null);
+const trafficLoading = ref(false);
+const trafficError = ref('');
+const trafficHourOptions = [
+  { value: '1', label: '近 1 小时' },
+  { value: '24', label: '近 24 小时' },
+  { value: '168', label: '近 7 天' },
+];
+
+function failureRateText(rate: number | null | undefined): string {
+  return rate == null ? '—' : `${(rate * 100).toFixed(1)}%`;
+}
+
+/** 主动探测通过但真实流量有上游失败——主动探测的盲区，必须显式可见。 */
+const trafficHint = computed(() => {
+  if (!traffic.value || !configService.value) {
+    return '';
+  }
+  if (configService.value.healthStatus === 'HEALTHY' && traffic.value.failed > 0) {
+    return `主动探测通过，但所选窗口内有 ${traffic.value.failed} 次真实上游失败——请检查上游凭证 / 配额 / 服务状态。`;
+  }
+  return '';
+});
+
+// #399：请求序号守卫——过期响应（含失败）一律丢弃；loading 只由最新请求收尾。
+let trafficRequestSeq = 0;
+
+async function loadTraffic() {
+  if (!configService.value) {
+    return;
+  }
+  const seq = ++trafficRequestSeq;
+  const serviceId = configService.value.id!;
+  const hours = Number(trafficHours.value);
+  trafficLoading.value = true;
+  trafficError.value = '';
+  try {
+    const view = await api.adminMcpServiceTraffic(serviceId, hours);
+    if (seq !== trafficRequestSeq) {
+      return;
+    }
+    traffic.value = view;
+  } catch (error) {
+    if (seq !== trafficRequestSeq) {
+      return;
+    }
+    trafficError.value = errorText(error, '加载真实流量失败。');
+  } finally {
+    if (seq === trafficRequestSeq) {
+      trafficLoading.value = false;
+    }
+  }
+}
+
+// #399：窗口切换由选择器事件驱动（不再用 watch——重开弹窗时窗口复位会经 watch 再触发一次请求）。
+function onTrafficHoursChange(value: string) {
+  trafficHours.value = value;
+  void loadTraffic();
+}
+
+// #685 onboarding closure: gateway access URLs + on-demand probe ("调用验证").
+const accessInfoService = ref<McpServiceView | null>(null);
+const accessInfoVisible = ref(false);
+const accessInfoLoading = ref(false);
+const accessInfo = ref<McpServiceAccessView | null>(null);
+const accessInfoError = ref('');
+
+async function openAccessInfo(service: McpServiceView) {
+  accessInfoService.value = service;
+  accessInfo.value = null;
+  accessInfoError.value = '';
+  accessInfoVisible.value = true;
+  accessInfoLoading.value = true;
+  try {
+    accessInfo.value = await api.adminMcpServiceAccess(service.id!);
+  } catch (error) {
+    accessInfoError.value = errorText(error, '加载接入信息失败，请稍后重试。');
+  } finally {
+    accessInfoLoading.value = false;
+  }
+}
+
+async function copyAccessUrl(text?: string) {
+  if (!text) {
+    return;
+  }
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      toast.success('接入地址已复制');
+      return;
+    }
+  } catch {
+    // fall through to the legacy path
+  }
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.style.position = 'fixed';
+  area.style.opacity = '0';
+  document.body.appendChild(area);
+  area.select();
+  const ok = document.execCommand('copy');
+  area.remove();
+  if (ok) {
+    toast.success('接入地址已复制');
+  } else {
+    toast.error('复制失败，请手动选择复制。');
+  }
+}
+
+const verifyService = ref<McpServiceView | null>(null);
+const verifyVisible = ref(false);
+const verifyRunning = ref(false);
+const verifyResult = ref<McpServiceVerifyView | null>(null);
+const verifyError = ref('');
+
+async function openVerify(service: McpServiceView) {
+  verifyService.value = service;
+  verifyResult.value = null;
+  verifyError.value = '';
+  verifyVisible.value = true;
+  await runVerify();
+}
+
+async function runVerify() {
+  if (!verifyService.value) {
+    return;
+  }
+  verifyRunning.value = true;
+  verifyError.value = '';
+  try {
+    verifyResult.value = await api.adminMcpServiceVerify(verifyService.value.id!);
+  } catch (error) {
+    verifyError.value = errorText(error, '验证失败，请稍后重试。');
+  } finally {
+    verifyRunning.value = false;
+  }
+}
+
+// I20 follow-up: per-service data-plane upstream budget (doc 135906 超时时间).
+const timeoutService = ref<McpServiceView | null>(null);
+const timeoutVisible = ref(false);
+const timeoutForm = ref({ upstreamTimeoutMs: '' });
+const timeoutSaving = ref(false);
+const timeoutError = ref('');
+
+function openTimeout(service: McpServiceView) {
+  timeoutService.value = service;
+  timeoutForm.value = { upstreamTimeoutMs: String(service.upstreamTimeoutMs ?? 60000) };
+  timeoutError.value = '';
+  timeoutVisible.value = true;
+}
+
+async function saveTimeout() {
+  if (!timeoutService.value) {
+    return;
+  }
+  const value = Number(timeoutForm.value.upstreamTimeoutMs);
+  if (!Number.isFinite(value) || value < 1000 || value > 600000) {
+    timeoutError.value = '上游超时必须为 1000–600000 毫秒。';
+    return;
+  }
+  timeoutSaving.value = true;
+  timeoutError.value = '';
+  try {
+    await api.adminSetMcpServiceUpstreamTimeout(timeoutService.value.id!, value);
+    timeoutVisible.value = false;
+    toast.success('上游预算已更新');
+    await load();
+  } catch (error) {
+    timeoutError.value = errorText(error, '保存失败，请稍后重试。');
+  } finally {
+    timeoutSaving.value = false;
+  }
+}
+
+// #320 upstream backend auth: the secret is write-only; API_KEY requires a
+// fresh value on every save, VISITOR clears any stored secret.
+const backendAuthService = ref<McpServiceView | null>(null);
+const backendAuthVisible = ref(false);
+const backendAuthMode = ref<'VISITOR' | 'API_KEY'>('VISITOR');
+const backendAuthSecret = ref('');
+const backendAuthSaving = ref(false);
+const backendAuthError = ref('');
+
+function openBackendAuth(service: McpServiceView) {
+  backendAuthService.value = service;
+  backendAuthMode.value = service.backendAuthMode === 'API_KEY' ? 'API_KEY' : 'VISITOR';
+  backendAuthSecret.value = '';
+  backendAuthError.value = '';
+  backendAuthVisible.value = true;
+}
+
+async function saveBackendAuth() {
+  if (!backendAuthService.value) {
+    return;
+  }
+  if (backendAuthMode.value === 'API_KEY' && !backendAuthSecret.value.trim()) {
+    backendAuthError.value = 'API 密钥模式必须填写密钥（每次保存都需要重新填写）。';
+    return;
+  }
+  backendAuthSaving.value = true;
+  backendAuthError.value = '';
+  try {
+    await api.adminSetMcpBackendAuth(backendAuthService.value.id!, {
+      mode: backendAuthMode.value,
+      secret: backendAuthMode.value === 'API_KEY' ? backendAuthSecret.value.trim() : undefined,
+    });
+    backendAuthVisible.value = false;
+    backendAuthSecret.value = '';
+    toast.success('后端鉴权已更新');
+    await load();
+  } catch (error) {
+    backendAuthError.value = error instanceof ApiError ? error.message : '更新失败';
+  } finally {
+    backendAuthSaving.value = false;
+  }
+}
+
+// Tools dialog
+const toolsService = ref<McpServiceView | null>(null);
+const toolsVisible = ref(false);
+const tools = ref<McpToolView[]>([]);
+const toolsLoading = ref(false);
+const toolsError = ref('');
+
+// Tools/list sync (doc 03, #344): dry-run preview, then apply on confirm
+const syncReport = ref<api.McpToolSyncReport | null>(null);
+const syncBusy = ref(false);
+const syncError = ref('');
+
+// F16 revision history / rollback drawer
+const revisionsTool = ref<McpToolView | null>(null);
+const revisionsVisible = ref(false);
+const revisions = ref<McpToolRevisionRow[]>([]);
+
+/** F16 field-level diff labels (issue #354; server computes changedFields). */
+const REVISION_FIELD_LABELS: Record<string, string> = {
+  description: '描述',
+  method: '方法',
+  path: '路径',
+};
+const revisionsLoading = ref(false);
+const revisionsError = ref('');
+const toolForm = ref({ toolName: '', description: '', method: 'GET', path: '' });
+
+// Tool-level retry override (F12/#360, I13)
+const toolRetryTool = ref<McpToolView | null>(null);
+const toolRetryVisible = ref(false);
+const toolRetryLoading = ref(false);
+const toolRetrySaving = ref(false);
+const toolRetryError = ref('');
+const toolRetryForm = ref({
+  retryEnabled: false,
+  retryMax: '1',
+  retryConditions: [] as string[],
+  idempotencyConfirmed: false,
+});
+
+// F16 edit-and-publish dialog
+const editTool = ref<McpToolView | null>(null);
+const editVisible = ref(false);
+const editForm = ref({ description: '', method: 'GET', path: '' });
+const editSaving = ref(false);
+const editError = ref('');
+
+// F17 OpenAPI batch import dialog
+const importVisible = ref(false);
+const importSpec = ref('');
+const importBusy = ref(false);
+const importError = ref('');
+const importResult = ref<ToolImportResult | null>(null);
+const toolSaving = ref(false);
+const toolFormError = ref('');
+const toolCreating = ref(false);
+
+// Access control dialog
+const accessService = ref<McpServiceView | null>(null);
+const accessVisible = ref(false);
+const accessLoading = ref(false);
+const accessError = ref('');
+const access = ref<McpAccessView | null>(null);
+const consumers = ref<ApiConsumerView[]>([]);
+const serverMode = ref<McpAclMode>('NONE');
+const serverIds = ref<string[]>([]);
+const serverSaving = ref(false);
+const serverResetSaving = ref(false);
+const accessNotice = ref('');
+/** Draft overrides per tool: null = inherit, otherwise ALLOW/DENY + ids. */
+const toolDrafts = ref<Record<string, { mode: McpAclMode | null; ids: string[] }>>({});
+
+const confirmState = ref<{
+  title: string;
+  body: string;
+  confirmLabel: string;
+  tone: 'danger' | 'primary';
+  run: () => Promise<void>;
+} | null>(null);
+
+const consumerOptions = computed(() =>
+  consumers.value.map((c) => ({
+    id: c.id,
+    label: `${c.name}（${c.keyPrefix}…）`,
+  })),
+);
+
+const canCreate = computed(
+  () => form.value.name.trim().length > 0 && form.value.endpoint.trim().length > 0,
+);
+
+const canCreateTool = computed(
+  () => toolForm.value.toolName.trim().length > 0 && toolForm.value.path.trim().length > 0,
+);
+
+// hub 类型里 healthStatus 为可选；未上报健康状态时按「未知」渲染与旧行为一致。
+function healthLabel(status: string | undefined): string {
+  return status === 'HEALTHY' ? '健康' : status === 'UNHEALTHY' ? '不健康' : '未知';
+}
+
+function healthTone(status: string | undefined): 'success' | 'danger' | 'neutral' {
+  return status === 'HEALTHY' ? 'success' : status === 'UNHEALTHY' ? 'danger' : 'neutral';
+}
+
+function formatTime(iso: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function errorText(error: unknown, fallback: string): string {
+  return error instanceof ApiError ? error.message : fallback;
+}
+
+async function load() {
+  loading.value = true;
+  loadError.value = '';
+  try {
+    services.value = await api.adminListMcpServices();
+  } catch (error) {
+    loadError.value = errorText(error, '加载 MCP 服务失败。');
+    if (error instanceof ApiError) {
+      loadRequestId.value = error.requestId ?? '';
+    }
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function registerService() {
+  if (!canCreate.value) {
+    formError.value = '请填写名称与接入地址。';
+    return;
+  }
+  submitting.value = true;
+  formError.value = '';
+  try {
+    await api.adminCreateMcpService({
+      name: form.value.name.trim(),
+      description: form.value.description.trim() || undefined,
+      endpoint: form.value.endpoint.trim(),
+      transport: form.value.transport,
+      upstreamTimeoutMs: form.value.upstreamTimeoutMs.trim()
+        ? Number(form.value.upstreamTimeoutMs)
+        : undefined,
+    });
+    registering.value = false;
+    form.value = {
+      name: '',
+      description: '',
+      endpoint: '',
+      transport: 'STREAMABLE_HTTP',
+      upstreamTimeoutMs: '',
+    };
+    toast.success('MCP 服务已注册');
+    await load();
+  } catch (error) {
+    formError.value = errorText(error, '创建失败，请稍后重试。');
+  } finally {
+    submitting.value = false;
+  }
+}
+
+function requestStatusChange(service: McpServiceView, status: string) {
+  const action = status === 'ONLINE' ? '上线' : '下线';
+  confirmState.value = {
+    title: `${action} MCP 服务「${service.name}」`,
+    body:
+      status === 'OFFLINE'
+        ? '下线后该服务暂停对外提供，健康检查不会自动恢复，需手动上线。'
+        : '上线后服务恢复对外提供。',
+    confirmLabel: action,
+    tone: status === 'OFFLINE' ? 'danger' : 'primary',
+    run: async () => {
+      try {
+        // 行数据来自服务列表接口，id 恒存在。
+        await api.adminSetMcpStatus(service.id!, status);
+        toast.success(`服务已${action}`);
+        await load();
+      } catch (error) {
+        if (error instanceof ApiError) {
+          toast.error(error.message);
+        }
+      }
+    },
+  };
+}
+
+async function confirmAndRun() {
+  const state = confirmState.value;
+  if (!state) return;
+  confirmState.value = null;
+  await state.run();
+}
+
+// ---- health config ----
+
+function openConfig(service: McpServiceView) {
+  configService.value = service;
+  configForm.value = {
+    checkIntervalSeconds: String(service.checkIntervalSeconds),
+    checkTimeoutSeconds: String(service.checkTimeoutSeconds),
+    failThreshold: String(service.failThreshold),
+    recoverThreshold: String(service.recoverThreshold),
+    checkPath: service.checkPath ?? '/health',
+    checkMode: service.checkMode === 'JSONRPC_INITIALIZE' ? 'JSONRPC_INITIALIZE' : 'HEALTH_PATH',
+  };
+  configError.value = '';
+  configVisible.value = true;
+  // #397：每次打开先复位窗口并拉取真实流量。
+  trafficHours.value = '24';
+  traffic.value = null;
+  trafficError.value = '';
+  void loadTraffic();
+}
+
+async function saveConfig() {
+  if (!configService.value) {
+    return;
+  }
+  configSaving.value = true;
+  configError.value = '';
+  try {
+    await api.adminUpdateMcpHealthConfig(configService.value.id!, {
+      checkIntervalSeconds: Number(configForm.value.checkIntervalSeconds),
+      checkTimeoutSeconds: Number(configForm.value.checkTimeoutSeconds),
+      failThreshold: Number(configForm.value.failThreshold),
+      recoverThreshold: Number(configForm.value.recoverThreshold),
+      checkPath: configForm.value.checkPath.trim(),
+      checkMode: configForm.value.checkMode,
+    });
+    configVisible.value = false;
+    toast.success('健康检查配置已更新');
+    await load();
+  } catch (error) {
+    configError.value = errorText(error, '保存失败，请稍后重试。');
+  } finally {
+    configSaving.value = false;
+  }
+}
+
+// ---- tools ----
+
+// #407：目标切换的过期响应防护（#399 序号守卫模式，全量收口）。
+let toolsRequestSeq = 0;
+
+async function openTools(service: McpServiceView) {
+  toolsService.value = service;
+  tools.value = [];
+  toolsError.value = '';
+  toolForm.value = { toolName: '', description: '', method: 'GET', path: '' };
+  toolCreating.value = false;
+  toolsVisible.value = true;
+  toolsLoading.value = true;
+  syncReport.value = null;
+  syncError.value = '';
+  syncBusy.value = false;
+  const seq = ++toolsRequestSeq;
+  try {
+    const list = await api.adminListMcpTools(service.id!);
+    if (seq !== toolsRequestSeq) {
+      return;
+    }
+    tools.value = list;
+  } catch (error) {
+    if (seq !== toolsRequestSeq) {
+      return;
+    }
+    toolsError.value = errorText(error, '加载工具失败。');
+  } finally {
+    if (seq === toolsRequestSeq) {
+      toolsLoading.value = false;
+    }
+  }
+}
+
+async function refreshTools() {
+  if (!toolsService.value) {
+    return;
+  }
+  tools.value = await api.adminListMcpTools(toolsService.value.id!);
+}
+
+async function previewToolSync() {
+  if (!toolsService.value) {
+    return;
+  }
+  syncBusy.value = true;
+  syncError.value = '';
+  try {
+    syncReport.value = await api.adminSyncMcpTools(toolsService.value.id!, true);
+  } catch (error) {
+    syncError.value = errorText(error, '同步预览失败。');
+  } finally {
+    syncBusy.value = false;
+  }
+}
+
+async function applyToolSync() {
+  if (!toolsService.value) {
+    return;
+  }
+  syncBusy.value = true;
+  syncError.value = '';
+  try {
+    syncReport.value = await api.adminSyncMcpTools(toolsService.value.id!, false);
+    toast.success('工具清单已同步');
+    await refreshTools();
+  } catch (error) {
+    syncError.value = errorText(error, '同步失败。');
+  } finally {
+    syncBusy.value = false;
+  }
+}
+
+async function createTool() {
+  if (!toolsService.value || !canCreateTool.value) {
+    toolFormError.value = '请填写工具名与路径。';
+    return;
+  }
+  toolSaving.value = true;
+  toolFormError.value = '';
+  try {
+    await api.adminCreateMcpTool(toolsService.value.id!, {
+      toolName: toolForm.value.toolName.trim(),
+      description: toolForm.value.description.trim() || undefined,
+      method: toolForm.value.method,
+      path: toolForm.value.path.trim(),
+    });
+    toolCreating.value = false;
+    toolForm.value = { toolName: '', description: '', method: 'GET', path: '' };
+    toast.success('工具已创建');
+    await refreshTools();
+  } catch (error) {
+    toolFormError.value = errorText(error, '创建失败，请稍后重试。');
+  } finally {
+    toolSaving.value = false;
+  }
+}
+
+// #407 序号守卫。
+let toolRetryRequestSeq = 0;
+
+async function openToolRetry(tool: McpToolView) {
+  if (!toolsService.value) {
+    return;
+  }
+  toolRetryTool.value = tool;
+  toolRetryVisible.value = true;
+  toolRetryLoading.value = true;
+  toolRetryError.value = '';
+  const seq = ++toolRetryRequestSeq;
+  try {
+    const policy = await api.getMcpToolRetryPolicy(toolsService.value.id!, tool.id!);
+    if (seq !== toolRetryRequestSeq) {
+      return;
+    }
+    toolRetryForm.value = {
+      retryEnabled: policy.retryEnabled,
+      retryMax: String(policy.retryMax),
+      retryConditions: [...policy.retryConditions],
+      idempotencyConfirmed: policy.idempotencyConfirmed,
+    };
+  } catch (error) {
+    if (seq !== toolRetryRequestSeq) {
+      return;
+    }
+    toolRetryError.value = errorText(error, '加载工具重试策略失败。');
+  } finally {
+    if (seq === toolRetryRequestSeq) {
+      toolRetryLoading.value = false;
+    }
+  }
+}
+
+function toggleToolRetryCondition(condition: string) {
+  const current = toolRetryForm.value.retryConditions;
+  toolRetryForm.value.retryConditions = current.includes(condition)
+    ? current.filter((entry) => entry !== condition)
+    : [...current, condition];
+}
+
+async function saveToolRetry() {
+  if (!toolsService.value || !toolRetryTool.value) {
+    return;
+  }
+  toolRetrySaving.value = true;
+  toolRetryError.value = '';
+  try {
+    await api.putMcpToolRetryPolicy(toolsService.value.id!, toolRetryTool.value.id!, {
+      retryEnabled: toolRetryForm.value.retryEnabled,
+      retryMax: Number(toolRetryForm.value.retryMax) || 1,
+      retryConditions: toolRetryForm.value.retryConditions,
+      idempotencyConfirmed: toolRetryForm.value.idempotencyConfirmed,
+    });
+    toast.success('工具重试策略已保存');
+    toolRetryVisible.value = false;
+  } catch (error) {
+    toolRetryError.value = errorText(error, '保存失败，请稍后重试。');
+  } finally {
+    toolRetrySaving.value = false;
+  }
+}
+
+// #407 序号守卫。
+let revisionsRequestSeq = 0;
+
+async function openToolRevisions(tool: McpToolView) {
+  if (!toolsService.value) {
+    return;
+  }
+  revisionsTool.value = tool;
+  revisions.value = [];
+  revisionsError.value = '';
+  revisionsVisible.value = true;
+  revisionsLoading.value = true;
+  const seq = ++revisionsRequestSeq;
+  try {
+    const list = await api.adminListToolRevisions(toolsService.value.id!, tool.id!);
+    if (seq !== revisionsRequestSeq) {
+      return;
+    }
+    revisions.value = list;
+  } catch (error) {
+    if (seq !== revisionsRequestSeq) {
+      return;
+    }
+    revisionsError.value = errorText(error, '加载版本历史失败。');
+  } finally {
+    if (seq === revisionsRequestSeq) {
+      revisionsLoading.value = false;
+    }
+  }
+}
+
+async function refreshRevisions() {
+  if (!toolsService.value || !revisionsTool.value) {
+    return;
+  }
+  revisions.value = await api.adminListToolRevisions(
+    toolsService.value.id!,
+    revisionsTool.value.id!,
+  );
+}
+
+async function rollbackToolRevision(tool: McpToolView, revision: McpToolRevisionRow) {
+  if (!toolsService.value) {
+    return;
+  }
+  // 服务/工具行与修订记录均来自列表接口，主键字段恒存在。
+  const serviceId = toolsService.value.id!;
+  const toolId = tool.id!;
+  confirmState.value = {
+    title: `回滚「${tool.toolName}」到修订 #${revision.revision}`,
+    body: '工具定义将切回该修订版本（不产生新版本号，历史保留）。确认回滚？',
+    confirmLabel: '回滚',
+    tone: 'primary',
+    run: async () => {
+      await api.adminActivateToolRevision(serviceId, toolId, revision.revision!);
+      toast.success(`已回滚到修订 #${revision.revision}`);
+      await refreshRevisions();
+      await refreshTools();
+    },
+  };
+}
+
+async function openEditTool(tool: McpToolView) {
+  editTool.value = tool;
+  editForm.value = {
+    description: tool.description ?? '',
+    method: tool.method ?? 'GET',
+    path: tool.path ?? '',
+  };
+  editError.value = '';
+  editVisible.value = true;
+}
+
+async function publishToolEdit() {
+  if (!toolsService.value || !editTool.value) {
+    return;
+  }
+  const path = editForm.value.path.trim();
+  if (!path.startsWith('/')) {
+    editError.value = '路径必须以 / 开头。';
+    return;
+  }
+  editSaving.value = true;
+  editError.value = '';
+  try {
+    const revision = await api.adminPublishToolRevision(
+      toolsService.value.id!,
+      editTool.value.id!,
+      {
+        description: editForm.value.description.trim() || undefined,
+        method: editForm.value.method,
+        path,
+      },
+    );
+    toast.success(`已发布修订 #${revision.revision}`);
+    editVisible.value = false;
+    await refreshRevisions();
+    await refreshTools();
+  } catch (error) {
+    editError.value = errorText(error, '发布失败，请稍后重试。');
+  } finally {
+    editSaving.value = false;
+  }
+}
+
+async function openImportDialog() {
+  importSpec.value = '';
+  importError.value = '';
+  importResult.value = null;
+  importVisible.value = true;
+}
+
+async function runImport() {
+  if (!toolsService.value) {
+    return;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(importSpec.value);
+  } catch {
+    importError.value = '不是合法的 JSON。';
+    return;
+  }
+  importBusy.value = true;
+  importError.value = '';
+  try {
+    const result = await api.adminImportMcpTools(toolsService.value.id!, parsed);
+    importResult.value = result;
+    const createdCount = result.created?.length ?? 0;
+    if (createdCount > 0) {
+      toast.success(`已导入 ${createdCount} 个工具`);
+    }
+    await refreshTools();
+  } catch (error) {
+    importError.value = errorText(error, '导入失败，请稍后重试。');
+  } finally {
+    importBusy.value = false;
+  }
+}
+
+async function setToolStatus(tool: McpToolView, status: string) {
+  if (!toolsService.value) {
+    return;
+  }
+  const action = status === 'ENABLED' ? '启用' : '禁用';
+  try {
+    await api.adminSetMcpToolStatus(toolsService.value.id!, tool.id!, status);
+    toast.success(`工具已${action}`);
+    await refreshTools();
+  } catch (error) {
+    if (error instanceof ApiError) {
+      toast.error(error.message);
+    }
+  }
+}
+
+// ---- access control ----
+
+/**
+ * 工具访问行（access view）恒携带 toolId；参数放宽到 string | undefined 仅
+ * 为适配 hub 可选字段的模板传参，undefined 实际不会出现。
+ */
+function toolDraft(toolId: string | undefined, mode: McpAclMode | null, ids: string[]) {
+  if (toolId === undefined) return;
+  toolDrafts.value[toolId] = { mode, ids: [...ids] };
+}
+
+/** 模板只读入口：读某工具当前草稿（无草稿 = undefined）。 */
+function accessDraft(toolId: string | undefined) {
+  return toolId === undefined ? undefined : toolDrafts.value[toolId];
+}
+
+function toggleToolConsumer(
+  toolId: string | undefined,
+  consumerId: string | undefined,
+  checked: boolean,
+) {
+  if (toolId === undefined || consumerId === undefined) return;
+  const draft = toolDrafts.value[toolId];
+  if (!draft) return;
+  toolDraft(
+    toolId,
+    draft.mode,
+    checked ? [...draft.ids, consumerId] : draft.ids.filter((id) => id !== consumerId),
+  );
+}
+
+async function openAccess(service: McpServiceView) {
+  accessService.value = service;
+  accessVisible.value = true;
+  accessError.value = '';
+  toolDrafts.value = {};
+  await loadAccess();
+}
+
+// #407 序号守卫。
+let accessRequestSeq = 0;
+
+async function loadAccess() {
+  if (!accessService.value) return;
+  const seq = ++accessRequestSeq;
+  accessLoading.value = true;
+  accessError.value = '';
+  try {
+    const [view, consumerList] = await Promise.all([
+      api.getMcpServiceAccess(accessService.value.id!),
+      api.listApiConsumers(),
+    ]);
+    if (seq !== accessRequestSeq) return;
+    access.value = view;
+    consumers.value = consumerList;
+    // Access 视图由已落库的服务/消费者/授权行构建，mode、consumer/tool 的
+    // id 恒非空（无授权的工具 mode 为 null = 继承服务规则）。
+    serverMode.value = view.mode!;
+    serverIds.value = (view.serverConsumers ?? []).map((c) => c.id!);
+    for (const tool of view.tools ?? []) {
+      toolDraft(tool.toolId!, tool.mode ?? null, tool.consumers?.map((c) => c.id!) ?? []);
+    }
+    accessNotice.value =
+      view.mode === 'NONE'
+        ? '全部开放：任何调用方均可访问。可在下方为单个工具配置更细的名单（工具级规则只会进一步收窄）。'
+        : view.mode === 'ALLOW'
+          ? '白名单：仅名单内的 API 消费者可调用该服务。'
+          : '黑名单：名单内的 API 消费者被禁止调用，其余放行。';
+  } catch (err) {
+    if (seq !== accessRequestSeq) return;
+    accessError.value = errorText(err, '加载失败');
+  } finally {
+    if (seq === accessRequestSeq) accessLoading.value = false;
+  }
+}
+
+async function saveServerMode() {
+  if (!accessService.value) return;
+  serverSaving.value = true;
+  accessError.value = '';
+  try {
+    await api.setMcpAccessMode(accessService.value.id!, serverMode.value);
+    toast.success('服务访问模式已保存');
+    await loadAccess();
+  } catch (err) {
+    accessError.value = errorText(err, '保存失败');
+  } finally {
+    serverSaving.value = false;
+  }
+}
+
+async function saveServerList() {
+  if (!accessService.value || serverMode.value === 'NONE') return;
+  serverSaving.value = true;
+  accessError.value = '';
+  try {
+    await api.setMcpAccessGrants(accessService.value.id!, {
+      mode: serverMode.value,
+      consumerIds: serverIds.value,
+    });
+    toast.success('服务名单已更新');
+    await loadAccess();
+  } catch (err) {
+    accessError.value = errorText(err, '保存失败');
+  } finally {
+    serverSaving.value = false;
+  }
+}
+
+async function resetServerAccess() {
+  if (!accessService.value) return;
+  serverResetSaving.value = true;
+  accessError.value = '';
+  try {
+    await api.setMcpAccessMode(accessService.value.id!, 'NONE');
+    toast.success('已重置为全部开放');
+    await loadAccess();
+  } catch (err) {
+    accessError.value = errorText(err, '重置失败');
+  } finally {
+    serverResetSaving.value = false;
+  }
+}
+
+async function saveToolDraft(toolId: string | undefined, toolName: string | undefined) {
+  if (toolId === undefined) return;
+  if (!accessService.value) return;
+  const draft = toolDrafts.value[toolId];
+  if (!draft) return;
+  toolSaving.value = true;
+  accessError.value = '';
+  try {
+    if (draft.mode === null) {
+      await api.clearMcpAccessGrants(accessService.value.id!, toolId);
+      toast.success(`${toolName} 已恢复为继承服务规则`);
+    } else {
+      await api.setMcpAccessGrants(accessService.value.id!, {
+        toolId,
+        mode: draft.mode,
+        consumerIds: draft.ids,
+      });
+      toast.success(`${toolName} 的访问名单已更新`);
+    }
+    await loadAccess();
+  } catch (err) {
+    accessError.value = errorText(err, '保存失败');
+  } finally {
+    toolSaving.value = false;
+  }
+}
+
+// ---- route rules (F11, Tencent doc 135482) ----
+
+const HTTP_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'];
+const MATCH_MODES = [
+  { value: '', label: '不限' },
+  { value: 'EXACT', label: '精确' },
+  { value: 'PREFIX', label: '前缀' },
+  { value: 'REGEX', label: '正则' },
+] as const;
+
+interface HeaderDraft {
+  name: string;
+  mode: 'EXACT' | 'PREFIX' | 'REGEX';
+  value: string;
+}
+
+const rulesService = ref<McpServiceView | null>(null);
+const rulesVisible = ref(false);
+const rules = ref<McpRouteRule[]>([]);
+const rulesLoading = ref(false);
+const rulesError = ref('');
+
+const routeDialogVisible = ref(false);
+const routeEditing = ref<McpRouteRule | null>(null);
+const routeForm = ref({
+  name: '',
+  description: '',
+  priority: '1000',
+  pathMode: '' as '' | 'EXACT' | 'PREFIX' | 'REGEX',
+  pathValue: '',
+  hostMode: '' as '' | 'EXACT' | 'PREFIX' | 'REGEX',
+  hostValue: '',
+  methods: new Set<string>(),
+  headers: [] as HeaderDraft[],
+});
+const routeSaving = ref(false);
+const routeFormError = ref('');
+
+const routeConfirm = ref<{
+  title: string;
+  body: string;
+  confirmLabel: string;
+  tone: 'danger' | 'primary';
+  run: () => Promise<void>;
+} | null>(null);
+
+function methodList(rule: McpRouteRule): string {
+  if (!rule.methods) return '全部方法';
+  const list = rule.methods.split(',');
+  return list.length === HTTP_METHODS.length ? '全部方法' : list.join(' / ');
+}
+
+function conditionText(rule: McpRouteRule): string {
+  const parts: string[] = [];
+  if (rule.pathMode) {
+    const mode = MATCH_MODES.find((m) => m.value === rule.pathMode)?.label ?? rule.pathMode;
+    parts.push(`路径 ${mode} ${rule.pathValue}`);
+  }
+  if (rule.hostMode) {
+    const mode = MATCH_MODES.find((m) => m.value === rule.hostMode)?.label ?? rule.hostMode;
+    parts.push(`Host ${mode} ${rule.hostValue}`);
+  }
+  const headerConditions = rule.headerConditions ?? [];
+  if (headerConditions.length) {
+    parts.push(
+      ...headerConditions.map(
+        (h) =>
+          `${h.name} ${MATCH_MODES.find((m) => m.value === h.mode)?.label ?? h.mode} ${h.value}`,
+      ),
+    );
+  }
+  if (!parts.length) return '全部请求（兜底）';
+  return parts.join(' · ');
+}
+
+// #407 序号守卫。
+let rulesRequestSeq = 0;
+
+async function openRoutes(service: McpServiceView) {
+  rulesService.value = service;
+  rules.value = [];
+  rulesError.value = '';
+  rulesVisible.value = true;
+  rulesLoading.value = true;
+  const seq = ++rulesRequestSeq;
+  try {
+    const list = await api.adminListMcpRouteRules(service.id!);
+    if (seq !== rulesRequestSeq) {
+      return;
+    }
+    rules.value = list;
+  } catch (error) {
+    if (seq !== rulesRequestSeq) {
+      return;
+    }
+    rulesError.value = errorText(error, '加载路由规则失败。');
+  } finally {
+    if (seq === rulesRequestSeq) {
+      rulesLoading.value = false;
+    }
+  }
+}
+
+function emptyRouteForm() {
+  return {
+    name: '',
+    description: '',
+    priority: '1000',
+    pathMode: '' as '' | 'EXACT' | 'PREFIX' | 'REGEX',
+    pathValue: '',
+    hostMode: '' as '' | 'EXACT' | 'PREFIX' | 'REGEX',
+    hostValue: '',
+    methods: new Set<string>(),
+    headers: [] as HeaderDraft[],
+  };
+}
+
+function openRouteCreate() {
+  routeEditing.value = null;
+  routeForm.value = emptyRouteForm();
+  routeFormError.value = '';
+  routeDialogVisible.value = true;
+}
+
+function openRouteEdit(rule: McpRouteRule) {
+  routeEditing.value = rule;
+  // 路由行由本弹窗（校验后）或系统默认路由生成：name 恒有；mode 值域受限。
+  routeForm.value = {
+    name: rule.name ?? '',
+    description: rule.description ?? '',
+    priority: String(rule.priority),
+    pathMode: rule.pathMode as '' | 'EXACT' | 'PREFIX' | 'REGEX',
+    pathValue: rule.pathValue ?? '',
+    hostMode: rule.hostMode as '' | 'EXACT' | 'PREFIX' | 'REGEX',
+    hostValue: rule.hostValue ?? '',
+    methods: new Set(rule.methods ? rule.methods.split(',') : HTTP_METHODS),
+    headers: (rule.headerConditions ?? []).map((h) => ({
+      name: h.name ?? '',
+      mode: h.mode as 'EXACT' | 'PREFIX' | 'REGEX',
+      value: h.value ?? '',
+    })),
+  };
+  routeFormError.value = '';
+  routeDialogVisible.value = true;
+}
+
+function addHeaderRow() {
+  if (routeForm.value.headers.length >= 8) return;
+  routeForm.value.headers.push({ name: '', mode: 'EXACT', value: '' });
+}
+
+function removeHeaderRow(index: number) {
+  routeForm.value.headers.splice(index, 1);
+}
+
+async function saveRouteRule() {
+  const form = routeForm.value;
+  if (!form.name.trim()) {
+    routeFormError.value = '路由名称必填。';
+    return;
+  }
+  if ((form.pathMode && !form.pathValue.trim()) || (form.hostMode && !form.hostValue.trim())) {
+    routeFormError.value = '选择了匹配方式后必须填写匹配值。';
+    return;
+  }
+  for (const [index, header] of form.headers.entries()) {
+    if (!header.name.trim()) {
+      routeFormError.value = `第 ${index + 1} 条请求头条件缺少名称。`;
+      return;
+    }
+    if (!header.value.trim()) {
+      routeFormError.value = `第 ${index + 1} 条请求头条件缺少匹配值。`;
+      return;
+    }
+  }
+  if (!rulesService.value) return;
+  // 行来自路由列表接口，id 恒存在；body 可选字段按 hub 契约以缺省代替 null。
+  const serviceId = rulesService.value.id!;
+  const body: UpsertMcpRouteRuleRequest = {
+    name: form.name.trim(),
+    description: form.description.trim() || undefined,
+    priority: Number(form.priority) || 1000,
+    pathMode: form.pathMode || undefined,
+    pathValue: form.pathMode ? form.pathValue.trim() : undefined,
+    hostMode: form.hostMode || undefined,
+    hostValue: form.hostMode ? form.hostValue.trim() : undefined,
+    methods: form.methods.size === HTTP_METHODS.length ? undefined : [...form.methods],
+    headers: form.headers
+      .filter((h) => h.name.trim())
+      .map((h) => ({ name: h.name.trim(), mode: h.mode, value: h.value.trim() })),
+  };
+  routeSaving.value = true;
+  routeFormError.value = '';
+  try {
+    if (routeEditing.value) {
+      await api.adminUpdateMcpRouteRule(serviceId, routeEditing.value.id!, body);
+      toast.success('路由已更新');
+    } else {
+      await api.adminCreateMcpRouteRule(serviceId, body);
+      toast.success('路由已创建');
+    }
+    routeDialogVisible.value = false;
+    rules.value = await api.adminListMcpRouteRules(serviceId);
+  } catch (error) {
+    routeFormError.value = errorText(
+      error,
+      routeEditing.value ? '保存失败，请稍后重试。' : '创建失败，请稍后重试。',
+    );
+  } finally {
+    routeSaving.value = false;
+  }
+}
+
+async function toggleRouteStatus(rule: McpRouteRule) {
+  if (!rulesService.value) return;
+  const next = rule.status === 'ENABLED' ? 'DISABLED' : 'ENABLED';
+  try {
+    // 服务/路由行 id 恒存在（列表接口返回落库主键）。
+    await api.adminSetMcpRouteStatus(rulesService.value.id!, rule.id!, next);
+    toast.success(rule.status === 'ENABLED' ? '路由已停用' : '路由已启用');
+    rules.value = await api.adminListMcpRouteRules(rulesService.value.id!);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      toast.error(error.message);
+    }
+  }
+}
+
+function requestRouteDelete(rule: McpRouteRule) {
+  routeConfirm.value = {
+    title: `删除路由「${rule.name}」`,
+    body: '删除后该路由不再参与匹配（默认路由不可删除）。',
+    confirmLabel: '删除',
+    tone: 'danger',
+    run: async () => {
+      if (!rulesService.value) return;
+      try {
+        await api.adminDeleteMcpRouteRule(rulesService.value.id!, rule.id!);
+        toast.success('路由已删除');
+        rules.value = await api.adminListMcpRouteRules(rulesService.value.id!);
+      } catch (error) {
+        if (error instanceof ApiError) {
+          toast.error(error.message);
+        }
+      }
+    },
+  };
+}
+
+async function routeConfirmAndRun() {
+  const state = routeConfirm.value;
+  if (!state) return;
+  routeConfirm.value = null;
+  await state.run();
+}
+
+onMounted(load);
+
+// ---- F12/F13 resilience configuration ----
+const resilienceOpen = ref(false);
+const resilienceService = ref<McpServiceView | null>(null);
+const resilienceLoading = ref(false);
+const resilienceSaving = ref(false);
+const resilienceError = ref('');
+
+const resilience = ref<McpResiliencePolicy | null>(null);
+// Editable form state (numbers as strings for inputs; codes as CSV).
+const rForm = ref({
+  retryEnabled: false,
+  retryMax: '1',
+  retryConditions: [] as string[],
+  idempotencyConfirmed: false,
+  breakerEnabled: false,
+  breakerWindowSeconds: '10',
+  breakerMinRequests: '10',
+  breakerErrorEnabled: true,
+  breakerErrorRatio: '50',
+  breakerErrorStatusCodes: '500,502,503,504',
+  breakerSlowEnabled: false,
+  breakerSlowCallMs: '3000',
+  breakerSlowRatio: '80',
+  breakerOpenSeconds: '30',
+  breakerProbeCount: '3',
+  breakerProbeSuccess: '2',
+  breakerSkipRetry: true,
+});
+const RETRY_CONDITION_LABELS: Record<string, string> = {
+  SERVER_5XX: '后端 5xx',
+  CONNECTION_FAILURE: '连接失败',
+  TIMEOUT: '请求超时',
+};
+
+// #407 序号守卫。
+let resilienceRequestSeq = 0;
+
+async function openResilience(service: McpServiceView) {
+  resilienceService.value = service;
+  resilienceOpen.value = true;
+  resilienceLoading.value = true;
+  resilienceError.value = '';
+  const seq = ++resilienceRequestSeq;
+  try {
+    const policy = await api.getMcpServiceResilience(service.id!);
+    if (seq !== resilienceRequestSeq) {
+      return;
+    }
+    resilience.value = policy;
+    // 韧性策略恒为完整快照（无记录时后端返回全默认 disabled 策略）。
+    rForm.value = {
+      retryEnabled: policy.retryEnabled!,
+      retryMax: String(policy.retryMax!),
+      retryConditions: [...policy.retryConditions!],
+      idempotencyConfirmed: policy.idempotencyConfirmed!,
+      breakerEnabled: policy.breakerEnabled!,
+      breakerWindowSeconds: String(policy.breakerWindowSeconds!),
+      breakerMinRequests: String(policy.breakerMinRequests!),
+      breakerErrorEnabled: policy.breakerErrorEnabled!,
+      breakerErrorRatio: String(policy.breakerErrorRatio!),
+      breakerErrorStatusCodes: [...policy.breakerErrorStatusCodes!].join(','),
+      breakerSlowEnabled: policy.breakerSlowEnabled!,
+      breakerSlowCallMs: String(policy.breakerSlowCallMs!),
+      breakerSlowRatio: String(policy.breakerSlowRatio!),
+      breakerOpenSeconds: String(policy.breakerOpenSeconds!),
+      breakerProbeCount: String(policy.breakerProbeCount!),
+      breakerProbeSuccess: String(policy.breakerProbeSuccess!),
+      breakerSkipRetry: policy.breakerSkipRetry!,
+    };
+  } catch (error) {
+    if (seq !== resilienceRequestSeq) return;
+    resilienceError.value = error instanceof ApiError ? error.message : '读取韧性配置失败';
+  } finally {
+    if (seq === resilienceRequestSeq) resilienceLoading.value = false;
+  }
+}
+
+function toggleRetryCondition(condition: string) {
+  const list = rForm.value.retryConditions;
+  const index = list.indexOf(condition);
+  if (index >= 0) {
+    list.splice(index, 1);
+  } else {
+    list.push(condition);
+  }
+}
+
+async function saveResilience() {
+  if (!resilienceService.value) return;
+  resilienceSaving.value = true;
+  resilienceError.value = '';
+  try {
+    const codes = rForm.value.breakerErrorStatusCodes
+      .split(',')
+      .map((part) => Number(part.trim()))
+      .filter((value) => Number.isInteger(value) && value >= 400 && value <= 599);
+    const draft: McpResilienceDraft = {
+      retryEnabled: rForm.value.retryEnabled,
+      retryMax: rForm.value.retryEnabled ? Number(rForm.value.retryMax) : undefined,
+      retryConditions: rForm.value.retryEnabled ? [...rForm.value.retryConditions] : undefined,
+      idempotencyConfirmed: rForm.value.idempotencyConfirmed,
+      breakerEnabled: rForm.value.breakerEnabled,
+      breakerWindowSeconds: Number(rForm.value.breakerWindowSeconds),
+      breakerMinRequests: Number(rForm.value.breakerMinRequests),
+      breakerErrorEnabled: rForm.value.breakerErrorEnabled,
+      breakerErrorRatio: Number(rForm.value.breakerErrorRatio),
+      breakerErrorStatusCodes: codes,
+      breakerSlowEnabled: rForm.value.breakerSlowEnabled,
+      breakerSlowCallMs: Number(rForm.value.breakerSlowCallMs),
+      breakerSlowRatio: Number(rForm.value.breakerSlowRatio),
+      breakerOpenSeconds: Number(rForm.value.breakerOpenSeconds),
+      breakerProbeCount: Number(rForm.value.breakerProbeCount),
+      breakerProbeSuccess: Number(rForm.value.breakerProbeSuccess),
+      breakerSkipRetry: rForm.value.breakerSkipRetry,
+    };
+    const stored = await api.putMcpServiceResilience(resilienceService.value.id!, draft);
+    resilience.value = stored;
+    toast.success('韧性配置已保存');
+    resilienceOpen.value = false;
+  } catch (error) {
+    resilienceError.value = error instanceof ApiError ? error.message : '保存失败';
+  } finally {
+    resilienceSaving.value = false;
+  }
+}
+</script>
+
+<template>
+  <div class="ui-page next-mcp">
+    <header class="ui-page-header">
+      <div>
+        <h1 class="ui-page-title">MCP 服务</h1>
+        <p class="ui-page-desc">
+          MCP Server 管理：注册、手动上下线（下线后健康检查不会自动恢复）、健康检查配置与状态。
+        </p>
+      </div>
+      <div class="ui-page-actions">
+        <UiButton
+          variant="primary"
+          data-testid="mcp-create-open"
+          @click="registering = !registering"
+        >
+          {{ registering ? '收起表单' : '注册 MCP 服务' }}
+        </UiButton>
+      </div>
+    </header>
+
+    <section v-if="guideOpen" class="ui-panel next-mcp__guide" data-testid="mcp-guide">
+      <div class="next-mcp__guide-head">
+        <div>
+          <h2 class="ui-panel-title">MCP 服务接入指引</h2>
+          <p class="next-mcp__guide-sub">从注册后端服务到客户端接入，三步完成。</p>
+        </div>
+        <div class="next-mcp__guide-head-actions">
+          <UiButton
+            variant="primary"
+            size="sm"
+            data-testid="mcp-guide-create"
+            @click="registering = true"
+            >注册 MCP 服务</UiButton
+          >
+          <button
+            type="button"
+            class="next-mcp__guide-dismiss"
+            data-testid="mcp-guide-dismiss"
+            @click="dismissGuide"
+          >
+            收起不再显示
+          </button>
+        </div>
+      </div>
+      <div class="ui-panel-body next-mcp__guide-body">
+        <ol class="next-mcp__steps">
+          <li class="next-mcp__step">
+            <span class="next-mcp__step-no" aria-hidden="true">1</span>
+            <span class="next-mcp__step-title">注册 MCP 服务</span>
+            <span class="next-mcp__step-desc"
+              >填写接入地址与传输类型（Streamable HTTP / SSE），网关即时代理。</span
+            >
+          </li>
+          <li class="next-mcp__step">
+            <span class="next-mcp__step-no" aria-hidden="true">2</span>
+            <span class="next-mcp__step-title">注册 Tools 与访问控制</span>
+            <span class="next-mcp__step-desc"
+              >同步、手动或导入工具清单并逐项启停；服务级模式叠加单工具覆盖两级收敛。</span
+            >
+          </li>
+          <li class="next-mcp__step">
+            <span class="next-mcp__step-no" aria-hidden="true">3</span>
+            <span class="next-mcp__step-title">客户端接入验证</span>
+            <span class="next-mcp__step-desc"
+              >用 MCP 客户端连接网关端点，调用一个工具确认链路。</span
+            >
+          </li>
+        </ol>
+        <div class="next-mcp__guide-cards">
+          <div class="next-mcp__guide-card">
+            <h3 class="next-mcp__guide-card-title">接入已有 MCP Server</h3>
+            <p class="next-mcp__guide-card-desc">
+              后端已实现 MCP 协议时，填写接入地址即可透传代理；健康检查默认每 30 秒探测 /health。
+            </p>
+            <span class="next-mcp__guide-card-fit">适合：已有 MCP Server 的团队</span>
+          </div>
+          <div class="next-mcp__guide-card">
+            <h3 class="next-mcp__guide-card-title">工具与访问控制</h3>
+            <p class="next-mcp__guide-card-desc">
+              工具清单支持同步、手动与导入三种来源，逐个启停；访问控制按服务级模式 +
+              单工具覆盖两级收敛。
+            </p>
+            <span class="next-mcp__guide-card-fit">适合：需要收敛可调用工具面的生产接入</span>
+          </div>
+          <div class="next-mcp__guide-card">
+            <h3 class="next-mcp__guide-card-title">观测与韧性</h3>
+            <p class="next-mcp__guide-card-desc">
+              MCP 访问日志逐条可查；每个服务可单独配置健康检查与韧性策略。
+            </p>
+            <span class="next-mcp__guide-card-fit">适合：上线后的日常运维</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div v-if="loadError" class="ui-alert ui-alert--error">
+      {{ loadError
+      }}<span v-if="loadRequestId" class="ui-request-id"> requestId: {{ loadRequestId }}</span>
+    </div>
+
+    <section v-if="registering" class="ui-panel next-mcp__register" data-testid="mcp-create-form">
+      <div class="ui-panel-head">
+        <h2 class="ui-panel-title">注册 MCP 服务</h2>
+      </div>
+      <div class="ui-panel-body">
+        <p class="next-mcp__hint">
+          接入地址必须为 https；健康检查默认每 30 秒探测 /health，连续失败 3 次标记不健康。
+        </p>
+        <div class="next-mcp__register-form">
+          <UiInput
+            v-model="form.name"
+            label="名称"
+            required
+            placeholder="例如 erp-mcp"
+            data-testid="mcp-create-name"
+          />
+          <div class="ui-field">
+            <span class="ui-field__label">描述</span>
+            <textarea
+              v-model="form.description"
+              class="ui-textarea"
+              rows="2"
+              placeholder="用途说明（可选）"
+              data-testid="mcp-create-desc"
+            />
+          </div>
+          <div class="next-mcp__row">
+            <UiSelect v-model="form.transport" label="传输类型" :options="transportOptions" />
+            <UiInput
+              v-model="form.endpoint"
+              label="接入地址"
+              required
+              placeholder="https://erp.internal.example"
+              data-testid="mcp-create-endpoint"
+            />
+          </div>
+          <UiInput
+            v-model="form.upstreamTimeoutMs"
+            label="上游预算（毫秒，可选）"
+            placeholder="默认 60000；范围 1000–600000"
+            data-testid="mcp-create-timeout"
+          />
+          <p v-if="formError" class="ui-form-error">{{ formError }}</p>
+          <div class="next-mcp__actions">
+            <UiButton
+              variant="primary"
+              :disabled="!canCreate"
+              :loading="submitting"
+              data-testid="mcp-create-submit"
+              @click="registerService"
+              >注册</UiButton
+            >
+            <UiButton variant="ghost" @click="registering = false">取消</UiButton>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="ui-panel">
+      <div class="ui-panel-toolbar">
+        <span class="ui-panel-sub"
+          >共 {{ countWhenLoaded(loadError, services.length) }} 个服务</span
+        >
+      </div>
+      <UiTable
+        :columns="columns"
+        :data="services"
+        :loading="loading"
+        row-key="id"
+        empty-title="还没有注册的 MCP 服务"
+        empty-description="注册后网关定期探测健康状态，代理可经网关调用其工具。"
+        data-testid="mcp-table"
+        :error="loadError"
+        @retry="load"
+      >
+        <template #name="{ row }">
+          <span class="next-mcp__name">{{ (row as McpServiceView).name }}</span>
+        </template>
+        <template #endpoint="{ row }">
+          <span class="ui-mono next-mcp__endpoint">{{ (row as McpServiceView).endpoint }}</span>
+        </template>
+        <template #transport="{ row }">
+          <span class="ui-mono">{{ (row as McpServiceView).transport }}</span>
+        </template>
+        <template #backendAuthMode="{ row }">
+          <button
+            type="button"
+            class="next-mcp__authchip"
+            :class="{
+              'next-mcp__authchip--key': (row as McpServiceView).backendAuthMode === 'API_KEY',
+            }"
+            data-testid="mcp-backend-auth-open"
+            @click="openBackendAuth(row as McpServiceView)"
+          >
+            {{ (row as McpServiceView).backendAuthMode === 'API_KEY' ? 'API 密钥' : '访客' }}
+          </button>
+        </template>
+        <template #status="{ row }">
+          <UiStatusBadge
+            :tone="(row as McpServiceView).status === 'ONLINE' ? 'success' : 'neutral'"
+            :label="(row as McpServiceView).status === 'ONLINE' ? '在线' : '已下线'"
+          />
+        </template>
+        <template #healthStatus="{ row }">
+          <UiStatusBadge
+            :tone="healthTone((row as McpServiceView).healthStatus)"
+            :label="healthLabel((row as McpServiceView).healthStatus)"
+          />
+        </template>
+        <template #healthCheckedAt="{ row }">{{
+          formatTime((row as McpServiceView).healthCheckedAt ?? null)
+        }}</template>
+        <template #actions="{ row }">
+          <div class="next-mcp__row-actions">
+            <UiButton
+              variant="link"
+              size="sm"
+              data-testid="mcp-tools"
+              @click="openTools(row as McpServiceView)"
+              >Tools</UiButton
+            >
+            <UiButton
+              variant="link"
+              size="sm"
+              data-testid="mcp-access"
+              @click="openAccess(row as McpServiceView)"
+              >访问控制</UiButton
+            >
+            <UiButton
+              variant="link"
+              size="sm"
+              data-testid="mcp-routes"
+              @click="openRoutes(row as McpServiceView)"
+              >路由规则</UiButton
+            >
+            <UiButton
+              variant="link"
+              size="sm"
+              data-testid="mcp-upstream-timeout"
+              @click="openTimeout(row as McpServiceView)"
+              >预算</UiButton
+            >
+            <UiButton
+              variant="link"
+              size="sm"
+              data-testid="mcp-health-config"
+              @click="openConfig(row as McpServiceView)"
+              >健康检查</UiButton
+            >
+            <UiButton
+              variant="link"
+              size="sm"
+              data-testid="mcp-resilience"
+              @click="openResilience(row as McpServiceView)"
+              >韧性配置</UiButton
+            >
+            <UiButton
+              variant="link"
+              size="sm"
+              data-testid="mcp-access-info"
+              @click="openAccessInfo(row as McpServiceView)"
+              >接入信息</UiButton
+            >
+            <UiButton
+              variant="link"
+              size="sm"
+              data-testid="mcp-verify"
+              @click="openVerify(row as McpServiceView)"
+              >验证连通</UiButton
+            >
+            <UiButton
+              v-if="(row as McpServiceView).status === 'ONLINE'"
+              variant="link-danger"
+              size="sm"
+              data-testid="mcp-offline"
+              @click="requestStatusChange(row as McpServiceView, 'OFFLINE')"
+              >下线</UiButton
+            >
+            <UiButton
+              v-else
+              variant="link"
+              size="sm"
+              data-testid="mcp-online"
+              @click="requestStatusChange(row as McpServiceView, 'ONLINE')"
+              >上线</UiButton
+            >
+          </div>
+        </template>
+      </UiTable>
+    </section>
+
+    <!-- #685 onboarding closure: gateway access URLs + on-demand probe -->
+    <UiDialog
+      :open="accessInfoVisible"
+      :title="accessInfoService ? `接入信息 · ${accessInfoService.name}` : '接入信息'"
+      width="600px"
+      data-testid="mcp-access-info-dialog"
+      @update:open="accessInfoVisible = false"
+    >
+      <div v-if="accessInfoLoading" class="next-mcp__hint">正在加载接入信息…</div>
+      <div v-else-if="accessInfoError" class="ui-alert ui-alert--error">{{ accessInfoError }}</div>
+      <div v-else-if="accessInfo" class="next-mcp__access-info">
+        <div class="next-mcp__access-row">
+          <span class="next-mcp__access-label">Streamable HTTP</span>
+          <code class="next-mcp__access-url">{{ accessInfo.mcpUrl }}</code>
+          <UiButton
+            variant="secondary"
+            size="sm"
+            data-testid="mcp-copy-mcp-url"
+            @click="copyAccessUrl(accessInfo?.mcpUrl)"
+            >复制</UiButton
+          >
+        </div>
+        <div class="next-mcp__access-row">
+          <span class="next-mcp__access-label">SSE</span>
+          <code class="next-mcp__access-url">{{ accessInfo.sseUrl }}</code>
+          <UiButton
+            variant="secondary"
+            size="sm"
+            data-testid="mcp-copy-sse-url"
+            @click="copyAccessUrl(accessInfo?.sseUrl)"
+            >复制</UiButton
+          >
+        </div>
+        <p class="next-mcp__hint">{{ accessInfo.authHint }}</p>
+      </div>
+    </UiDialog>
+
+    <UiDialog
+      :open="verifyVisible"
+      :title="verifyService ? `验证连通 · ${verifyService.name}` : '验证连通'"
+      width="480px"
+      data-testid="mcp-verify-dialog"
+      @update:open="verifyVisible = false"
+    >
+      <div v-if="verifyRunning" class="next-mcp__hint" data-testid="mcp-verify-running">
+        正在探测上游…
+      </div>
+      <div v-else-if="verifyError" class="ui-alert ui-alert--error">{{ verifyError }}</div>
+      <div v-else-if="verifyResult" class="next-mcp__verify-result" data-testid="mcp-verify-result">
+        <UiStatusBadge
+          variant="pill"
+          :tone="verifyResult.reachable ? 'success' : 'danger'"
+          :label="verifyResult.reachable ? '可达' : '不可达'"
+        />
+        <span class="next-mcp__verify-detail">{{ verifyResult.detail }}</span>
+        <span class="next-mcp__hint"
+          >模式 {{ verifyResult.checkMode }} · {{ verifyResult.latencyMs }} ms</span
+        >
+      </div>
+      <template #footer>
+        <UiButton variant="ghost" @click="verifyVisible = false">关闭</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="verifyRunning"
+          data-testid="mcp-verify-rerun"
+          @click="runVerify"
+          >重新验证</UiButton
+        >
+      </template>
+    </UiDialog>
+
+    <!-- Upstream budget (I20): the data-plane per-attempt timeout -->
+    <UiDialog
+      :open="timeoutVisible"
+      :title="timeoutService ? `上游预算 · ${timeoutService.name}` : '上游预算'"
+      width="440px"
+      data-testid="mcp-timeout-dialog"
+      @update:open="timeoutVisible = false"
+    >
+      <p class="next-mcp__hint">
+        数据面每次上游尝试的超时（毫秒）。预算耗尽将返回 504
+        mcp_upstream_timeout；启用慢调用熔断时，预算须高于慢调用阈值。
+      </p>
+      <UiInput
+        v-model="timeoutForm.upstreamTimeoutMs"
+        label="上游预算（毫秒）"
+        required
+        type="number"
+        data-testid="mcp-timeout-input"
+      />
+      <p v-if="timeoutError" class="ui-form-error">{{ timeoutError }}</p>
+      <template #footer>
+        <UiButton variant="ghost" @click="timeoutVisible = false">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="timeoutSaving"
+          data-testid="mcp-timeout-save"
+          @click="saveTimeout"
+          >保存</UiButton
+        >
+      </template>
+    </UiDialog>
+
+    <!-- Health check configuration -->
+    <UiDialog
+      :open="configVisible"
+      :title="configService ? `健康检查 · ${configService.name}` : '健康检查'"
+      width="520px"
+      @update:open="configVisible = false"
+    >
+      <div class="next-mcp__dialog-form">
+        <div class="next-mcp__row">
+          <UiInput
+            v-model="configForm.checkIntervalSeconds"
+            label="检查间隔（秒）"
+            data-testid="mcp-check-interval"
+          />
+          <UiInput
+            v-model="configForm.checkTimeoutSeconds"
+            label="超时（秒）"
+            data-testid="mcp-check-timeout"
+          />
+        </div>
+        <div class="next-mcp__row">
+          <UiInput
+            v-model="configForm.failThreshold"
+            label="失败阈值"
+            data-testid="mcp-check-fail"
+          />
+          <UiInput
+            v-model="configForm.recoverThreshold"
+            label="恢复阈值"
+            data-testid="mcp-check-recover"
+          />
+        </div>
+        <UiSelect
+          v-model="configForm.checkMode"
+          label="探测方式"
+          :options="probeModeOptions"
+          data-testid="mcp-check-mode"
+        />
+        <UiInput
+          v-model="configForm.checkPath"
+          label="检查路径"
+          placeholder="/health"
+          :disabled="configForm.checkMode === 'JSONRPC_INITIALIZE'"
+          data-testid="mcp-check-path"
+        />
+        <p class="next-mcp__hint">
+          {{
+            configForm.checkMode === 'JSONRPC_INITIALIZE'
+              ? 'JSON-RPC initialize：POST 服务地址（协议原生探活，适用于无 HTTP 健康路径的标准 MCP 服务；API 密钥模式后端自动携带解密凭证）。'
+              : '健康路径：GET 服务地址 + 路径，2xx 视为健康。'
+          }}
+        </p>
+        <!-- #397 被动健康：真实流量（与主动探测互补，只读） -->
+        <div class="next-mcp__traffic" data-testid="mcp-traffic">
+          <UiSelect
+            v-model="trafficHours"
+            label="真实流量窗口"
+            :options="trafficHourOptions"
+            data-testid="mcp-traffic-hours"
+            @change="onTrafficHoursChange"
+          />
+          <p v-if="trafficLoading" class="next-mcp__hint">真实流量加载中…</p>
+          <p v-else-if="trafficError" class="ui-form-error">{{ trafficError }}</p>
+          <template v-else-if="traffic">
+            <p class="next-mcp__traffic-line" data-testid="mcp-traffic-summary">
+              转发 {{ traffic.forwarded }} · 上游失败 {{ traffic.failed }}（{{
+                failureRateText(traffic.failureRate)
+              }}）· 被拒 {{ traffic.denied }} · 最近失败
+              {{ formatTime(traffic.lastFailureAt ?? null) }}
+            </p>
+            <p v-if="trafficHint" class="next-mcp__traffic-hint" data-testid="mcp-traffic-hint">
+              {{ trafficHint }}
+            </p>
+            <ul
+              v-if="traffic.topFailingTools.length"
+              class="next-mcp__traffic-tools"
+              data-testid="mcp-traffic-tools"
+            >
+              <li v-for="tool in traffic.topFailingTools" :key="tool.name">
+                <span class="ui-mono">{{ tool.name }}</span> × {{ tool.failures }}
+              </li>
+            </ul>
+            <p v-if="traffic.totalCalls === 0" class="next-mcp__hint">所选窗口内暂无真实调用。</p>
+            <p v-else-if="traffic.failed === 0" class="next-mcp__hint">所选窗口内无上游失败。</p>
+          </template>
+        </div>
+        <p v-if="configError" class="ui-form-error">{{ configError }}</p>
+      </div>
+      <template #footer>
+        <UiButton variant="ghost" @click="configVisible = false">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="configSaving"
+          data-testid="mcp-config-save"
+          @click="saveConfig"
+          >保存</UiButton
+        >
+      </template>
+    </UiDialog>
+
+    <!-- Tool registry -->
+    <UiDialog
+      :open="toolsVisible"
+      :title="toolsService ? `Tools · ${toolsService.name}` : 'Tools'"
+      width="640px"
+      @update:open="toolsVisible = false"
+    >
+      <div v-if="toolsError" class="ui-alert ui-alert--error">{{ toolsError }}</div>
+      <div v-if="toolsLoading" class="next-mcp__tools-loading">
+        <div v-for="n in 3" :key="n" class="ui-skeleton next-mcp__tool-skeleton">&nbsp;</div>
+      </div>
+      <template v-else>
+        <div v-if="tools.length" class="next-mcp__tool-list" data-testid="mcp-tool-list">
+          <div v-for="tool in tools" :key="tool.id" class="next-mcp__tool-row">
+            <div class="next-mcp__tool-info">
+              <span class="ui-mono next-mcp__tool-name">{{ tool.toolName }}</span>
+              <span class="next-mcp__tool-desc">{{ tool.description || '—' }}</span>
+              <span class="ui-mono next-mcp__tool-path">{{ tool.method }} {{ tool.path }}</span>
+            </div>
+            <UiStatusBadge
+              :tone="tool.status === 'ENABLED' ? 'success' : 'neutral'"
+              :label="tool.status === 'ENABLED' ? '已启用' : '已禁用'"
+            />
+            <UiButton
+              variant="ghost"
+              size="sm"
+              data-testid="mcp-tool-revisions-open"
+              @click="openToolRevisions(tool as McpToolView)"
+              >版本</UiButton
+            >
+            <UiButton
+              variant="ghost"
+              size="sm"
+              data-testid="mcp-tool-retry-open"
+              @click="openToolRetry(tool as McpToolView)"
+              >重试</UiButton
+            >
+            <UiButton
+              variant="ghost"
+              size="sm"
+              data-testid="mcp-tool-edit-open"
+              @click="openEditTool(tool as McpToolView)"
+              >编辑</UiButton
+            >
+            <UiButton
+              v-if="tool.status === 'ENABLED'"
+              variant="ghost"
+              size="sm"
+              class="next-mcp__danger"
+              data-testid="mcp-tool-disable"
+              @click="setToolStatus(tool, 'DISABLED')"
+              >禁用</UiButton
+            >
+            <UiButton
+              v-else
+              variant="ghost"
+              size="sm"
+              data-testid="mcp-tool-enable"
+              @click="setToolStatus(tool, 'ENABLED')"
+              >启用</UiButton
+            >
+          </div>
+        </div>
+        <p v-else class="next-mcp__tool-empty">
+          该服务还没有工具。<br /><span class="next-mcp__hint"
+            >手动创建工具后，AI Agent 即可按工具名调用。</span
+          >
+        </p>
+        <div class="next-mcp__tool-create">
+          <UiButton
+            variant="secondary"
+            size="sm"
+            data-testid="mcp-tool-create-open"
+            @click="toolCreating = !toolCreating"
+          >
+            {{ toolCreating ? '收起表单' : '新建工具' }}
+          </UiButton>
+          <UiButton
+            variant="secondary"
+            size="sm"
+            data-testid="mcp-tool-import-open"
+            @click="openImportDialog"
+            >OpenAPI 导入</UiButton
+          >
+          <UiButton
+            variant="secondary"
+            size="sm"
+            :loading="syncBusy"
+            data-testid="mcp-tool-sync"
+            @click="previewToolSync"
+            >同步 Tools</UiButton
+          >
+          <div
+            v-if="toolCreating"
+            class="next-mcp__tool-create-form"
+            data-testid="mcp-tool-create-form"
+          >
+            <div class="next-mcp__row">
+              <UiInput
+                v-model="toolForm.toolName"
+                label="工具名"
+                required
+                placeholder="query_order"
+                data-testid="mcp-tool-name"
+              />
+              <UiSelect v-model="toolForm.method" label="方法" :options="methodOptions" />
+            </div>
+            <UiInput
+              v-model="toolForm.path"
+              label="路径"
+              required
+              placeholder="/orders/{id}"
+              data-testid="mcp-tool-path"
+            />
+            <UiInput
+              v-model="toolForm.description"
+              label="描述"
+              placeholder="工具用途（可选）"
+              data-testid="mcp-tool-desc"
+            />
+            <p v-if="toolFormError" class="ui-form-error">{{ toolFormError }}</p>
+            <div class="next-mcp__actions">
+              <UiButton
+                variant="primary"
+                size="sm"
+                :disabled="!canCreateTool"
+                :loading="toolSaving"
+                data-testid="mcp-tool-create-submit"
+                @click="createTool"
+                >创建</UiButton
+              >
+            </div>
+          </div>
+        </div>
+        <div v-if="syncError" class="ui-alert ui-alert--error" data-testid="mcp-tool-sync-error">
+          {{ syncError }}
+        </div>
+        <div v-if="syncReport" class="next-mcp__sync-report" data-testid="mcp-tool-sync-report">
+          <p class="ui-panel-sub">
+            上游 {{ syncReport.upstreamToolCount }} 个工具 · 新增 {{ syncReport.added.length }} ·
+            更新 {{ syncReport.updated.length }} · 未变 {{ syncReport.unchanged
+            }}<template v-if="syncReport.dryRun">（预览，未写入）</template>
+          </p>
+          <p v-if="syncReport.added.length" class="next-mcp__sync-line">
+            新增：<span class="ui-mono">{{ syncReport.added.join('、') }}</span>
+          </p>
+          <p v-if="syncReport.updated.length" class="next-mcp__sync-line">
+            更新（描述）：<span class="ui-mono">{{ syncReport.updated.join('、') }}</span>
+          </p>
+          <p v-if="syncReport.absentUpstream.length" class="next-mcp__sync-line">
+            上游未返回（未改动）：<span class="ui-mono">{{
+              syncReport.absentUpstream.join('、')
+            }}</span>
+          </p>
+          <p v-if="syncReport.skipped.length" class="next-mcp__sync-line">
+            跳过：<span class="ui-mono">{{
+              syncReport.skipped
+                .map((entry) => `${entry.toolName || '—'}（${entry.reason}）`)
+                .join('；')
+            }}</span>
+          </p>
+          <div
+            v-if="syncReport.dryRun && (syncReport.added.length || syncReport.updated.length)"
+            class="next-mcp__actions"
+          >
+            <UiButton
+              variant="primary"
+              size="sm"
+              :loading="syncBusy"
+              data-testid="mcp-tool-sync-apply"
+              @click="applyToolSync"
+              >确认应用</UiButton
+            >
+          </div>
+        </div>
+      </template>
+      <template #footer>
+        <UiButton variant="secondary" @click="toolsVisible = false">关闭</UiButton>
+      </template>
+    </UiDialog>
+
+    <!-- Tool revision history (F16): snapshot list with idempotent rollback -->
+    <UiDialog
+      :open="revisionsVisible"
+      :title="revisionsTool ? `版本历史 · ${revisionsTool.toolName}` : '版本历史'"
+      width="640px"
+      data-testid="mcp-tool-revisions-dialog"
+      @update:open="revisionsVisible = false"
+    >
+      <div v-if="revisionsError" class="ui-alert ui-alert--error">{{ revisionsError }}</div>
+      <div v-if="revisionsLoading" class="next-mcp__tools-loading">
+        <div v-for="n in 3" :key="n" class="ui-skeleton next-mcp__tool-skeleton">&nbsp;</div>
+      </div>
+      <template v-else>
+        <div
+          v-if="revisions.length"
+          class="next-mcp__tool-list"
+          data-testid="mcp-tool-revisions-list"
+        >
+          <div
+            v-for="rev in revisions"
+            :key="rev.revision"
+            class="next-mcp__tool-row"
+            :data-revision="rev.revision"
+          >
+            <div class="next-mcp__tool-info">
+              <span class="ui-mono next-mcp__tool-name">#{{ rev.revision }}</span>
+              <span class="next-mcp__tool-desc">{{ rev.description || '—' }}</span>
+              <span class="ui-mono next-mcp__tool-path">{{ rev.method }} {{ rev.path }}</span>
+              <span
+                v-if="rev.changedFields && rev.changedFields.length"
+                class="next-mcp__rev-diff"
+                :data-testid="`mcp-rev-diff-${rev.revision}`"
+              >
+                <span
+                  v-for="field in rev.changedFields"
+                  :key="field"
+                  class="next-mcp__rev-diff-chip"
+                >
+                  {{ REVISION_FIELD_LABELS[field] ?? field }}
+                </span>
+              </span>
+              <span
+                v-else-if="rev.revision === 1"
+                class="next-mcp__rev-diff-chip next-mcp__rev-diff-chip--baseline"
+                :data-testid="`mcp-rev-baseline-${rev.revision}`"
+                >初始版本</span
+              >
+            </div>
+            <UiStatusBadge
+              :tone="rev.activatedAt ? 'success' : 'neutral'"
+              :label="rev.activatedAt ? '已生效' : '历史'"
+            />
+            <span class="next-mcp__tool-time">{{ formatTime(rev.createdAt ?? null) }}</span>
+            <UiButton
+              v-if="!rev.activatedAt"
+              variant="ghost"
+              size="sm"
+              :data-testid="`mcp-rev-rollback-${rev.revision}`"
+              @click="rollbackToolRevision(revisionsTool as McpToolView, rev)"
+              >回滚</UiButton
+            >
+          </div>
+        </div>
+        <p v-else class="next-mcp__tool-empty">该工具还没有修订记录。</p>
+      </template>
+      <template #footer>
+        <UiButton variant="secondary" @click="revisionsVisible = false">关闭</UiButton>
+      </template>
+    </UiDialog>
+
+    <!-- Tool-level retry override (F12/#360, I13) -->
+    <UiDialog
+      :open="toolRetryVisible"
+      :title="toolRetryTool ? `重试策略 · ${toolRetryTool.toolName}` : '重试策略'"
+      width="560px"
+      data-testid="mcp-tool-retry-dialog"
+      @update:open="toolRetryVisible = false"
+    >
+      <div
+        v-if="toolRetryError"
+        class="ui-alert ui-alert--error"
+        data-testid="mcp-tool-retry-error"
+      >
+        {{ toolRetryError }}
+      </div>
+      <div v-if="toolRetryLoading" class="next-mcp__tools-loading">
+        <div v-for="n in 3" :key="n" class="ui-skeleton">&nbsp;</div>
+      </div>
+      <template v-else>
+        <p class="next-mcp__routes-note">
+          工具级重试仅覆盖服务级策略的重试字段（熔断保持服务级）；无记录时跟随服务策略。
+        </p>
+        <div class="next-mcp__dialog-form">
+          <UiCheckbox v-model="toolRetryForm.retryEnabled" data-testid="mcp-tool-retry-enabled">
+            启用重试（仅首字节前；默认关闭）
+          </UiCheckbox>
+          <template v-if="toolRetryForm.retryEnabled">
+            <div class="next-mcp__row">
+              <UiInput
+                v-model="toolRetryForm.retryMax"
+                label="重试次数（1–5）"
+                data-testid="mcp-tool-retry-max"
+              />
+            </div>
+            <div class="next-mcp__resilience-checks">
+              <span class="next-mcp__resilience-label">重试条件（至少一项）</span>
+              <UiCheckbox
+                v-for="(label, condition) in RETRY_CONDITION_LABELS"
+                :key="condition"
+                :checked="toolRetryForm.retryConditions.includes(condition)"
+                :data-testid="`mcp-tool-retry-${condition.toLowerCase()}`"
+                @update:model-value="toggleToolRetryCondition(condition)"
+              >
+                {{ label }}
+              </UiCheckbox>
+            </div>
+            <UiCheckbox
+              v-model="toolRetryForm.idempotencyConfirmed"
+              data-testid="mcp-tool-retry-idempotent"
+            >
+              已确认后端接口幂等（POST/PUT/PATCH 工具可重试）
+            </UiCheckbox>
+          </template>
+        </div>
+      </template>
+      <template #footer>
+        <UiButton variant="ghost" @click="toolRetryVisible = false">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="toolRetrySaving"
+          data-testid="mcp-tool-retry-save"
+          @click="saveToolRetry"
+        >
+          保存
+        </UiButton>
+      </template>
+    </UiDialog>
+
+    <!-- F16 edit-and-publish: snapshot the next revision -->
+    <UiDialog
+      :open="editVisible"
+      :title="editTool ? `编辑并发布 · ${editTool.toolName}` : '编辑并发布'"
+      width="560px"
+      data-testid="mcp-tool-edit-dialog"
+      @update:open="editVisible = false"
+    >
+      <div v-if="editError" class="ui-alert ui-alert--error">{{ editError }}</div>
+      <div class="next-mcp__tool-create-form">
+        <div class="next-mcp__row">
+          <UiSelect v-model="editForm.method" label="方法" :options="methodOptions" />
+          <UiInput
+            v-model="editForm.path"
+            label="路径"
+            required
+            placeholder="/orders/{id}"
+            data-testid="mcp-tool-edit-path"
+          />
+        </div>
+        <UiInput
+          v-model="editForm.description"
+          label="描述"
+          placeholder="工具用途说明"
+          data-testid="mcp-tool-edit-desc"
+        />
+        <p class="ui-field__hint">发布即生成新修订并切换生效版；历史修订可随时回滚。</p>
+      </div>
+      <template #footer>
+        <UiButton variant="ghost" @click="editVisible = false">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="editSaving"
+          data-testid="mcp-tool-edit-submit"
+          @click="publishToolEdit"
+          >发布修订</UiButton
+        >
+      </template>
+    </UiDialog>
+
+    <!-- F17 OpenAPI batch import -->
+    <UiDialog
+      :open="importVisible"
+      :title="'OpenAPI 导入'"
+      width="640px"
+      data-testid="mcp-tool-import-dialog"
+      @update:open="importVisible = false"
+    >
+      <div v-if="importError" class="ui-alert ui-alert--error">{{ importError }}</div>
+      <textarea
+        v-model="importSpec"
+        class="next-mcp__import-spec"
+        rows="12"
+        placeholder='示例：{"openapi":"3.1.0","paths":{...}}'
+        data-testid="mcp-tool-import-spec"
+      />
+      <p class="ui-field__hint">
+        粘贴 OpenAPI JSON（paths
+        下每个受支持操作注册一个工具；重名/不可派生的操作会逐项跳过并报告，上限 100）。
+      </p>
+      <div v-if="importResult" class="next-mcp__import-result" data-testid="mcp-tool-import-result">
+        <strong
+          >导入完成：新建 {{ (importResult.created ?? []).length }}，跳过
+          {{ (importResult.skipped ?? []).length + (importResult.parseSkips ?? []).length }}</strong
+        >
+        <ul v-if="(importResult.skipped?.length ?? 0) || (importResult.parseSkips?.length ?? 0)">
+          <li
+            v-for="(s, idx) in [
+              ...(importResult.skipped ?? []),
+              ...(importResult.parseSkips ?? []),
+            ]"
+            :key="idx"
+          >
+            {{ s.toolName || '（无法命名）' }} — {{ s.reason }}
+          </li>
+        </ul>
+      </div>
+      <template #footer>
+        <UiButton variant="ghost" @click="importVisible = false">关闭</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="importBusy"
+          data-testid="mcp-tool-import-submit"
+          @click="runImport"
+          >导入</UiButton
+        >
+      </template>
+    </UiDialog>
+
+    <!-- Two-level access control -->
+    <UiDialog
+      :open="accessVisible"
+      :title="'访问控制 · ' + (accessService?.name ?? '')"
+      width="780px"
+      data-testid="mcp-access-dialog"
+      @update:open="accessVisible = false"
+    >
+      <div v-if="accessError" class="ui-alert ui-alert--error">{{ accessError }}</div>
+      <div v-if="accessLoading" class="next-mcp__access-loading">
+        <div v-for="n in 3" :key="n" class="ui-skeleton next-mcp__tool-skeleton">&nbsp;</div>
+      </div>
+      <template v-else-if="access">
+        <p class="next-mcp__access-notice">{{ accessNotice }}</p>
+
+        <section class="next-mcp__access-section">
+          <h3 class="next-mcp__access-title">服务级访问（谁能调用整个服务）</h3>
+          <div class="next-mcp__access-row">
+            <div class="next-mcp__segmented" data-testid="mcp-access-mode">
+              <button
+                type="button"
+                class="next-mcp__seg"
+                :class="{ 'next-mcp__seg--on': serverMode === 'NONE' }"
+                @click="serverMode = 'NONE'"
+              >
+                全部开放
+              </button>
+              <button
+                type="button"
+                class="next-mcp__seg"
+                :class="{ 'next-mcp__seg--on': serverMode === 'ALLOW' }"
+                @click="serverMode = 'ALLOW'"
+              >
+                白名单
+              </button>
+              <button
+                type="button"
+                class="next-mcp__seg"
+                :class="{ 'next-mcp__seg--on': serverMode === 'DENY' }"
+                @click="serverMode = 'DENY'"
+              >
+                黑名单
+              </button>
+            </div>
+            <UiButton
+              variant="secondary"
+              size="sm"
+              :loading="serverSaving"
+              data-testid="mcp-access-mode-save"
+              @click="saveServerMode"
+              >保存模式</UiButton
+            >
+          </div>
+          <div v-if="serverMode !== 'NONE'" class="next-mcp__access-list-block">
+            <span class="ui-field__label"
+              >名单（{{ serverMode === 'ALLOW' ? '白名单' : '黑名单' }}）</span
+            >
+            <div class="next-mcp__check-list" data-testid="mcp-access-server-list">
+              <UiCheckbox
+                v-for="c in consumerOptions"
+                :key="c.id"
+                v-model="serverIds"
+                :value="c.id"
+                data-testid="mcp-access-consumer"
+              >
+                {{ c.label }}
+              </UiCheckbox>
+              <p v-if="!consumerOptions.length" class="ui-field__hint">暂无 API 消费者</p>
+            </div>
+            <div class="next-mcp__actions">
+              <UiButton
+                variant="primary"
+                size="sm"
+                :loading="serverSaving"
+                data-testid="mcp-access-server-save"
+                @click="saveServerList"
+                >保存{{ serverMode === 'ALLOW' ? '白' : '黑' }}名单</UiButton
+              >
+              <UiButton
+                variant="secondary"
+                size="sm"
+                :loading="serverResetSaving"
+                data-testid="mcp-access-server-reset"
+                @click="resetServerAccess"
+                >重置为全部开放</UiButton
+              >
+            </div>
+          </div>
+        </section>
+
+        <section v-if="serverMode === 'NONE'" class="next-mcp__access-section">
+          <h3 class="next-mcp__access-title">
+            工具级访问（谁可调用某个工具；仅服务全开放时可配置）
+          </h3>
+          <div class="next-mcp__tool-access-list" data-testid="mcp-access-tools">
+            <div
+              v-for="tool in access.tools"
+              :key="tool.toolId"
+              class="next-mcp__tool-access"
+              :data-tool-id="tool.toolId"
+            >
+              <div class="next-mcp__tool-access-head">
+                <span class="ui-mono next-mcp__tool-name">{{ tool.toolName }}</span>
+                <div
+                  class="next-mcp__segmented next-mcp__segmented--sm"
+                  data-testid="mcp-access-tool-mode"
+                >
+                  <button
+                    v-for="opt in modeOptions"
+                    :key="opt.value"
+                    type="button"
+                    class="next-mcp__seg"
+                    :class="{
+                      'next-mcp__seg--on':
+                        (accessDraft(tool.toolId)?.mode ?? null) ===
+                        (opt.value === '' ? null : opt.value),
+                    }"
+                    @click="
+                      toolDraft(
+                        tool.toolId,
+                        opt.value === '' ? null : (opt.value as 'ALLOW' | 'DENY'),
+                        accessDraft(tool.toolId)?.ids ?? [],
+                      )
+                    "
+                  >
+                    {{ opt.label }}
+                  </button>
+                </div>
+              </div>
+              <div
+                v-if="accessDraft(tool.toolId)?.mode"
+                class="next-mcp__check-list next-mcp__check-list--nested"
+              >
+                <UiCheckbox
+                  v-for="c in consumerOptions"
+                  :key="c.id"
+                  :value="c.id"
+                  :checked="accessDraft(tool.toolId)?.ids.includes(c.id ?? '') ?? false"
+                  data-testid="mcp-tool-consumer"
+                  @update:model-value="toggleToolConsumer(tool.toolId, c.id, $event as boolean)"
+                >
+                  {{ c.label }}
+                </UiCheckbox>
+                <p v-if="!consumerOptions.length" class="ui-field__hint">暂无 API 消费者</p>
+              </div>
+              <div class="next-mcp__actions">
+                <UiButton
+                  variant="primary"
+                  size="sm"
+                  :loading="toolSaving"
+                  data-testid="mcp-access-tool-save"
+                  @click="saveToolDraft(tool.toolId, tool.toolName)"
+                  >保存</UiButton
+                >
+              </div>
+            </div>
+            <p v-if="!access.tools?.length" class="next-mcp__hint">该服务暂无工具。</p>
+          </div>
+        </section>
+      </template>
+      <template #footer>
+        <UiButton variant="secondary" @click="accessVisible = false">关闭</UiButton>
+      </template>
+    </UiDialog>
+
+    <UiDialog
+      v-if="confirmState"
+      :open="true"
+      :title="confirmState.title"
+      :description="confirmState.body"
+      width="440px"
+      @update:open="confirmState = null"
+    >
+      <template #footer>
+        <UiButton variant="ghost" @click="confirmState = null">取消</UiButton>
+        <UiButton
+          :variant="confirmState.tone === 'danger' ? 'danger' : 'primary'"
+          @click="confirmAndRun"
+        >
+          {{ confirmState.confirmLabel }}
+        </UiButton>
+      </template>
+    </UiDialog>
+
+    <!-- Route rules (F11): per-service priority rules gating inbound requests -->
+    <UiDrawer
+      :open="rulesVisible"
+      :title="rulesService ? `路由规则 · ${rulesService.name}` : '路由规则'"
+      width="760px"
+      data-testid="mcp-routes-drawer"
+      @update:open="rulesVisible = false"
+    >
+      <div v-if="rulesError" class="ui-alert ui-alert--error">{{ rulesError }}</div>
+      <div class="next-mcp__routes-head">
+        <p class="next-mcp__routes-note">
+          规则按优先级匹配（数值大者优先）；全部自定义规则未命中时回落到系统 default 路由兜底。
+        </p>
+        <UiButton
+          variant="primary"
+          size="sm"
+          data-testid="mcp-route-create-open"
+          @click="openRouteCreate"
+          >新建规则</UiButton
+        >
+      </div>
+      <div v-if="rulesLoading" class="next-mcp__access-loading">
+        <div v-for="n in 3" :key="n" class="ui-skeleton next-mcp__tool-skeleton">&nbsp;</div>
+      </div>
+      <div v-else-if="rules.length" class="next-mcp__route-list" data-testid="mcp-routes-list">
+        <div
+          v-for="rule in rules"
+          :key="rule.id"
+          class="next-mcp__route-row"
+          :data-rule-id="rule.id"
+        >
+          <span class="ui-num next-mcp__route-priority">{{ rule.priority }}</span>
+          <div class="next-mcp__route-info">
+            <div class="next-mcp__route-name-line">
+              <span class="next-mcp__route-name">{{ rule.name }}</span>
+              <span v-if="rule.name === 'default'" class="next-mcp__route-default-chip"
+                >系统默认</span
+              >
+              <span v-if="rule.description" class="next-mcp__route-desc">{{
+                rule.description
+              }}</span>
+            </div>
+            <div class="ui-mono next-mcp__route-conditions">{{ conditionText(rule) }}</div>
+            <div
+              v-if="rule.matchExpression"
+              class="ui-mono next-mcp__route-expression"
+              :data-testid="`mcp-route-expr-${rule.id}`"
+            >
+              {{ rule.matchExpression }}
+            </div>
+            <div class="next-mcp__route-methods">{{ methodList(rule) }}</div>
+          </div>
+          <UiStatusBadge
+            :tone="rule.status === 'ENABLED' ? 'success' : 'neutral'"
+            :label="rule.status === 'ENABLED' ? '已启用' : '已停用'"
+          />
+          <div v-if="rule.name !== 'default'" class="next-mcp__route-actions">
+            <UiButton
+              variant="ghost"
+              size="sm"
+              data-testid="mcp-route-edit"
+              @click="openRouteEdit(rule)"
+              >编辑</UiButton
+            >
+            <UiButton variant="ghost" size="sm" @click="toggleRouteStatus(rule)">{{
+              rule.status === 'ENABLED' ? '停用' : '启用'
+            }}</UiButton>
+            <UiButton
+              variant="ghost"
+              size="sm"
+              class="next-mcp__danger"
+              data-testid="mcp-route-delete"
+              @click="requestRouteDelete(rule)"
+              >删除</UiButton
+            >
+          </div>
+        </div>
+      </div>
+      <p v-else class="next-mcp__route-empty">
+        该服务还没有自定义路由。<br /><span class="next-mcp__hint"
+          >只有 default 兜底在生效——新建规则后即可按条件分流。</span
+        >
+      </p>
+    </UiDrawer>
+
+    <!-- Route rule editor (create/edit share one form; save = full replace) -->
+    <UiDialog
+      :open="routeDialogVisible"
+      :title="routeEditing ? `编辑路由 · ${routeEditing.name}` : '新建路由'"
+      width="680px"
+      data-testid="mcp-route-dialog"
+      @update:open="routeDialogVisible = false"
+    >
+      <div class="next-mcp__route-form">
+        <div class="next-mcp__row">
+          <UiInput
+            v-model="routeForm.name"
+            label="路由名称"
+            required
+            placeholder="例如 gray-v2"
+            data-testid="mcp-route-name"
+          />
+          <UiInput
+            v-model="routeForm.priority"
+            label="优先级"
+            placeholder="1000"
+            hint="数值越大越先匹配；0 为系统默认保留"
+            data-testid="mcp-route-priority"
+          />
+        </div>
+        <div class="ui-field">
+          <span class="ui-field__label">描述</span>
+          <textarea
+            v-model="routeForm.description"
+            class="ui-textarea"
+            rows="2"
+            maxlength="200"
+            placeholder="用途说明（可选）"
+            data-testid="mcp-route-desc"
+          />
+        </div>
+
+        <div class="ui-field">
+          <span class="ui-field__label">路径匹配</span>
+          <div class="next-mcp__segmented" data-testid="mcp-route-path-mode">
+            <button
+              v-for="m in MATCH_MODES"
+              :key="m.value"
+              type="button"
+              class="next-mcp__seg"
+              :class="{ 'next-mcp__seg--on': routeForm.pathMode === m.value }"
+              @click="routeForm.pathMode = m.value"
+            >
+              {{ m.label }}
+            </button>
+          </div>
+          <UiInput
+            v-if="routeForm.pathMode"
+            v-model="routeForm.pathValue"
+            placeholder="例如 /api（精确/前缀）或 ^/api/v[0-9]+$（正则）"
+            data-testid="mcp-route-path-value"
+          />
+        </div>
+
+        <div class="ui-field">
+          <span class="ui-field__label">Host 匹配</span>
+          <div class="next-mcp__segmented" data-testid="mcp-route-host-mode">
+            <button
+              v-for="m in MATCH_MODES"
+              :key="m.value"
+              type="button"
+              class="next-mcp__seg"
+              :class="{ 'next-mcp__seg--on': routeForm.hostMode === m.value }"
+              @click="routeForm.hostMode = m.value"
+            >
+              {{ m.label }}
+            </button>
+          </div>
+          <UiInput
+            v-if="routeForm.hostMode"
+            v-model="routeForm.hostValue"
+            placeholder="例如 mcp-prod.example.com"
+            data-testid="mcp-route-host-value"
+          />
+        </div>
+
+        <div class="ui-field">
+          <span class="ui-field__label">HTTP 方法（全选 = 不限）</span>
+          <div class="next-mcp__method-chips" data-testid="mcp-route-methods">
+            <UiCheckbox
+              v-for="method in HTTP_METHODS"
+              :key="method"
+              v-model="routeForm.methods"
+              :value="method"
+              data-testid="mcp-route-method"
+            >
+              {{ method }}
+            </UiCheckbox>
+          </div>
+        </div>
+
+        <div class="ui-field">
+          <span class="ui-field__label"
+            >Header 条件（AND 关系，最多 8 条）
+            <UiButton
+              v-if="routeForm.headers.length < 8"
+              variant="ghost"
+              size="sm"
+              data-testid="mcp-route-header-add"
+              @click="addHeaderRow"
+              >+ 添加条件</UiButton
+            ></span
+          >
+          <div class="next-mcp__header-rows" data-testid="mcp-route-headers">
+            <div
+              v-for="(header, index) in routeForm.headers"
+              :key="index"
+              class="next-mcp__header-row"
+            >
+              <UiInput
+                v-model="header.name"
+                placeholder="名称，如 X-Tenant-Id"
+                data-testid="mcp-route-header-name"
+              />
+              <div class="next-mcp__segmented next-mcp__segmented--sm">
+                <button
+                  v-for="m in MATCH_MODES.filter((x) => x.value)"
+                  :key="m.value"
+                  type="button"
+                  class="next-mcp__seg"
+                  :class="{ 'next-mcp__seg--on': header.mode === m.value }"
+                  @click="header.mode = m.value as 'EXACT' | 'PREFIX' | 'REGEX'"
+                >
+                  {{ m.label }}
+                </button>
+              </div>
+              <UiInput
+                v-model="header.value"
+                placeholder="匹配值"
+                data-testid="mcp-route-header-value"
+              />
+              <UiButton
+                variant="ghost"
+                size="sm"
+                aria-label="移除该条件"
+                @click="removeHeaderRow(index)"
+                >移除</UiButton
+              >
+            </div>
+          </div>
+        </div>
+
+        <p v-if="routeFormError" class="ui-form-error" data-testid="mcp-route-form-error">
+          {{ routeFormError }}
+        </p>
+      </div>
+      <template #footer>
+        <UiButton variant="ghost" @click="routeDialogVisible = false">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="routeSaving"
+          data-testid="mcp-route-save"
+          @click="saveRouteRule"
+          >保存</UiButton
+        >
+      </template>
+    </UiDialog>
+
+    <UiDialog
+      v-if="routeConfirm"
+      :open="true"
+      :title="routeConfirm.title"
+      :description="routeConfirm.body"
+      width="440px"
+      @update:open="routeConfirm = null"
+    >
+      <template #footer>
+        <UiButton variant="ghost" @click="routeConfirm = null">取消</UiButton>
+        <UiButton
+          :variant="routeConfirm.tone === 'danger' ? 'danger' : 'primary'"
+          @click="routeConfirmAndRun"
+        >
+          {{ routeConfirm.confirmLabel }}
+        </UiButton>
+      </template>
+    </UiDialog>
+
+    <!-- F12/F13 resilience configuration -->
+    <UiDrawer
+      :open="resilienceOpen"
+      :title="resilienceService ? `韧性配置 · ${resilienceService.name}` : '韧性配置'"
+      width="640px"
+      data-testid="mcp-resilience-drawer"
+      @update:open="resilienceOpen = false"
+    >
+      <div
+        v-if="resilienceError"
+        class="ui-alert ui-alert--error"
+        data-testid="mcp-resilience-error"
+      >
+        {{ resilienceError }}
+      </div>
+      <div v-if="resilienceLoading" class="next-mcp__tools-loading">
+        <div v-for="n in 3" :key="n" class="ui-skeleton">&nbsp;</div>
+      </div>
+      <template v-else-if="resilience">
+        <div class="next-mcp__dialog-form">
+          <div class="next-mcp__resilience-group">
+            <h3 class="next-mcp__resilience-title">重试（F12 · 默认关闭）</h3>
+            <UiCheckbox v-model="rForm.retryEnabled" data-testid="mcp-res-retry-enabled">
+              启用重试（仅首字节前；默认关闭）
+            </UiCheckbox>
+            <template v-if="rForm.retryEnabled">
+              <div class="next-mcp__row">
+                <UiInput
+                  v-model="rForm.retryMax"
+                  label="重试次数（1–5）"
+                  data-testid="mcp-res-retry-max"
+                />
+              </div>
+              <div class="next-mcp__resilience-checks">
+                <span class="next-mcp__resilience-label">重试条件（至少一项）</span>
+                <UiCheckbox
+                  v-for="(label, condition) in RETRY_CONDITION_LABELS"
+                  :key="condition"
+                  :checked="rForm.retryConditions.includes(condition)"
+                  :data-testid="`mcp-res-retry-${condition.toLowerCase()}`"
+                  @update:model-value="toggleRetryCondition(condition)"
+                >
+                  {{ label }}
+                </UiCheckbox>
+              </div>
+              <UiCheckbox v-model="rForm.idempotencyConfirmed" data-testid="mcp-res-idempotent">
+                已确认后端接口幂等（POST/PUT/PATCH 工具可重试）
+              </UiCheckbox>
+            </template>
+          </div>
+
+          <div class="next-mcp__resilience-group">
+            <h3 class="next-mcp__resilience-title">熔断（F13 · 默认关闭）</h3>
+            <UiCheckbox v-model="rForm.breakerEnabled" data-testid="mcp-res-breaker-enabled">
+              启用熔断（三态状态机；429 需加入下方状态码）
+            </UiCheckbox>
+            <template v-if="rForm.breakerEnabled">
+              <div class="next-mcp__row">
+                <UiInput
+                  v-model="rForm.breakerWindowSeconds"
+                  label="统计窗口（秒 1–60）"
+                  data-testid="mcp-res-window"
+                />
+                <UiInput
+                  v-model="rForm.breakerMinRequests"
+                  label="最小请求数（1–100）"
+                  data-testid="mcp-res-minreq"
+                />
+              </div>
+              <UiCheckbox v-model="rForm.breakerErrorEnabled" data-testid="mcp-res-error-enabled">
+                错误比例触发
+              </UiCheckbox>
+              <div class="next-mcp__row">
+                <UiInput
+                  v-model="rForm.breakerErrorRatio"
+                  label="错误比例阈值 %（1–100）"
+                  data-testid="mcp-res-error-ratio"
+                />
+                <UiInput
+                  v-model="rForm.breakerErrorStatusCodes"
+                  label="计入错误的状态码（CSV，≤32）"
+                  data-testid="mcp-res-codes"
+                />
+              </div>
+              <UiCheckbox v-model="rForm.breakerSlowEnabled" data-testid="mcp-res-slow-enabled">
+                慢调用触发
+              </UiCheckbox>
+              <div v-if="rForm.breakerSlowEnabled" class="next-mcp__row">
+                <UiInput
+                  v-model="rForm.breakerSlowCallMs"
+                  label="慢调用阈值 ms（须小于服务超时）"
+                  data-testid="mcp-res-slow-ms"
+                />
+                <UiInput
+                  v-model="rForm.breakerSlowRatio"
+                  label="慢调用比例 %（1–100）"
+                  data-testid="mcp-res-slow-ratio"
+                />
+              </div>
+              <div class="next-mcp__row">
+                <UiInput
+                  v-model="rForm.breakerOpenSeconds"
+                  label="熔断时长（秒 5–600）"
+                  data-testid="mcp-res-open"
+                />
+              </div>
+              <div class="next-mcp__row">
+                <UiInput
+                  v-model="rForm.breakerProbeCount"
+                  label="半开探测数（1–10）"
+                  data-testid="mcp-res-probes"
+                />
+                <UiInput
+                  v-model="rForm.breakerProbeSuccess"
+                  label="恢复成功数"
+                  data-testid="mcp-res-probe-ok"
+                />
+              </div>
+              <UiCheckbox v-model="rForm.breakerSkipRetry" data-testid="mcp-res-skip-retry">
+                熔断期跳过重试
+              </UiCheckbox>
+            </template>
+          </div>
+          <p class="next-mcp__resilience-hint">
+            修改经路由快照下发，约一个刷新周期（默认
+            30s）内生效。慢调用阈值校验、状态码范围等错误会在保存时提示。
+          </p>
+        </div>
+      </template>
+      <template #footer>
+        <UiButton variant="ghost" @click="resilienceOpen = false">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="resilienceSaving"
+          data-testid="mcp-resilience-save"
+          @click="saveResilience"
+          >保存</UiButton
+        >
+      </template>
+    </UiDrawer>
+    <!-- #320 upstream backend auth -->
+    <UiDialog
+      v-if="backendAuthService"
+      :open="backendAuthVisible"
+      :title="`后端鉴权 — ${backendAuthService.name}`"
+      description="控制网关调用该 MCP 服务时向上游携带的凭据：访客模式不携带；API 密钥模式由网关注入 Authorization: Bearer <密钥>（密钥只写不读）。"
+      width="540px"
+      @update:open="backendAuthVisible = false"
+    >
+      <div class="next-mcp__auth-mode">
+        <UiRadio v-model="backendAuthMode" value="VISITOR" data-testid="mcp-auth-visitor">
+          访客（不向上游携带凭据）
+        </UiRadio>
+        <UiRadio v-model="backendAuthMode" value="API_KEY" data-testid="mcp-auth-apikey">
+          API 密钥（网关注入 Bearer 凭据）
+        </UiRadio>
+      </div>
+      <UiInput
+        v-if="backendAuthMode === 'API_KEY'"
+        v-model="backendAuthSecret"
+        type="password"
+        label="上游密钥（写入后不可查看）"
+        data-testid="mcp-auth-secret"
+      />
+      <p v-if="backendAuthError" class="ui-form-error">{{ backendAuthError }}</p>
+      <template #footer>
+        <UiButton variant="ghost" @click="backendAuthVisible = false">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="backendAuthSaving"
+          data-testid="mcp-auth-save"
+          @click="saveBackendAuth"
+        >
+          保存
+        </UiButton>
+      </template>
+    </UiDialog>
+  </div>
+</template>
+
+<style scoped>
+.ui-alert {
+  padding: var(--ui-space-3) var(--ui-space-4);
+  margin-bottom: var(--ui-space-4);
+  border-radius: var(--ui-radius-control);
+  font-size: var(--ui-font-size-sm);
+}
+
+.ui-alert--error {
+  background: var(--ui-danger-bg);
+  color: var(--ui-danger-fg);
+}
+
+.ui-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-1);
+}
+
+.ui-field__label {
+  font-size: var(--ui-font-size-xs);
+  font-weight: var(--ui-weight-medium);
+  color: var(--ui-foreground);
+  line-height: var(--ui-line-height-sm);
+}
+
+.ui-field__hint {
+  margin: 0;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+  line-height: var(--ui-line-height-sm);
+}
+
+.ui-textarea {
+  width: 100%;
+  min-height: 56px;
+  padding: var(--ui-space-2) var(--ui-space-3);
+  border: 1px solid var(--ui-input-border);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-card);
+  color: var(--ui-foreground);
+  font-family: inherit;
+  font-size: var(--ui-font-size-sm);
+  line-height: var(--ui-line-height-base);
+  resize: vertical;
+}
+
+.ui-textarea:focus {
+  outline: none;
+  border-color: var(--ui-primary);
+  box-shadow: var(--ui-shadow-focus);
+}
+
+.next-mcp__register {
+  margin-bottom: var(--ui-space-5);
+  max-width: 760px;
+}
+
+.next-mcp__traffic {
+  margin-top: var(--ui-space-2);
+  padding-top: var(--ui-space-3);
+  border-top: 1px solid var(--ui-border-muted);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+}
+
+.next-mcp__traffic-line {
+  margin: 0;
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-mcp__traffic-hint {
+  margin: 0;
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-warning-fg);
+}
+
+.next-mcp__traffic-tools {
+  margin: 0;
+  padding-left: var(--ui-space-4);
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-mcp__hint {
+  margin: 0;
+  font-size: var(--ui-font-size-xs);
+  line-height: var(--ui-line-height-base);
+  color: var(--ui-foreground-faint);
+}
+
+.next-mcp__register-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-4);
+  max-width: 560px;
+}
+
+.next-mcp__dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-4);
+}
+
+.next-mcp__row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ui-space-4);
+}
+
+.next-mcp__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
+}
+
+.next-mcp__row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-1);
+}
+
+.next-mcp__name {
+  font-weight: var(--ui-weight-medium);
+}
+
+.next-mcp__endpoint {
+  font-size: var(--ui-font-size-xs);
+  overflow-wrap: anywhere;
+}
+
+.next-mcp__danger {
+  color: var(--ui-danger-fg);
+}
+
+/* tools */
+.next-mcp__tools-loading,
+.next-mcp__access-loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+}
+
+.next-mcp__tool-skeleton {
+  height: 52px;
+}
+
+.next-mcp__tool-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+}
+
+.next-mcp__tool-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+  padding: var(--ui-space-2) var(--ui-space-3);
+  border: 1px solid var(--ui-border-muted);
+  border-radius: var(--ui-radius-control);
+}
+
+.next-mcp__tool-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.next-mcp__tool-name {
+  font-weight: var(--ui-weight-medium);
+  color: var(--ui-foreground);
+}
+
+.next-mcp__tool-desc {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-mcp__tool-path {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+}
+
+.next-mcp__tool-empty {
+  margin: 0 0 var(--ui-space-4);
+  font-size: var(--ui-font-size-sm);
+  line-height: var(--ui-line-height-lg);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-mcp__tool-create {
+  border-top: 1px solid var(--ui-border);
+  padding-top: var(--ui-space-4);
+  margin-top: var(--ui-space-4);
+}
+
+.next-mcp__tool-create-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-3);
+  margin-top: var(--ui-space-3);
+  max-width: 560px;
+}
+
+/* access control */
+.next-mcp__access-notice {
+  margin: 0 0 var(--ui-space-4);
+  padding: var(--ui-space-3) var(--ui-space-4);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-info-bg);
+  color: var(--ui-info-fg);
+  font-size: var(--ui-font-size-sm);
+  line-height: var(--ui-line-height-base);
+}
+
+.next-mcp__access-section {
+  margin-bottom: var(--ui-space-4);
+  padding-bottom: var(--ui-space-4);
+  border-bottom: 1px solid var(--ui-border-muted);
+}
+
+.next-mcp__access-section:last-of-type {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.next-mcp__access-title {
+  margin: 0 0 var(--ui-space-3);
+  font-size: var(--ui-font-size-sm);
+  font-weight: var(--ui-weight-semibold);
+  color: var(--ui-foreground);
+}
+
+.next-mcp__access-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ui-space-3);
+}
+
+.next-mcp__access-list-block {
+  margin-top: var(--ui-space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+}
+
+.next-mcp__segmented {
+  display: inline-flex;
+  gap: var(--ui-space-1);
+  padding: var(--ui-space-1);
+  background: var(--ui-muted);
+  border: 1px solid var(--ui-border-muted);
+  border-radius: var(--ui-radius-control);
+}
+
+.next-mcp__segmented--sm .next-mcp__seg {
+  height: 24px;
+  padding: 0 var(--ui-space-2);
+  font-size: var(--ui-font-size-xs);
+}
+
+.next-mcp__seg {
+  height: 30px;
+  padding: 0 var(--ui-space-3);
+  border: 0;
+  border-radius: calc(var(--ui-radius-control) - 2px);
+  background: transparent;
+  color: var(--ui-foreground-secondary);
+  font-size: var(--ui-font-size-sm);
+  font-weight: var(--ui-weight-medium);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.next-mcp__seg--on {
+  background: var(--ui-card);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-primary-text);
+  font-weight: var(--ui-weight-semibold);
+}
+
+.next-mcp__check-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-1);
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--ui-input-border);
+  border-radius: var(--ui-radius-control);
+  padding: var(--ui-space-1);
+}
+
+.next-mcp__check-list--nested {
+  margin-top: var(--ui-space-2);
+}
+
+.next-mcp__tool-access-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-3);
+}
+
+.next-mcp__tool-access {
+  padding: var(--ui-space-3);
+  border: 1px solid var(--ui-border-muted);
+  border-radius: var(--ui-radius-control);
+}
+
+.next-mcp__tool-access-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
+}
+
+/* route rules (F11) */
+.next-mcp__routes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-3);
+  margin-bottom: var(--ui-space-4);
+}
+
+.next-mcp__routes-note {
+  margin: 0;
+  font-size: var(--ui-font-size-xs);
+  line-height: var(--ui-line-height-base);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-mcp__route-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+}
+
+.next-mcp__route-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ui-space-3);
+  padding: var(--ui-space-3);
+  border: 1px solid var(--ui-border-muted);
+  border-radius: var(--ui-radius-control);
+}
+
+.next-mcp__route-priority {
+  min-width: 44px;
+  padding-top: 2px;
+  font-size: var(--ui-font-size-base);
+  font-weight: var(--ui-weight-semibold);
+  color: var(--ui-foreground);
+}
+
+.next-mcp__route-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.next-mcp__route-name-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
+}
+
+.next-mcp__route-name {
+  font-weight: var(--ui-weight-semibold);
+  color: var(--ui-foreground);
+}
+
+.next-mcp__route-default-chip {
+  font-size: var(--ui-font-size-xs);
+  line-height: var(--ui-line-height-sm);
+  padding: 0 var(--ui-space-2);
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-neutral-bg);
+  color: var(--ui-neutral-fg);
+}
+
+.next-mcp__route-desc {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-mcp__route-conditions {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+  overflow-wrap: anywhere;
+}
+
+.next-mcp__route-methods {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+}
+
+.next-mcp__route-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-1);
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+.next-mcp__route-empty {
+  margin: 0;
+  padding: var(--ui-space-8) 0;
+  text-align: center;
+  font-size: var(--ui-font-size-sm);
+  line-height: var(--ui-line-height-lg);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-mcp__route-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-4);
+}
+
+.next-mcp__method-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-1);
+}
+
+.next-mcp__header-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+}
+
+.next-mcp__header-row {
+  display: grid;
+  grid-template-columns: 150px auto minmax(120px, 1fr) auto;
+  align-items: center;
+  gap: var(--ui-space-2);
+}
+
+.next-mcp__resilience-group {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--ui-border-muted);
+}
+.next-mcp__resilience-title {
+  font-size: var(--ui-font-size-sm);
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+.next-mcp__resilience-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  align-items: center;
+  margin: 6px 0;
+}
+.next-mcp__resilience-label {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+.next-mcp__resilience-hint {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+  margin: 8px 0 0;
+}
+
+.next-mcp__import-spec {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid #d8dfeb;
+  border-radius: 8px;
+  font:
+    12px/1.6 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  color: #17213a;
+  resize: vertical;
+}
+.next-mcp__import-spec:focus {
+  outline: none;
+  border-color: #7f8aff;
+  box-shadow: 0 0 0 3px rgba(107, 118, 255, 0.1);
+}
+.next-mcp__import-result {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e3e9f4;
+  border-radius: 8px;
+  background: #f8faff;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.next-mcp__import-result ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: #5b6b85;
+}
+.next-mcp__authchip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--ui-space-2);
+  border-radius: var(--ui-radius-pill);
+  border: none;
+  background: var(--ui-muted);
+  color: var(--ui-foreground-secondary);
+  font-size: var(--ui-font-size-xs);
+  cursor: pointer;
+}
+
+.next-mcp__authchip--key {
+  background: var(--ui-success-bg);
+  color: var(--ui-success-fg);
+}
+
+.next-mcp__auth-mode {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+  margin-bottom: var(--ui-space-3);
+}
+
+.next-mcp__sync-report {
+  margin-top: var(--ui-space-3);
+  padding: var(--ui-space-3) var(--ui-space-4);
+  background: var(--ui-muted);
+  border: 1px solid var(--ui-border-muted);
+  border-radius: var(--ui-radius-control);
+  font-size: var(--ui-font-size-sm);
+}
+
+.next-mcp__sync-line {
+  margin: var(--ui-space-1) 0 0;
+  color: var(--ui-foreground-secondary);
+  word-break: break-word;
+}
+
+.next-mcp__rev-diff {
+  display: inline-flex;
+  gap: var(--ui-space-1);
+}
+
+.next-mcp__rev-diff-chip {
+  font-size: var(--ui-font-size-xs);
+  padding: 1px 8px;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-muted);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-mcp__rev-diff-chip--baseline {
+  border-style: dashed;
+  color: var(--ui-foreground-faint);
+}
+
+.next-mcp__route-expression {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+  overflow-wrap: anywhere;
+}
+
+/* ---- onboarding guide (#674) ---- */
+.next-mcp__guide {
+  margin-bottom: var(--ui-space-5);
+}
+
+.next-mcp__guide-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ui-space-4);
+  padding: var(--ui-space-4) var(--ui-space-6) 0;
+}
+
+.next-mcp__guide-sub {
+  margin: 4px 0 0;
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-mcp__guide-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+  flex-shrink: 0;
+}
+
+.next-mcp__guide-dismiss {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--ui-foreground-faint);
+  font-size: var(--ui-font-size-xs);
+  cursor: pointer;
+  transition: color var(--ui-ease);
+}
+
+.next-mcp__guide-dismiss:hover {
+  color: var(--ui-foreground-secondary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.next-mcp__guide-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-4);
+}
+
+.next-mcp__steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ui-space-4);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.next-mcp__step {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  column-gap: var(--ui-space-2);
+}
+
+.next-mcp__step-no {
+  grid-row: 1 / span 2;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--ui-primary-soft);
+  color: var(--ui-primary-text);
+  font-size: var(--ui-font-size-xs);
+  font-weight: var(--ui-weight-semibold);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.next-mcp__step-title {
+  font-size: var(--ui-font-size-sm);
+  font-weight: var(--ui-weight-medium);
+  color: var(--ui-foreground);
+}
+
+.next-mcp__step-desc {
+  font-size: var(--ui-font-size-xs);
+  line-height: 20px;
+  color: var(--ui-foreground-secondary);
+}
+
+.next-mcp__guide-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ui-space-3);
+}
+
+.next-mcp__guide-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+  padding: var(--ui-space-4);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-panel);
+}
+
+.next-mcp__guide-card-title {
+  margin: 0;
+  font-size: var(--ui-font-size-sm);
+  font-weight: var(--ui-weight-semibold);
+  color: var(--ui-foreground);
+}
+
+.next-mcp__guide-card-desc {
+  margin: 0;
+  flex: 1;
+  font-size: var(--ui-font-size-xs);
+  line-height: 20px;
+  color: var(--ui-foreground-secondary);
+}
+
+.next-mcp__guide-card-fit {
+  align-self: flex-start;
+  padding: 1px 8px;
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-primary-soft);
+  color: var(--ui-primary-text);
+  font-size: var(--ui-font-size-xs);
+}
+
+@media (max-width: 1100px) {
+  .next-mcp__steps,
+  .next-mcp__guide-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.next-mcp__access-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-3);
+}
+
+.next-mcp__access-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+}
+
+.next-mcp__access-label {
+  flex: 0 0 120px;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-mcp__access-url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ui-font-mono, monospace);
+  font-size: var(--ui-font-size-xs);
+  background: var(--ui-muted);
+  border: 1px solid var(--ui-border-muted);
+  border-radius: var(--ui-radius-control);
+  padding: 4px 8px;
+}
+
+.next-mcp__verify-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+  align-items: flex-start;
+}
+
+.next-mcp__verify-detail {
+  font-size: var(--ui-font-size-sm);
+}
+</style>

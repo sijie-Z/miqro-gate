@@ -1,17 +1,19 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
 import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
 import jakarta.servlet.http.Cookie;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -21,12 +23,15 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -162,6 +167,43 @@ class MeUsageApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("#1128/#1139: the self-service records carry the same attribution fields (incl. candidates) as the admin ones")
+    void recordsCarryAttribution() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID keyId = fx.createOwnKey();
+        fx.insertPrices();
+        // Distinct instants: the ordering asserted below must not rest on a tie between
+        // two rows inserted in the same second.
+        fx.insertAttributedUsage(keyId, "chatcmpl-attr", 10L, 5L, Instant.now().minusSeconds(120), "RESOLVED_SUFFIX", 1,
+                "git_remote", "MEDIUM");
+        // Fresh row (the me-side fixture timestamps it at now), so it sorts above the
+        // attributed one without relying on a tie-break.
+        fx.insertUsage(keyId, "chatcmpl-plain", 10L, 5L);
+
+        MvcResult r = mockMvc.perform(get("/api/v1/me/usage/records").cookie(sessionCookie)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(2)).andReturn();
+        JsonNode items = objectMapper.readTree(r.getResponse().getContentAsString()).path("items");
+        JsonNode plain = items.get(0); // newest first
+        JsonNode attributed = items.get(1);
+
+        // The self-service mapper is a second, separately written mapper — a swap there
+        // is invisible to the admin test, so it has to be asserted here too.
+        Assertions.assertThat(attributed.path("resolutionStatus").asText()).isEqualTo("RESOLVED_SUFFIX");
+        // #1139: 1 candidate = the suffix merely matched the only binding — the same
+        // "no decision" fact SOLE_BINDING records; the count is what tells them apart.
+        Assertions.assertThat(attributed.path("resolutionCandidates").asInt()).isEqualTo(1);
+        Assertions.assertThat(attributed.path("claimSource").asText()).isEqualTo("git_remote");
+        Assertions.assertThat(attributed.path("claimConfidence").asText()).isEqualTo("MEDIUM");
+        // Present-and-null, not absent: doesNotExist() would also accept a field the
+        // API
+        // stopped sending, which is a different contract.
+        Assertions.assertThat(plain.path("resolutionStatus").isNull()).isTrue();
+        Assertions.assertThat(plain.path("resolutionCandidates").isNull()).isTrue();
+        Assertions.assertThat(plain.path("claimSource").isNull()).isTrue();
+        Assertions.assertThat(plain.path("claimConfidence").isNull()).isTrue();
+    }
+
+    @Test
     @DisplayName("records reject invalid pagination and oversized windows")
     void recordsValidation() throws Exception {
         mockMvc.perform(get("/api/v1/me/usage/records").param("page", "0").cookie(sessionCookie))
@@ -173,6 +215,44 @@ class MeUsageApiIntegrationTest {
         mockMvc.perform(get("/api/v1/me/usage/records").param("from", "2026-01-01T00:00:00Z")
                 .param("to", "2026-12-31T00:00:00Z").cookie(sessionCookie)).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("TIME_RANGE_TOO_WIDE"));
+    }
+
+    @Test
+    @DisplayName("#1200: the self-service cache_level dimension is served (the console's cache-level dropdown)")
+    void myUsageCacheLevelGroupingIsServed() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID keyId = fx.createOwnKey();
+        fx.insertPrices();
+        // The exact request the front-end's 缓存级别 dropdown sends (lower-case
+        // value): one L1 hit on a 1000/500 response, one L2 hit on a 2000/1000
+        // one. Before #1200 this was a 500 INTERNAL_ERROR.
+        fx.insertCacheHits(keyId, 1_000L, 500L, 1, 0);
+        fx.insertCacheHits(keyId, 2_000L, 1_000L, 0, 1);
+
+        MvcResult r = mockMvc
+                .perform(get("/api/v1/me/usage/summary").param("groupBy", "cache_level").cookie(sessionCookie))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.groupBy").value("cache_level"))
+                .andExpect(jsonPath("$.groups.length()").value(2))
+                .andExpect(jsonPath("$.groups[*].label", containsInAnyOrder("L1_HIT", "L2_HIT")))
+                .andExpect(jsonPath("$.groups[?(@.label=='L1_HIT')].requests.l1Hit").value(contains(1)))
+                .andExpect(jsonPath("$.groups[?(@.label=='L1_HIT')].requests.l2Hit").value(contains(0)))
+                .andExpect(jsonPath("$.groups[?(@.label=='L2_HIT')].requests.l1Hit").value(contains(0)))
+                .andExpect(jsonPath("$.groups[?(@.label=='L2_HIT')].requests.l2Hit").value(contains(1))).andReturn();
+        JsonNode groups = objectMapper.readTree(r.getResponse().getContentAsString()).path("groups");
+        Assertions.assertThat(savedByGatewayCache(groups, "L1_HIT")).isEqualByComparingTo("0.002");
+        Assertions.assertThat(savedByGatewayCache(groups, "L2_HIT")).isEqualByComparingTo("0.004");
+    }
+
+    /**
+     * The cache-saving figure of the group with {@code label}, exact-comparable.
+     */
+    private static BigDecimal savedByGatewayCache(JsonNode groups, String label) {
+        for (JsonNode group : groups) {
+            if (label.equals(group.path("label").asText())) {
+                return group.path("cost").path("savedByGatewayCache").decimalValue();
+            }
+        }
+        throw new AssertionError("no group labelled " + label + " in " + groups);
     }
 
     // ------------------------------------------------------------------
@@ -200,10 +280,11 @@ class MeUsageApiIntegrationTest {
         final UUID otherKeyId = UUID.randomUUID();
 
         void reset() {
-            for (String table : List.of("usage_event", "cache_hit_event", "price_snapshot", "virtual_key_models",
-                    "key_project_binding", "model_approval", "virtual_keys", "project_provider_grant_models",
-                    "project_provider_grants", "upstream_credential_versions", "upstream_credentials", "plan_seats",
-                    "upstream_subscriptions", "project_memberships", "projects", "provider_products", "providers",
+            for (String table : List.of("usage_event", "cache_hit_event", "cache_entry", "price_snapshot",
+                    "virtual_key_models", "key_project_binding", "model_approval", "virtual_keys",
+                    "project_provider_grant_models", "project_provider_grants", "unattributed_policy",
+                    "upstream_credential_versions", "upstream_credentials", "plan_seats", "upstream_subscriptions",
+                    "project_memberships", "project_repositories", "projects", "provider_products", "providers",
                     "admin_audit_events", "user_sessions", "users")) {
                 try {
                     jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
@@ -325,6 +406,72 @@ class MeUsageApiIntegrationTest {
                             .addValue("credentialId", credentialId).addValue("model", MODEL)
                             .addValue("cacheLevel", cacheLevel).addValue("input", input).addValue("output", output)
                             .addValue("total", input + output).addValue("occurredAt", Timestamp.from(Instant.now())));
+        }
+
+        /**
+         * With the CAA attribution the gateway records for a resolved request (#1128) —
+         * the self-service mapper has to carry the same fields as the admin one,
+         * including the candidate cardinality (#1139).
+         */
+        void insertAttributedUsage(UUID keyId, String providerRequestId, long input, long output, Instant occurredAt,
+                String resolutionStatus, Integer resolutionCandidates, String claimSource, String claimConfidence) {
+            jdbc.update("""
+                    INSERT INTO usage_event
+                        (id, tenant_id, provider_request_id, virtual_key_id, project_id, provider_product_id,
+                         credential_id, model_id, cache_level, input_tokens, output_tokens, total_tokens, latency_ms,
+                         upstream_status_code, is_complete, usage_missing, gateway_request_id, occurred_at,
+                         resolution_status, resolution_candidates, claim_source, claim_confidence)
+                    VALUES (:id, :tenantId, :providerRequestId, :keyId, :projectId, :productId, :credentialId, :model,
+                            'UPSTREAM', :input, :output, :total, 42, 200, TRUE, FALSE, 'greq-attr', :occurredAt,
+                            :resolutionStatus, :resolutionCandidates, :claimSource, :claimConfidence)
+                    """, new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                    .addValue("providerRequestId", providerRequestId).addValue("keyId", keyId)
+                    .addValue("projectId", projectId).addValue("productId", productId)
+                    .addValue("credentialId", credentialId).addValue("model", MODEL).addValue("input", input)
+                    .addValue("output", output).addValue("total", input + output)
+                    .addValue("occurredAt", Timestamp.from(occurredAt)).addValue("resolutionStatus", resolutionStatus)
+                    .addValue("resolutionCandidates", resolutionCandidates).addValue("claimSource", claimSource)
+                    .addValue("claimConfidence", claimConfidence));
+        }
+
+        /**
+         * One cached response plus its hit events (#1200) — the hits half of
+         * {@code groupBy=cache_level}. {@code meta_json} carries the cached response's
+         * token usage, which is what each hit is valued against; the level lives on the
+         * events, never on the entry.
+         */
+        void insertCacheHits(UUID keyId, long inputTokens, long outputTokens, int l1Hits, int l2Hits) {
+            String keyHex = (UUID.randomUUID().toString() + UUID.randomUUID().toString()).replace("-", "");
+            String meta = "{\"usage\":{\"inputTokens\":" + inputTokens + ",\"outputTokens\":" + outputTokens + "}}";
+            jdbc.update("""
+                    INSERT INTO cache_entry
+                        (id, tenant_id, cache_key, virtual_key_id, project_id, provider_product_id, model_id,
+                         status_code, body, meta_json, hit_count_l1, hit_count_l2, created_at, updated_at)
+                    VALUES (:id, :tenantId, decode(:keyHex, 'hex'), :keyId, :projectId, :productId, :model, 200,
+                            decode('', 'hex'), CAST(:meta AS jsonb), :l1, :l2, now(), now())
+                    """,
+                    new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                            .addValue("keyHex", keyHex).addValue("keyId", keyId).addValue("projectId", projectId)
+                            .addValue("productId", productId).addValue("model", MODEL).addValue("meta", meta)
+                            .addValue("l1", l1Hits).addValue("l2", l2Hits));
+            insertHitEvents(keyId, keyHex, "L1_HIT", l1Hits);
+            insertHitEvents(keyId, keyHex, "L2_HIT", l2Hits);
+        }
+
+        private void insertHitEvents(UUID keyId, String keyHex, String level, int hits) {
+            for (int i = 0; i < hits; i++) {
+                jdbc.update("""
+                        INSERT INTO cache_hit_event
+                            (id, tenant_id, cache_key, virtual_key_id, project_id, provider_product_id, level,
+                             occurred_at, gateway_request_id, created_at)
+                        VALUES (:id, :tenantId, decode(:keyHex, 'hex'), :keyId, :projectId, :productId, :level,
+                                now() - make_interval(secs => :offset), :greq, now())
+                        """,
+                        new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                                .addValue("keyHex", keyHex).addValue("keyId", keyId).addValue("projectId", projectId)
+                                .addValue("productId", productId).addValue("level", level).addValue("offset", 2 + i)
+                                .addValue("greq", UUID.randomUUID().toString()));
+            }
         }
     }
 

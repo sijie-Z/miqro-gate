@@ -1,0 +1,26 @@
+{
+  "name": "miqro-context",
+  "version": "0.1.0",
+  "description": "MiQroKey Context Attribution local agent: per-request project context evidence collection and claim injection (CAA P1-P3).",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "miqro-context": "dist/src/cli/index.js"
+  },
+  "files": [
+    "dist/src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.json && node --test \"dist/test/*.test.js\"",
+    "start": "node dist/src/cli/index.js run"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0"
+  }
+}

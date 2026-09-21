@@ -15,11 +15,20 @@ import type { ProblemDetails } from '@/types/api';
 
 export const CSRF_COOKIE_NAME = 'MIQROKEY_CSRF';
 
+/**
+ * Client-side cap for JSON API calls, aligned with the nginx 60s read timeout.
+ * Without it a stalled backend (e.g. the control plane restarting) leaves the
+ * UI spinning forever when the page is served without the nginx proxy (#583).
+ */
+const REQUEST_TIMEOUT_MS = 60_000;
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
   readonly requestId?: string;
   readonly fieldErrors?: Array<{ field: string; code: string }>;
+  /** I21: present on 409 RESOURCE_IN_USE — what blocks the delete. */
+  readonly dependencies?: Array<{ type: string; id: string; name?: string; detail?: string }>;
 
   constructor(details: ProblemDetails) {
     super(details.detail ?? details.title);
@@ -28,6 +37,7 @@ export class ApiError extends Error {
     this.code = details.code;
     this.requestId = details.requestId;
     this.fieldErrors = details.fieldErrors;
+    this.dependencies = details.dependencies;
   }
 }
 
@@ -57,7 +67,7 @@ async function parseError(response: Response): Promise<ApiError> {
   }
   return new ApiError({
     type: 'about:blank',
-    title: `Request failed with status ${response.status}`,
+    title: `请求失败（HTTP ${response.status}）`,
     status: response.status,
     code: 'HTTP_ERROR',
     requestId: '',
@@ -100,37 +110,64 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     headers['Content-Type'] = 'application/json';
   }
 
-  let response: Response;
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, REQUEST_TIMEOUT_MS);
+
   try {
-    response = await fetch(url, {
+    const response = await fetch(url, {
       method,
       headers,
       credentials: 'include',
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal: controller.signal,
     });
-  } catch {
+
+    if (!response.ok) {
+      throw await parseError(response);
+    }
+
+    if (response.status === 204) {
+      return undefined as T;
+    }
+    return (await response.json()) as T;
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
     throw new ApiError({
       type: 'about:blank',
-      title: 'Network error',
+      title: timedOut ? 'Request timed out' : 'Network error',
       status: 0,
-      code: 'NETWORK_ERROR',
-      detail: '无法连接到 MiQroGate 服务，请检查网络后重试。',
+      code: timedOut ? 'TIMEOUT' : 'NETWORK_ERROR',
+      detail: timedOut
+        ? `请求超时（${REQUEST_TIMEOUT_MS / 1000} 秒未响应），请稍后重试。`
+        : '无法连接到 MiQroGate 服务，请检查网络后重试。',
       requestId: '',
     });
+  } finally {
+    clearTimeout(timeout);
   }
-
-  if (!response.ok) {
-    throw await parseError(response);
-  }
-
-  if (response.status === 204) {
-    return undefined as T;
-  }
-  return (await response.json()) as T;
 }
 
 export function get<T>(path: string, query?: RequestOptions['query']): Promise<T> {
   return request<T>(path, { method: 'GET', query });
+}
+
+/**
+ * GET for endpoints whose body is a bare JSON array.
+ *
+ * `response.json() as T` is an unchecked cast, so the declared shape is only a
+ * promise, never a guarantee: a non-array body (contract drift, proxy error
+ * page, version mismatch) reaches `list.length` / `.map` and throws mid-render.
+ * Normalising here keeps the declared `Promise<T[]>` honest for every
+ * list endpoint at once (#PH20-C).
+ */
+export function getList<T>(path: string, query?: RequestOptions['query']): Promise<T[]> {
+  return get<T[] | null>(path, query).then((value) => (Array.isArray(value) ? value : []));
 }
 
 export function post<T>(path: string, body?: unknown): Promise<T> {
@@ -141,6 +178,42 @@ export function patch<T>(path: string, body?: unknown): Promise<T> {
   return request<T>(path, { method: 'PATCH', body });
 }
 
+export function put<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>(path, { method: 'PUT', body });
+}
+
 export function del<T>(path: string): Promise<T> {
   return request<T>(path, { method: 'DELETE' });
+}
+
+/** Fetches a binary resource (e.g. skill package zip) as a Blob. */
+export async function downloadBlob(path: string): Promise<Blob> {
+  const response = await fetch(path, {
+    method: 'GET',
+    credentials: 'include',
+    headers: { Accept: 'application/zip' },
+  });
+  if (!response.ok) {
+    throw await parseError(response);
+  }
+  return response.blob();
+}
+
+/** Uploads a raw binary body (e.g. skill package zip) with CSRF protection. */
+export async function uploadBytes<T>(path: string, blob: Blob): Promise<T> {
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  const csrf = readCookie(CSRF_COOKIE_NAME);
+  if (csrf) {
+    headers['X-CSRF-Token'] = csrf;
+  }
+  const response = await fetch(path, {
+    method: 'POST',
+    headers,
+    credentials: 'include',
+    body: blob,
+  });
+  if (!response.ok) {
+    throw await parseError(response);
+  }
+  return (await response.json()) as T;
 }

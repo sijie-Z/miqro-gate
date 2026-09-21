@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.persistence.repository;
 import com.miqroera.miqrokey.domain.model.KeyProjectBinding;
 import com.miqroera.miqrokey.domain.model.KeyProjectBindingStatus;
 import com.miqroera.miqrokey.domain.repository.KeyProjectBindingRepository;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -20,9 +21,9 @@ public class KeyProjectBindingRepositoryImpl implements KeyProjectBindingReposit
 
     private static final RowMapper<KeyProjectBinding> ROW_MAPPER = (rs, rowNum) -> new KeyProjectBinding(
             (UUID) rs.getObject("id"), (UUID) rs.getObject("tenant_id"), (UUID) rs.getObject("virtual_key_id"),
-            (UUID) rs.getObject("project_id"), KeyProjectBindingStatus.valueOf(rs.getString("status")),
-            rs.getLong("version"), rs.getTimestamp("created_at").toInstant(),
-            rs.getTimestamp("updated_at").toInstant());
+            (UUID) rs.getObject("project_id"), (UUID) rs.getObject("grant_id"),
+            KeyProjectBindingStatus.valueOf(rs.getString("status")), rs.getLong("version"),
+            rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant());
 
     private final NamedParameterJdbcTemplate jdbc;
 
@@ -41,23 +42,19 @@ public class KeyProjectBindingRepositoryImpl implements KeyProjectBindingReposit
     }
 
     @Override
-    public Optional<KeyProjectBinding> findByVirtualKeyId(UUID virtualKeyId) {
-        try {
-            return Optional.ofNullable(jdbc.queryForObject(
-                    "SELECT * FROM key_project_binding WHERE virtual_key_id = :virtualKeyId ORDER BY created_at DESC LIMIT 1",
-                    new MapSqlParameterSource("virtualKeyId", virtualKeyId), ROW_MAPPER));
-        } catch (EmptyResultDataAccessException e) {
-            return Optional.empty();
-        }
+    public java.util.List<KeyProjectBinding> findAllByVirtualKeyId(UUID virtualKeyId) {
+        return jdbc.query(
+                "SELECT * FROM key_project_binding WHERE virtual_key_id = :virtualKeyId" + " ORDER BY created_at, id",
+                new MapSqlParameterSource("virtualKeyId", virtualKeyId), ROW_MAPPER);
     }
 
     @Override
     @Transactional
     public KeyProjectBinding insert(KeyProjectBinding binding) {
         jdbc.update("""
-                INSERT INTO key_project_binding (id, tenant_id, virtual_key_id, project_id,
+                INSERT INTO key_project_binding (id, tenant_id, virtual_key_id, project_id, grant_id,
                     status, version, created_at, updated_at)
-                VALUES (:id, :tenantId, :virtualKeyId, :projectId,
+                VALUES (:id, :tenantId, :virtualKeyId, :projectId, :grantId,
                     :status, :version, :createdAt, :updatedAt)
                 """, toParams(binding));
         return binding;
@@ -74,14 +71,14 @@ public class KeyProjectBindingRepositoryImpl implements KeyProjectBindingReposit
                 WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion
                 """, params);
         if (rows != 1)
-            throw new IllegalStateException("Optimistic lock failure: key project binding " + binding.id());
+            throw new OptimisticLockingFailureException("Optimistic lock failure: key project binding " + binding.id());
         return binding;
     }
 
     private MapSqlParameterSource toParams(KeyProjectBinding b) {
         return new MapSqlParameterSource().addValue("id", b.id()).addValue("tenantId", b.tenantId())
                 .addValue("virtualKeyId", b.virtualKeyId()).addValue("projectId", b.projectId())
-                .addValue("status", b.status().name()).addValue("version", b.version())
+                .addValue("grantId", b.grantId()).addValue("status", b.status().name()).addValue("version", b.version())
                 .addValue("createdAt", Timestamp.from(b.createdAt()))
                 .addValue("updatedAt", Timestamp.from(b.updatedAt()));
     }

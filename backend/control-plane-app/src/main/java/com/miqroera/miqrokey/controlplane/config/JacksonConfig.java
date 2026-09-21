@@ -2,7 +2,7 @@ package com.miqroera.miqrokey.controlplane.config;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.miqroera.miqrokey.domain.model.User;
-import org.springframework.boot.autoconfigure.jackson.Jackson2ObjectMapperBuilderCustomizer;
+import org.springframework.boot.jackson2.autoconfigure.Jackson2ObjectMapperBuilderCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 

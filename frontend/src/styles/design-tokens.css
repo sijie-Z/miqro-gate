@@ -1,0 +1,130 @@
+/* MiQroGate UI v2.1 design tokens — Vben Admin console edition (2026-09-06).
+ *
+ * Master update (owner round 2026-09-06): the console language moves from the
+ * PostHog warm-paper palette to the Vue Vben Admin console family — cool light
+ * canvas (#f0f2f5), white content surfaces, hairline borders, the antd blue
+ * (#1677ff) single brand color, and a deep-navy navigation rail (#001529).
+ * Layout/component organization follows Vben Admin (github.com/vben-group/
+ * vue-vben-admin + v2.vben.pro demo) as the design master; no code is copied.
+ *
+ * Unchanged product constraints still enforced by the aesthetic audit: no
+ * gradients (brand identity chips and the cost donut aside), no violet outside
+ * the chip palette, regular containers <= 8px radius, shadows only on
+ * popper/dialog/focus rings — this edition adds no new surface shadows.
+ *
+ * Token vocabulary stays on the v2 semantic names (background / card / muted /
+ * chrome / border / input / ring + -foreground pairs) so views and components
+ * do not change; only the tuned values differ. v1 `--miqrokey-*` tokens and
+ * their legacy CSS remain loaded but are consumed by no v2 page.
+ */
+:root {
+  /* surfaces — cool neutral console ground (Vben #f0f2f5 family) */
+  --ui-background: #f4f7f9; /* Vben v2 @content-bg */
+  --ui-card: #ffffff;
+  --ui-muted: #fafafa; /* antd gray-1 (table heads, fills) */
+  --ui-chrome: #f0f0f0;
+  --ui-fill-hover: rgba(0, 0, 0, 0.04);
+  --ui-fill-selected: rgba(0, 0, 0, 0.06);
+  --ui-fill-expanded: rgba(24, 24, 27, 0.12);
+
+  /* text — cool near-black ink + slate grays */
+  --ui-foreground: #262626; /* antd rgba(0,0,0,0.85) */
+  --ui-foreground-secondary: #595959; /* antd rgba(0,0,0,0.65) */
+  --ui-foreground-faint: #737373; /* antd rgba(0,0,0,0.45), 4.7:1 AA */
+  --ui-foreground-inverse: #ffffff;
+
+  /* lines */
+  --ui-border: #f0f0f0; /* antd split line */
+  --ui-border-muted: #f5f5f5;
+  --ui-border-strong: #d9d9d9; /* antd colorBorder */
+  --ui-input-border: #d9d9d9; /* antd colorBorder */
+  --ui-control-border-hover: #2a7dc9; /* v2.pro live: input/select hover border */
+  --ui-row-hover: #fafafa; /* v2.pro live: antd table row hover */
+
+  /* brand — single antd/Vben blue */
+  --ui-primary: #0960bd; /* Vben v2 default themeColor */
+  --ui-primary-hover: #2a7dc9; /* v2.pro live: primary button + control hover */
+  --ui-primary-active: #095bb4; /* darken 5% */
+  --ui-primary-soft: #e6eff8; /* primary @8% on white */
+  --ui-primary-text: #0960bd; /* 6.1:1 on white — AA */ /* brand blue tuned for small TEXT (AA on white) */
+  --ui-ring: rgba(0, 155, 228, 0.11); /* v2.pro live: antd control focus outline */
+
+  /* console chrome — deep navy navigation rail (Vben #001529) */
+  --ui-rail: #001529; /* Vben v2 default sider (#001529) */
+  --ui-rail-text: rgba(255, 255, 255, 0.65);
+  --ui-rail-text-muted: rgba(255, 255, 255, 0.45);
+  --ui-rail-hover: rgba(255, 255, 255, 0.08);
+  --ui-rail-line: rgba(255, 255, 255, 0.08);
+
+  /* login brand panel (Vben login split-screen blue) */
+  --ui-login-panel: #2a5ad7;
+
+  /* status — muted foregrounds on pale backgrounds */
+  --ui-success-fg: #0d6a3d;
+  --ui-success-bg: #d9f2e4;
+  --ui-warning-fg: #8a4b00;
+  --ui-warning-bg: #f8e8d2;
+  --ui-danger-fg: #bd1426;
+  --ui-danger-bg: #f9dfdc;
+  --ui-info-fg: #1677ff;
+  --ui-info-bg: #e6f0ff;
+  --ui-neutral-fg: #4e4e55;
+  --ui-neutral-bg: #e9e8e2;
+
+  /* typography */
+  --ui-font:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Arial,
+    sans-serif;
+  --ui-font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  --ui-font-size-xs: 12px;
+  --ui-font-size-sm: 13px;
+  --ui-font-size-base: 14px;
+  --ui-font-size-lg: 15px;
+  --ui-font-size-xl: 18px;
+  --ui-font-size-2xl: 20px;
+  --ui-line-height-sm: 18px;
+  --ui-line-height-base: 20px;
+  --ui-line-height-lg: 24px;
+  --ui-weight-regular: 400;
+  --ui-weight-medium: 500;
+  --ui-weight-semibold: 600;
+
+  /* spacing — 4px base */
+  --ui-space-1: 4px;
+  --ui-space-2: 8px;
+  --ui-space-3: 12px;
+  --ui-space-4: 16px;
+  --ui-space-5: 20px;
+  --ui-space-6: 24px;
+  --ui-space-8: 32px;
+  --ui-space-10: 40px;
+  --ui-space-12: 48px;
+
+  /* shape — Vben console family: generous card corners, tight controls */
+  --ui-radius-control: 6px; /* v2.pro live: buttons/inputs 6px */
+  --ui-radius-panel: 8px; /* v2.pro live: cards 8px */
+  --ui-radius-dialog: 8px;
+  --ui-radius-pill: 999px;
+
+  /* sizes */
+  --ui-control-height: 32px;
+  --ui-control-height-lg: 40px;
+  --ui-row-height: 48px;
+  --ui-table-row-height: 48px;
+  --ui-header-height: 48px; /* Vben v2 @header-height */
+  --ui-sidebar-width: 210px; /* Vben v2 menuWidth 210 */
+  --ui-content-max: 1200px; /* fixed-mode cap — default mode is fluid (vben v5 fills the viewport; 'wide' → 100%) */
+
+  /* shadows — popper / dialog / focus affordance + hairline card lift */
+  --ui-shadow-card: none; /* antd bordered cards carry no shadow */
+  --ui-shadow-popper: 0 6px 16px rgba(0, 0, 0, 0.08), 0 3px 6px -4px rgba(0, 0, 0, 0.12),
+    0 9px 28px 8px rgba(0, 0, 0, 0.05); /* v2.pro live: antd elevated (dropdown/select) */
+  --ui-shadow-dialog: 0 6px 16px rgba(0, 0, 0, 0.08), 0 3px 6px -4px rgba(0, 0, 0, 0.12),
+    0 9px 28px 8px rgba(0, 0, 0, 0.05); /* v2.pro live: antd elevated (modal/drawer) */
+  --ui-shadow-focus: 0 0 0 2px var(--ui-ring);
+
+  /* motion — subtle, feedback only */
+  --ui-ease: 200ms cubic-bezier(0.645, 0.045, 0.355, 1); /* antd motionEaseInOut */
+  --ui-ease-enter: cubic-bezier(0.23, 1, 0.32, 1); /* antd slide-up enter */
+  --ui-ease-zoom: cubic-bezier(0.08, 0.82, 0.17, 1); /* antd zoom enter */
+}
