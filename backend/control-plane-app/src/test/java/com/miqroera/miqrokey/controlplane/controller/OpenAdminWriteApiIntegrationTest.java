@@ -211,11 +211,11 @@ class OpenAdminWriteApiIntegrationTest {
     @Test
     @DisplayName("#1252: an absent alert-rule type is a 400 on the machine face too, not a 500")
     void missingRuleTypeIsRejectedOnTheMachineFace() throws Exception {
-        // Deliberately not routed through assertBothFacesReject: that helper asserts the
-        // documented DTO answer (400 VALIDATION_FAILED + fieldErrors), while `type` is
-        // the one field the DTOs leave to AlertRuleService and the service answers with
-        // its own code. The machine face has no DTO constraints of its own either, so it
-        // reaches the same service check and must land on the same 400.
+        // Deliberately not routed through assertBothFacesReject: that helper
+        // asserts the documented DTO answer (400 VALIDATION_FAILED + fieldErrors),
+        // while `type` is the one field the DTOs leave to AlertRuleService, which
+        // answers with its own code. The machine face carries no DTO constraints
+        // of its own either, so it reaches the same service check and lands on 400.
         mockMvc.perform(post("/api/v1/admin-api/alert-rules").header("Authorization", "Bearer " + machineSecret)
                 .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"ph63-no-type\",\"threshold\":0.1}"))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("ALERT_TYPE_INVALID"));

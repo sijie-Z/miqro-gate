@@ -113,8 +113,8 @@ class GlobalExceptionHandlerTest {
         assertThat(noResource.getStatusCode().value()).isEqualTo(404);
         assertThat(body(noResource).get("code")).isEqualTo("NOT_FOUND");
 
-        ResponseEntity<Map<String, Object>> notAcceptable = handler.handleNotAcceptable(
-                new HttpMediaTypeNotAcceptableException("No acceptable representation"), request);
+        ResponseEntity<Map<String, Object>> notAcceptable = handler
+                .handleNotAcceptable(new HttpMediaTypeNotAcceptableException("No acceptable representation"), request);
         assertThat(notAcceptable.getStatusCode().value()).isEqualTo(406);
         assertThat(body(notAcceptable).get("code")).isEqualTo("UNSUPPORTED_ACCEPT");
     }

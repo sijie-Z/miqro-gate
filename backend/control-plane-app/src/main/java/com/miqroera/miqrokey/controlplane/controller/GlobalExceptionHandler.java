@@ -245,8 +245,8 @@ public class GlobalExceptionHandler {
             HttpServletRequest request) {
         String requestId = resolveRequestId(request);
         LOG.warn("Not acceptable [requestId={}] mediaTypes={}", requestId, e.getSupportedMediaTypes());
-        Map<String, Object> body = problemDetail(406, "UNSUPPORTED_ACCEPT", "Not acceptable",
-                "请求的 Accept 无法由该端点满足。", requestId);
+        Map<String, Object> body = problemDetail(406, "UNSUPPORTED_ACCEPT", "Not acceptable", "请求的 Accept 无法由该端点满足。",
+                requestId);
         return ResponseEntity.status(HttpStatus.NOT_ACCEPTABLE).contentType(MediaType.APPLICATION_PROBLEM_JSON)
                 .body(body);
     }

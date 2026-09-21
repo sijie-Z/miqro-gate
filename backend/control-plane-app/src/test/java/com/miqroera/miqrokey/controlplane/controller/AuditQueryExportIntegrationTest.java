@@ -283,17 +283,15 @@ class AuditQueryExportIntegrationTest {
         // The baseline declares no media type for the export 200, so a
         // contract-generated client sends Accept: application/json at an endpoint
         // that produces only text/csv. That mismatch is the caller's to fix.
-        mockMvc.perform(get("/api/v1/admin/audit-events/export").cookie(sessionCookie)
-                .header("X-CSRF-Token", csrfToken).accept(MediaType.APPLICATION_JSON))
-                .andExpect(status().isNotAcceptable()).andExpect(jsonPath("$.code").value("UNSUPPORTED_ACCEPT"))
-                .andExpect(jsonPath("$.status").value(406));
+        mockMvc.perform(get("/api/v1/admin/audit-events/export").cookie(sessionCookie).header("X-CSRF-Token", csrfToken)
+                .accept(MediaType.APPLICATION_JSON)).andExpect(status().isNotAcceptable())
+                .andExpect(jsonPath("$.code").value("UNSUPPORTED_ACCEPT")).andExpect(jsonPath("$.status").value(406));
         mockMvc.perform(get("/api/v1/admin-api/audit-events/export").header("Authorization", "Bearer " + machineToken)
                 .accept(MediaType.APPLICATION_JSON)).andExpect(status().isNotAcceptable())
                 .andExpect(jsonPath("$.code").value("UNSUPPORTED_ACCEPT"));
         // The control: the media type the endpoint does produce still streams CSV.
-        mockMvc.perform(get("/api/v1/admin/audit-events/export").cookie(sessionCookie)
-                .header("X-CSRF-Token", csrfToken).accept(MediaType.parseMediaType("text/csv")))
-                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/admin/audit-events/export").cookie(sessionCookie).header("X-CSRF-Token", csrfToken)
+                .accept(MediaType.parseMediaType("text/csv"))).andExpect(status().isOk());
     }
 
     @Test
