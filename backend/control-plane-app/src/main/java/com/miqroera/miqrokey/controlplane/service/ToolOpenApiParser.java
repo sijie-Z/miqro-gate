@@ -13,7 +13,8 @@ import java.util.Set;
  * {@code paths.*.<method>} operations, derives the snake_case tool name from
  * {@code operationId} (falling back to the path when absent or invalid), takes
  * {@code summary}/{@code description} as the description and keeps the raw
- * path/method. Unknown vendor extensions and unsupported HTTP methods are
+ * path/method. Unknown vendor extensions, unsupported HTTP methods, operations
+ * whose name cannot be derived and paths beyond the 512 the column holds are
  * ignored with a skip note instead of failing the whole import.
  */
 public final class ToolOpenApiParser {
@@ -22,6 +23,11 @@ public final class ToolOpenApiParser {
     private static final int MAX_ITEMS = 100;
     private static final int MAX_DESCRIPTION = 2000;
     private static final int MAX_TOOL_NAME = 128;
+    /**
+     * Matches {@code McpToolCreateRequest.path} and
+     * {@code mcp_tools.path}/{@code mcp_tool_revisions.path}.
+     */
+    private static final int MAX_PATH = 512;
 
     private ToolOpenApiParser() {
     }
@@ -66,6 +72,16 @@ public final class ToolOpenApiParser {
                 }
                 if (derived == null || derived.length() > MAX_TOOL_NAME) {
                     skipped.add(new SkipNote(operationId == null ? "" : operationId, "无法从 operationId/路径派生合法工具名"));
+                    return;
+                }
+                // Same bound the single-create endpoint enforces through
+                // McpToolCreateRequest#path and the column itself. Without it the
+                // insert overflows varchar(512), the whole batch rolls back and the
+                // admin gets a 409 about a duplicate that does not exist (issue #1323).
+                // Skipped, never truncated: a shortened path would silently point the
+                // tool at the wrong upstream endpoint.
+                if (path.length() > MAX_PATH) {
+                    skipped.add(new SkipNote(derived, "路径超过 " + MAX_PATH + " 字符"));
                     return;
                 }
                 String summary = text(op.get("summary"));
