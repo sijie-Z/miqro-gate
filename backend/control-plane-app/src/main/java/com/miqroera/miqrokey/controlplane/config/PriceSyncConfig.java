@@ -1,6 +1,6 @@
 package com.miqroera.miqrokey.controlplane.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.client.OpenRouterPriceSourceClient;
 import com.miqroera.miqrokey.controlplane.client.PriceSourceClient;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;

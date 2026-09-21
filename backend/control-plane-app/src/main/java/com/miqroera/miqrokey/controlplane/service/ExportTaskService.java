@@ -1,6 +1,6 @@
 package com.miqroera.miqrokey.controlplane.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.dto.ExportTaskView;
 import com.miqroera.miqrokey.domain.usage.ExportFormat;
 import com.miqroera.miqrokey.domain.usage.ExportStatus;
