@@ -2,6 +2,16 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 会话交接点 2026-09-21（交接文档归档 + 4 处文档失真修复：#1251）
+
+- **归档 `docs/handover/`**（8 篇 / 约 7,900 行）：交接人 `sijie-Z` 离职（2026-09-25）前，把按**接手顺序**组织的文档集归档进仓库。`README.md` 明确标注**「时间切片存档，非当前事实来源」**，并附归档时已知失真清单；`document-map.md` 已登记本目录并注明契约以专项文档为准。与既有 `docs/`（按主题拆分的规格）互补，不竞争。
+- **补齐 `database-schema.md` 漏掉的 12 个迁移号**：V3 / V41 / V43 / **V51** / V61 / V62 / V65 / V67–V71。其中 **V51 是 `retention_log` 建表**——该表此前在这份文档里 **grep 命中 0**。另记入 V61↔V65↔V68 的索引增删史（V65 建的索引被 V68 判定为 V61 的逐字节重复后删除，**当前 schema 里已不存在**）。
+- **修 `CLAUDE.md` §2 两条"被 ADR 修订但正文没改"的产品决策**：**ADR-0018 与 ADR-0020 的文件里都写明「修订 CLAUDE.md §2」**，但 §2 一直没动——一条是「一个 Virtual Key 固定绑定一个用户、**项目**…」，一条是「不限流、不因预算阻断，只做 Webhook 告警」。已就地标注修订（不改决策本身，只让清单与 ADR 对齐）。§1 品牌名旧称一并改回 `MiQroGate`。
+- **订正 `docs/frontend-design.md` 的视觉母版 v3**：主色 / hover / active / soft / hairline / input / 正文色 / 侧栏宽度 / 顶栏高度**一批值都已不在代码里**。按该文档自认的权威源 `frontend/src/styles/design-tokens.css` 订正。实测：`#4096ff` / `#0958d9` / `#dfe3e8` / `#bcc3d1` / `#1f2328` 在 `frontend/src` **已一处不剩**；`#1677ff` 只剩 `--ui-info-fg` 一处（**不再是主色**）；侧栏 210px（非 240）、顶栏 48（非 56）。`design-tokens.css` 自己的**头注释**同病（自称权威源却写着旧值），一并订正——**值本身是对的，只有注释陈旧**。
+- **重写 `docs/NEXT_SESSION_PLAN.md`**：原文件停在 rc.10 / V40、写着"下一个 V41"，且两条红线已被 ADR 推翻。重写为纯"怎么开工"指引，**版本/迁移号改为现查、不再写死**（写死正是它过期的主因）。依据：`document-map.md` 本就把该文件的职责标注为"以 `progress.md` Current State 为准"。
+- **记录 V70 的升级卡死风险（关联 #1249，本 PR 只记录不修）**：V70 用**非幂等**的 `CREATE UNIQUE INDEX`（同批 V69 明写 *Idempotent on purpose*）。两条 **100% 必现**的失败路径——路径 A：V63–V69 期间经**公开 API** 产生的重复冲销行（#999 之前 `reversalOf()` 无"已被冲销"检查）；路径 B：照 V69 注释**带外**建过同名索引。**失败后果重**：PostgreSQL 事务性 DDL 把「迁移执行 + 迁移表插入」一起回滚，`flyway_schema_history` **连 `success=false` 都不留** → `flyway repair` 报 *"No failed migration detected"* 空转 → **控制面每次启动都停在同一处**，无自动恢复路径。那段前置查重 SQL **只存在于 `.sql` 注释**，发布检查单与运维手册均无入口。已写入 `database-schema.md` 的 V70 条目。
+- **不变式**：`docs/handover/` 与其余 `docs/` 冲突时，按 `document-map.md` §1 优先级判定——**Accepted ADR 与专项契约高于本目录**。
+
 ## 会话交接点 2026-09-20（配额水位的定价口径：#943）
 
 - **问题形态**：COST 配额水位取 `upstreamPaid`（只含已定价部分），未定价用量计 0 → 一条 `action=REJECT` 的成本封顶对这类用量**完全不起作用**，而水位一直显示 `NORMAL / 0%`。这是「未知被当成零」的运维后果，不是显示层瑕疵。
