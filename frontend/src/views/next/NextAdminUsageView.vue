@@ -103,6 +103,12 @@ const series = ref<UsageSummary | null>(null);
 // #1337: the trend is the one block the user can re-bucket on its own, so a
 // failed re-bucket needs a state of its own — see loadSeries().
 const seriesError = ref('');
+// The trend is the one block two writers feed: 查询 (load) re-fetches it as part
+// of the page, and the 按日/按月 tabs fetch it alone. "Nothing to draw yet" and
+// "an answer is still on its way" are different sentences, and a count says
+// which one we are in without either writer having to know about the other.
+const seriesPending = ref(0);
+const seriesLoading = computed(() => seriesPending.value > 0);
 
 const seriesOptions: Array<{ value: 'day' | 'month'; label: string }> = [
   { value: 'day', label: '按日' },
@@ -136,8 +142,16 @@ const trendSeries = computed<UiTrendSeries[]>(() => {
   const groups = [...(series.value?.groups ?? [])].sort((a, b) =>
     String(a.groupKey ?? '').localeCompare(String(b.groupKey ?? '')),
   );
+  // #1337: the formatter follows the granularity the data was actually fetched
+  // with — the response carries its own `groupBy` — not the tab the user has
+  // since moved to. A month bucket put through the day formatter reads "09" for
+  // 2026-09, which is indistinguishable from a real day label; the reverse puts
+  // a day bucket on the X axis as a whole date, which reads as a month.
+  // loadSeries() also drops a held series whose granularity no longer matches
+  // the tab, so this is the invariant stated where the labels are made.
+  const dataDim = series.value?.groupBy === 'month' ? 'month' : 'day';
   const label = (key?: string) =>
-    seriesDim.value === 'month' ? String(key ?? '') : String(key ?? '').slice(5);
+    dataDim === 'month' ? String(key ?? '') : String(key ?? '').slice(5);
   const pointsOf = (pick: (g: UsageGroup) => number) =>
     groups.map((g) => ({ label: label(g.groupKey), value: pick(g) }));
   return [
@@ -679,6 +693,7 @@ function summaryFilters() {
 async function load() {
   const seq = ++loadRequestSeq;
   const seriesSeq = ++seriesRequestSeq;
+  seriesPending.value += 1;
   summaryLoading.value = true;
   recordsLoading.value = true;
   summaryError.value = '';
@@ -719,6 +734,9 @@ async function load() {
       summaryRequestId.value = error.requestId ?? '';
     }
   } finally {
+    // Unconditional: the trend fetch this call started is over either way, even
+    // when a newer click has already superseded it (that click counted itself).
+    seriesPending.value -= 1;
     if (seq === loadRequestSeq) {
       summaryLoading.value = false;
       recordsLoading.value = false;
@@ -728,6 +746,7 @@ async function load() {
 
 async function loadSeries() {
   const seq = ++seriesRequestSeq;
+  seriesPending.value += 1;
   seriesError.value = '';
   try {
     const result = await api.adminUsageSummary({
@@ -741,16 +760,24 @@ async function loadSeries() {
     }
   } catch (error) {
     if (seq === seriesRequestSeq) {
-      // #1337: keeping the previous data was worse than an empty chart here.
-      // trendSeries() labels every point from `seriesDim`, not from the bucket
-      // the data actually came from, so a stale series is not merely out of
-      // date — it is re-labelled as the granularity the user just picked: the
-      // 按日 bucket 2026-09-15 redraws as a "month" under the 按月 tab, and the
-      // 查询 that failed is the only thing the tab ever says about it. Drop it
-      // and say so; leaving a bare 重试-less chart would strand the user.
-      series.value = null;
+      // #1337: the old code swallowed this failure — the tab stayed highlighted,
+      // the chart kept drawing, and the only thing the user was told was
+      // nothing. What the held data is worth depends on whether it still
+      // answers the question on screen, so that is what we ask, using the
+      // granularity the response itself carries:
+      //   • granularity moved (按日 → 按月 or back): the held series answers the
+      //     previous question and, labelled by its own buckets, would draw a day
+      //     under a month tab. Drop it — an honest empty chart plus an error.
+      //   • same granularity (a refresh of the tab already shown): the series
+      //     still answers the question, merely older. Keep it; the error row
+      //     carries the staleness, and discarding it would flash the chart away.
+      if ((series.value?.groupBy === 'month' ? 'month' : 'day') !== seriesDim.value) {
+        series.value = null;
+      }
       seriesError.value = error instanceof ApiError ? error.message : '趋势加载失败，请稍后重试。';
     }
+  } finally {
+    seriesPending.value -= 1;
   }
 }
 
@@ -1229,7 +1256,9 @@ onMounted(() => {
       <div class="ui-panel-body">
         <UiTrendChart
           :series="trendSeries"
-          :empty-text="seriesError || summaryError ? '趋势加载失败' : undefined"
+          :empty-text="
+            seriesError || summaryError ? '趋势加载失败' : seriesLoading ? '加载中…' : undefined
+          "
           data-testid="usage-trend-chart"
         />
         <!-- #1337: a failed 按日/按月 switch used to leave the old bucket on
@@ -1243,6 +1272,7 @@ onMounted(() => {
           <UiButton
             variant="secondary"
             size="sm"
+            :loading="seriesLoading"
             data-testid="usage-trend-retry"
             @click="loadSeries"
           >

@@ -675,12 +675,14 @@ describe('NextAdminUsageView', () => {
     await wrapper.find('[data-testid="trend-dim-month"]').trigger('click');
     await flushPromises();
 
-    // trendSeries() labels each point from seriesDim, so the untouched 按日
-    // series is re-drawn through the month formatter: the day bucket
-    // 2026-09-15 now reads as a month under the 按月 tab that the user just
-    // selected — the switch looks like it worked and the granularity is wrong.
+    // The 按日 series answers a different question than the tab now asks, so it
+    // is dropped rather than redrawn: kept, its day bucket 2026-09-15 would sit
+    // under the 按月 tab as if it were a month (before this fix, labelled from
+    // seriesDim and drawn whole). What is left on screen is the failure, said
+    // out loud — never a chart that quietly keeps its old shape.
     const chart = wrapper.find('[data-testid="usage-trend-chart"]').text();
     expect(chart).not.toContain('2026-09-15');
+    expect(chart).not.toContain('2026-09');
     // …and the failure has to be visible, with a way back, not swallowed.
     const failure = wrapper.find('[data-testid="usage-trend-error"]');
     expect(failure.exists()).toBe(true);
@@ -697,6 +699,116 @@ describe('NextAdminUsageView', () => {
     const recovered = wrapper.find('[data-testid="usage-trend-chart"]').text();
     expect(recovered).toContain('2026-09');
     expect(recovered).not.toContain('2026-09-15');
+  });
+
+  it('#PH69R2: while the new granularity is in flight the chart keeps its old labels honest', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.find('[data-testid="usage-trend-chart"]').text()).toContain('09-15');
+
+    // The 按月 answer is still coming. What is drawn meanwhile is the 按日
+    // series — labelled as days, which is what it is. Labelling it from the tab
+    // instead would redraw the day bucket 2026-09-15 as a "month" before any
+    // month data exists, which is the state a failed switch used to be left in.
+    mockApi.adminUsageSummary.mockImplementation(() => new Promise<UsageSummary>(() => {}));
+    await wrapper.find('[data-testid="trend-dim-month"]').trigger('click');
+
+    const chart = wrapper.find('[data-testid="usage-trend-chart"]').text();
+    expect(chart).toContain('09-15');
+    expect(chart).not.toContain('2026-09-15');
+  });
+
+  it('#PH69R2: a failed refresh of the tab already on screen keeps its chart, and says it is stale', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.find('[data-testid="usage-trend-chart"]').text()).toContain('09-15');
+
+    // Re-clicking the selected 按日 tab re-runs the same query. Failure here is
+    // not the same animal as a failed switch: the data on screen still answers
+    // the question the tab asks, it is merely older than the user wanted. The
+    // chart stays — blanking it would invent an emptiness that is not there.
+    mockApi.adminUsageSummary.mockImplementation(async (query) => {
+      if (query?.groupBy === 'day') {
+        throw new ApiError({
+          type: 'about:blank',
+          title: 'Server error',
+          status: 500,
+          code: 'INTERNAL_ERROR',
+          requestId: 'req-trend-same-dim',
+        });
+      }
+      return summaryFor(String(query?.groupBy ?? 'project'));
+    });
+
+    await wrapper.find('[data-testid="trend-dim-day"]').trigger('click');
+    await flushPromises();
+
+    const chart = wrapper.find('[data-testid="usage-trend-chart"]').text();
+    expect(chart).toContain('09-15');
+    expect(chart).not.toContain('暂无趋势数据');
+    // Staleness is stated, not implied, and carries a way to try again.
+    const failure = wrapper.find('[data-testid="usage-trend-error"]');
+    expect(failure.exists()).toBe(true);
+    expect(failure.text()).toContain('Server error');
+  });
+
+  it('#PH69R2: an unanswered trend request reads as 加载中, never as 暂无趋势数据', async () => {
+    // Hold every answer open. The chart has nothing to draw yet, which is the
+    // one situation where "empty" and "still coming" look identical — and the
+    // page renders the trend before its first answer either way.
+    mockApi.adminUsageSummary.mockImplementation(() => new Promise<UsageSummary>(() => {}));
+    const wrapper = mountView();
+    await flushPromises();
+
+    const pending = wrapper.find('[data-testid="usage-trend-chart"]').text();
+    expect(pending).toContain('加载中');
+    expect(pending).not.toContain('暂无趋势数据');
+  });
+
+  it('#PH69R2: a slow 重试 does not let the empty chart claim the query came back empty', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    mockApi.adminUsageSummary.mockImplementation(async (query) => {
+      if (query?.groupBy === 'month') {
+        throw new ApiError({
+          type: 'about:blank',
+          title: 'Server error',
+          status: 500,
+          code: 'INTERNAL_ERROR',
+          requestId: 'req-trend-slow',
+        });
+      }
+      return summaryFor(String(query?.groupBy ?? 'project'));
+    });
+    await wrapper.find('[data-testid="trend-dim-month"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[data-testid="usage-trend-error"]').exists()).toBe(true);
+
+    // 重试 clears the error as it starts, and the panel has no series to fall
+    // back on — the gap in which a bare chart would say "暂无趋势数据" about a
+    // request that is still in flight. Hold the answer open and check.
+    let answer!: (v: UsageSummary) => void;
+    mockApi.adminUsageSummary.mockImplementation((query) =>
+      query?.groupBy === 'month'
+        ? new Promise<UsageSummary>((resolve) => {
+            answer = resolve;
+          })
+        : Promise.resolve(summaryFor(String(query?.groupBy ?? 'project'))),
+    );
+    await wrapper.find('[data-testid="usage-trend-retry"]').trigger('click');
+
+    const inFlight = wrapper.find('[data-testid="usage-trend-chart"]').text();
+    expect(inFlight).toContain('加载中');
+    expect(inFlight).not.toContain('暂无趋势数据');
+
+    answer({
+      groupBy: 'month',
+      groups: [group('2026-09', '2026-09', 14, 20_000, 5_000, 0.03)],
+      totals: group('__totals__', '合计', 14, 20_000, 5_000, 0.03),
+    } as UsageSummary);
+    await flushPromises();
+    expect(wrapper.find('[data-testid="usage-trend-chart"]').text()).toContain('2026-09');
   });
 
   it('a 按日/按月 click supersedes only the trend, not an in-flight 查询', async () => {
