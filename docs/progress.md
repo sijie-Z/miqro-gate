@@ -5880,3 +5880,30 @@ booking 一笔 `outputTokensDelta=-300`：观测 1000 tokens（600 in / 400 out�
   今天 `NextOverviewView` 不读 query，可见损失为零。
 - 「记忆路径里的 `credentialId` 可能已不存在 → 空表」：`NextGrantsView` 已有「查看全部/清除筛选」出口，
   属优雅降级；且硬化后记忆路径不再落盘，来源只剩用户本次会话真的访问过的 URL。
+
+## 2026-09-21 模型广场 + 试调台：补上「我能用哪些模型」（#1201）
+
+### 交付
+
+- **数据面** `GET /api/v1/me/plaza/models`（control-plane）：对调用者每把 **ACTIVE** 密钥（其授权须为 ACTIVE）
+  计算**与网关同门的交集** `key.models ∩ grant.models ∩ ACTIVE model_catalog`——网关侧另有签名的供应商目录一层，
+  控制面看不到，已在 Javadoc 注明。每模型带产品展示名、目录元数据、**最新单价快照**（输入/输出/缓存读/写四项，
+  与成本报表同价；无快照=null，不出 0，#878 口径）与可调用它的密钥标签；另出 `requestable`（目录 ACTIVE 但不在
+  该密钥上的模型，按 (model, key) 逐行）供审批流一键带入。**新代码零 Jackson import**，刻意避开迁移中的控制面主代码面。
+- **模型广场页** `/app/plaza`（普通导航组，紧随「我的密钥」）：搜索/产品筛选、输入/输出价两列、上下文、
+  可用密钥 chips（>2 折叠 `+N`）、行内「试调」深链；下半区「可申请模型」带「去申请」——深链到模型申请页并
+  预填 model+keyId（该页 onMounted 读 query 后自动展开表单）。
+- **试调台** `/app/playground`：粘贴 Virtual Key（**仅页面内存，不写 localStorage/日志**，e2e 有断言）→
+  「读取可用模型」走网关自己的 `GET /v1/models`（服务端权威交集视角）→ 选模型·发一句话 →
+  `POST /v1/chat/completions`（全目录 23 个产品都声明 OPENAI_COMPATIBLE，v1 统一 chat 形态）；展示回复原文 +
+  延迟/tokens/按目录价的估算成本（缺价不出数）。429 附 Retry-After 提示；错误按网关信封原样显示。
+  该调用是**普通流量**：同规计量/审计/计入配额。
+- 两页均接入 #656 使用指引组件；导航/路由/字典/类型同步。
+
+### 验证
+
+- 后端：`MePlazaApiIntegrationTest` **6/6**（交集归属、无 ACTIVE 授权空集、停用密钥剔除、目录门、
+  最新价生效与缺价 null、无密钥用户空集且不泄漏他人 + 未认证 401）。
+- 前端：vitest **642/642**（新增 8 条）、typecheck、lint（改动文件）、build、e2e **66/66**（新增 4 条：
+  广场渲染/空态/试调全链含「密钥不落 storage」断言/拒绝信封）。
+- OpenAPI 基线随测试重生成（`/me/plaza/models` 入 spec），`gen:types` 同步，前端类型切 `generated-api`。
