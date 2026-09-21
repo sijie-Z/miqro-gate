@@ -25,6 +25,7 @@ import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -509,6 +510,16 @@ public class ModelApprovalService {
      * the commit or rollback of that same transaction.
      */
     private void lockSubmit(UUID virtualKeyId, String modelId) {
+        // Fail loudly instead of degrading to a no-op. Outside a transaction the
+        // connection is in autocommit, so pg_advisory_xact_lock is released the
+        // moment the statement returns and the check-then-act pair in #submit is
+        // unserialised again while every observable symptom says "locked"
+        // (same guard and reasoning as AuditServiceImpl#acquireChainLock).
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("lockSubmit() must run inside a transaction: outside one the advisory "
+                    + "lock is released as soon as the call returns, which would silently drop the serialisation "
+                    + "this lock exists to establish (#1333)");
+        }
         jdbc.getJdbcTemplate().query("SELECT pg_advisory_xact_lock(?)", rs -> {
         }, submitLockKey(virtualKeyId, modelId));
     }

@@ -2,6 +2,22 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 会话交接点 2026-09-21（PH65 写操作幂等猎线：#1305 + #1333）
+
+- **形态**：猎线（审计+修复），不是 Goal。枚举全部写端点的重复提交防护，对代表性端点做真实 API + 真实 PG 的并发双发实测。确认 2 个缺陷、否证 8 条（否证清单见猎线报告 §5），未凑数立案。
+- **#1305 `model_approval` 无任何唯一约束**：`ModelApprovalService#submit` 是纯 check-then-act，6 个 barrier 同步请求全落库。修复 = **V73** 部分唯一索引 `uq_model_approval_pending ON model_approval (virtual_key_id, model_id) WHERE status = 'PENDING'` + 捕获 `DuplicateKeyException` → 与串行重复同一句 409 `DUPLICATE_PENDING`。
+  - 迁移**先**把历史重复 PENDING 行收敛到 `(created_at, id)` 最小的一条再建索引（避免重演 #1249 的「建索引失败 → Flyway 中止 → 控制面卡死」形状）。语义边界：只约束 PENDING，「申请 → 驳回 → 再次申请」历史不受影响。
+- **#1333 白名单直批路径绕过 V73**（本线对抗评审的「非阻塞观察」转正）：部分索引的谓词是 `WHERE status='PENDING'`，而直批分支在**同一事务内**把行翻成 `APPROVED` → **槽位被释放**，等锁的输家在赢家提交后重新求值、照插不误。实测白名单模型并发 6 发 `{"201": 6}` / 6 条 APPROVED，非白名单对照模型 `{"201": 1, "409": 5}` / 1 条 PENDING——唯一变量是模型名。
+  - **这不是 #1305 修复的疏漏，而是部分索引的语义边界**。加全量唯一索引会挡死「申请→驳回→再申请」，所以修复必须把 check-then-act 那一对读+写串行化。
+  - 修复 = `submit` 在**第一处读之前**取事务级 `pg_advisory_xact_lock`，键 = `SHA-256(virtualKeyId + "|" + modelId)` 前 8 字节；`submit` 本身 `@Transactional`，锁随提交/回滚释放。索引**保留**作纵深防御，两者互补不互替。
+  - `lockSubmit()` 入口加 `isActualTransactionActive()` 守卫（不在事务里直接抛，与既有先例 `AuditServiceImpl#acquireChainLock` 同构）——自动提交连接上该锁**取到即释放**，是本修复最危险的失效模式。
+- **影响如实收窄**：#1333 **不产生重复授权**（`project_provider_grant_models` 实测仍 1 行，写授权走 `ON CONFLICT DO NOTHING`）。重复的是**记录 / 审计 / 告警选通**，不是越权或重复计费。
+- **校准（红/绿都取原始日志，不引二手数字）**：红检必须在**两棵不同的树**上各跑一次——#1305 用 `3c134a9f`（develop，无 V73）服务层 **且** V73 从 `src/main/resources/db/migration/` 与 `target/classes/db/migration/` 两处移出（Maven `process-resources` 不清旧副本，不移会带着幽灵 V73 跑）；#1333 用 `acecdda0`（有索引、无锁）服务层。红日志分别是 `[pending rows for one logical submit] expected: 1 but was: 4` / `[auto-approved rows for one logical submit] expected: 1 but was: 5`，均为**行数断言**失败（断言顺序刻意改成计数优先，避免用响应码代理当证据）。绿：`Tests run: 16, Failures: 0, Errors: 0, Skipped: 0` + `BUILD SUCCESS`，且是**强制重编译**（`Compiling 244` + `Compiling 172`）而非 `Nothing to compile`，日志自证。
+- **修复后真实 API 复测（2026-09-22，修复版 exec jar 连真实 PG）**：白名单新模型 `ph65-probe-wl3` 冷启动并发 6 发 = `{"201": 1, "400": 5}`、DB 恒 1 条 APPROVED、审计 1 对（红：`{"201": 6}` / 6 条）；非白名单新模型 `ph65-probe-nw2` 并发 6 发 = `{"201": 1, "409": 5}`、DB 恒 1 条 PENDING、审计 1 条。原始输出 `postfix_whitelist_conc_out.txt` / `postfix_pending_out.txt`。**探针实例的 V73 校验和修复**（`DROP INDEX` + 删 `flyway_schema_history` version=73 行后由启动时重放）已在报告 §7 声明。
+- **遗留（报告 §6 逐条声明，均未立案）**：`approve`/`reject` 走原子 CAS 但**不取同一把锁**；`notifyApproval` 在**持锁期间**同步走出站告警投递（`AlertEventDispatcher`），即锁持有时长含一次出站 HTTP；红检均为单样本；`model_approval` 之外另有 5 个部分唯一索引的写路径未按「谓词被状态迁移绕开」这个形状重扫。
+- **已知无法就地修正**：提交 `6605ad64` 尾注写「2 个 `201`」，实际数组是 3 个（`red_no_fix.log:343`）。改它要改写历史，红线禁止，故如实记录在报告 §4.6.6 不修改。
+- 分支 `fix/ph65-write-idempotency`；issue #1305 / #1333；PR #1314。
+
 ## 会话交接点 2026-09-20（配额水位的定价口径：#943）
 
 - **问题形态**：COST 配额水位取 `upstreamPaid`（只含已定价部分），未定价用量计 0 → 一条 `action=REJECT` 的成本封顶对这类用量**完全不起作用**，而水位一直显示 `NORMAL / 0%`。这是「未知被当成零」的运维后果，不是显示层瑕疵。

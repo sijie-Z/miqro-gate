@@ -350,13 +350,17 @@ class ModelApprovalApiIntegrationTest {
             pool.shutdownNow();
         }
 
-        assertThat(statuses).containsOnly(201, 409);
-        assertThat(statuses).containsOnlyOnce(201);
+        // The database counts come first on purpose: they are the assertion that
+        // actually pins the defect down ("only one record landed"), and leading
+        // with them means a broken tree fails on the row count itself rather than
+        // on a status-code proxy that a future re-code could keep passing.
         assertThat(countBy("SELECT count(*) FROM model_approval WHERE virtual_key_id = :key AND model_id = :model"
                 + " AND status = 'PENDING'", keyId, MODEL_NEW)).as("pending rows for one logical submit").isEqualTo(1);
         assertThat(countBy("SELECT count(*) FROM admin_audit_events WHERE action = 'MODEL_APPROVAL_SUBMITTED'"
                 + " AND target_id IN (SELECT id FROM model_approval WHERE virtual_key_id = :key"
                 + " AND model_id = :model)", keyId, MODEL_NEW)).as("submit audits").isEqualTo(1);
+        assertThat(statuses).containsOnly(201, 409);
+        assertThat(statuses).containsOnlyOnce(201);
     }
 
     /**
@@ -400,9 +404,10 @@ class ModelApprovalApiIntegrationTest {
             pool.shutdownNow();
         }
 
-        // Winner: 201 APPROVED. Losers: the model is on the key by then, so 400.
-        assertThat(statuses).containsOnly(201, 400);
-        assertThat(statuses).containsOnlyOnce(201);
+        // Database counts first, same reasoning as the PENDING case above: the
+        // defect is "N records where there must be one", so the count is what has
+        // to fail on an unfixed tree. Winner: 201 APPROVED. Losers: the model is
+        // on the key by then, so 400.
         assertThat(countBy("SELECT count(*) FROM model_approval WHERE virtual_key_id = :key AND model_id = :model"
                 + " AND status = 'APPROVED'", keyId, MODEL_AUTO)).as("auto-approved rows for one logical submit")
                 .isEqualTo(1);
@@ -412,6 +417,8 @@ class ModelApprovalApiIntegrationTest {
         assertThat(countBy("SELECT count(*) FROM admin_audit_events WHERE action = 'MODEL_APPROVAL_APPROVED'"
                 + " AND target_id IN (SELECT id FROM model_approval WHERE virtual_key_id = :key"
                 + " AND model_id = :model)", keyId, MODEL_AUTO)).as("auto-approve audits").isEqualTo(1);
+        assertThat(statuses).containsOnly(201, 400);
+        assertThat(statuses).containsOnlyOnce(201);
     }
 
     @Test
