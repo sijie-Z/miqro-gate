@@ -767,6 +767,43 @@ class AdminUsageApiIntegrationTest {
                                 .addValue("greq", UUID.randomUUID().toString()));
             }
         }
+
+        /**
+         * A cached response under a caller-chosen cache key (#1206). Unlike
+         * {@link #insertCacheHits}, the key is not random, so a later call can hang
+         * further hits off the same entry — which is what makes a key hit at both
+         * levels expressible. {@code meta_json} carries the token usage each hit is
+         * valued against; the level lives on the events, never on the entry.
+         */
+        void insertCacheEntry(UUID keyId, String keyHex, long inputTokens, long outputTokens) {
+            jdbc.update("""
+                    INSERT INTO cache_entry
+                        (id, tenant_id, cache_key, virtual_key_id, project_id, provider_product_id, model_id,
+                         status_code, body, meta_json)
+                    VALUES (:id, :tenantId, decode(:keyHex, 'hex'), :keyId, :projectId, :productId, :model,
+                            200, decode('00', 'hex'), CAST(:meta AS jsonb))
+                    """,
+                    new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                            .addValue("keyHex", keyHex).addValue("keyId", keyId).addValue("projectId", projectId)
+                            .addValue("productId", productId).addValue("model", MODEL)
+                            .addValue("meta", "{\"usage\":{\"inputTokens\":" + inputTokens + ",\"outputTokens\":"
+                                    + outputTokens + "}}"));
+        }
+
+        /** One served-from-cache event at {@code level}, deduplicated per (key, level, second). */
+        void insertCacheHit(UUID keyId, String keyHex, String level, Instant occurredAt, String greq) {
+            jdbc.update("""
+                    INSERT INTO cache_hit_event
+                        (id, tenant_id, cache_key, virtual_key_id, project_id, provider_product_id, level,
+                         occurred_at, gateway_request_id, created_at)
+                    VALUES (:id, :tenantId, decode(:keyHex, 'hex'), :keyId, :projectId, :productId, :level,
+                            :occurredAt, :greq, now())
+                    """,
+                    new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                            .addValue("keyHex", keyHex).addValue("keyId", keyId).addValue("projectId", projectId)
+                            .addValue("productId", productId).addValue("level", level)
+                            .addValue("occurredAt", Timestamp.from(occurredAt)).addValue("greq", greq));
+        }
     }
 
     @Test
@@ -995,6 +1032,56 @@ class AdminUsageApiIntegrationTest {
                 .andExpect(jsonPath("$.groups[?(@.label=='UPSTREAM')].requests.upstream").value(contains(1)))
                 .andExpect(jsonPath("$.groups[?(@.label=='UPSTREAM')].tokens.input").value(contains(1_000)))
                 .andExpect(jsonPath("$.groups[?(@.label=='L1_HIT')].requests.l1Hit").value(contains(1)));
+    }
+
+    @Test
+    @DisplayName("#1206: one cache key hit at both levels is valued once, not once per level")
+    void cacheLevelGroupingDoesNotDoubleCountAKeyHitAtBothLevels() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertPrices();
+        // A single cache key hit three times — twice from L1, once from L2 — which is
+        // the ordinary shape: an L2 hit re-fills L1 on the way out, and
+        // uq_cache_hit_event_dedup keys on (tenant, cache_key, level, occurred_at), so
+        // both levels coexisting under one key is normal traffic rather than a corner
+        // case. The #1200 fixture above cannot reach this: it mints a fresh cache key
+        // per call, so no key there is ever hit at both levels and l1+l2 collapses to
+        // whichever single level is present.
+        String keyHex = "0102030405060708";
+        Instant t = Instant.now().minusSeconds(60);
+        fx.insertCacheEntry(ownKey, keyHex, 1_000L, 500L);
+        fx.insertCacheHit(ownKey, keyHex, "L1_HIT", t, "greq-l1-1");
+        fx.insertCacheHit(ownKey, keyHex, "L1_HIT", t.plusSeconds(1), "greq-l1-2");
+        fx.insertCacheHit(ownKey, keyHex, "L2_HIT", t, "greq-l2-1");
+
+        JsonNode cacheLevel =
+                objectMapper.readTree(summaryBody("cache_level")).path("totals");
+        JsonNode project = objectMapper.readTree(summaryBody("PROJECT")).path("totals");
+
+        // 3 hits x (1000 x 1.00 + 500 x 2.00) / 1e6 = 0.006. The two L1 rows are worth
+        // 0.004 and the single L2 row 0.002; before #1206 both rows replayed the whole
+        // key's three hits and the totals came to 0.012 — double the same three facts
+        // cut by PROJECT.
+        Assertions.assertThat(project.path("cost").path("savedByGatewayCache").decimalValue())
+                .as("the PROJECT cut is the reference reading of these three hits")
+                .isEqualByComparingTo("0.006");
+        Assertions.assertThat(cacheLevel.path("cost").path("savedByGatewayCache").decimalValue())
+                .as("CACHE_LEVEL totals disagree with PROJECT totals for the same hits")
+                .isEqualByComparingTo(project.path("cost").path("savedByGatewayCache").decimalValue());
+        // The per-level rows have to carry the level's own hit counts too, so the two
+        // rows sum to the same three hits the PROJECT cut reports.
+        JsonNode groups = objectMapper.readTree(summaryBody("cache_level")).path("groups");
+        Assertions.assertThat(savedByGatewayCache(groups, "L1_HIT")).isEqualByComparingTo("0.004");
+        Assertions.assertThat(savedByGatewayCache(groups, "L2_HIT")).isEqualByComparingTo("0.002");
+        Assertions.assertThat(cacheLevel.path("requests").path("l1Hit").asLong()
+                + cacheLevel.path("requests").path("l2Hit").asLong())
+                .as("the per-level rows must add up to the same hits")
+                .isEqualTo(3L);
+    }
+
+    private String summaryBody(String groupBy) throws Exception {
+        return mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", groupBy).cookie(adminSession))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
     }
 
     /**

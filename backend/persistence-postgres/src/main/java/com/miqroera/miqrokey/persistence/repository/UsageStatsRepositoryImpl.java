@@ -601,15 +601,22 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
             BigDecimal rowPriceCacheCreation = rs.getBigDecimal("price_cache_creation");
 
             if (groupBy == GroupBy.CACHE_LEVEL) {
+                // Each level is valued on its own hits, not on the key's total (#1206).
+                // One key can be hit at both levels inside a window — an L2 hit seeds L1
+                // on the way out — so handing both accumulators `hits` charges the same
+                // cached tokens once per level and the two rows no longer add up to the
+                // same facts grouped any other way. The level's own count is also what
+                // keeps `totalHits` (the divisor behind the mean) equal to the hits
+                // actually reported in that row.
                 if (l1 > 0) {
                     acc.computeIfAbsent(key("L1_HIT", productId, modelId),
-                            k -> new HitAccumulator("L1_HIT", "L1_HIT", productId, modelId)).add(l1, 0, cached, hits,
+                            k -> new HitAccumulator("L1_HIT", "L1_HIT", productId, modelId)).add(l1, 0, cached, l1,
                                     rs.getBigDecimal("price_input"), rs.getBigDecimal("price_output"),
                                     rs.getBigDecimal("price_cache_read"), rs.getBigDecimal("price_cache_creation"));
                 }
                 if (l2 > 0) {
                     acc.computeIfAbsent(key("L2_HIT", productId, modelId),
-                            k -> new HitAccumulator("L2_HIT", "L2_HIT", productId, modelId)).add(0, l2, cached, hits,
+                            k -> new HitAccumulator("L2_HIT", "L2_HIT", productId, modelId)).add(0, l2, cached, l2,
                                     rs.getBigDecimal("price_input"), rs.getBigDecimal("price_output"),
                                     rs.getBigDecimal("price_cache_read"), rs.getBigDecimal("price_cache_creation"));
                 }
