@@ -171,8 +171,8 @@ class MeUsageApiIntegrationTest {
         fx.insertPrices();
         // Distinct instants: the ordering asserted below must not rest on a tie between
         // two rows inserted in the same second.
-        fx.insertAttributedUsage(keyId, "chatcmpl-attr", 10L, 5L, Instant.now().minusSeconds(120), "RESOLVED_SUFFIX",
-                1, "git_remote", "MEDIUM");
+        fx.insertAttributedUsage(keyId, "chatcmpl-attr", 10L, 5L, Instant.now().minusSeconds(120), "RESOLVED_SUFFIX", 1,
+                "git_remote", "MEDIUM");
         // Fresh row (the me-side fixture timestamps it at now), so it sorts above the
         // attributed one without relying on a tie-break.
         fx.insertUsage(keyId, "chatcmpl-plain", 10L, 5L);

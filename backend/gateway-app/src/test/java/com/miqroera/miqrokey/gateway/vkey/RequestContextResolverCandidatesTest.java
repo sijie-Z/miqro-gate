@@ -53,8 +53,8 @@ class RequestContextResolverCandidatesTest {
         RouteSnapshot.KeyRecord key = new RouteSnapshot.KeyRecord(KEY_ID, TENANT, USER, "pub-1", new byte[32],
                 "DISABLED", "CLAUDE_CODE", GRANT_A);
         return new RouteSnapshot(1, Instant.EPOCH, Map.of("pub-1", key), Map.of(KEY_ID, bindings),
-                Map.of(CRED_A, credential(CRED_A), CRED_B, credential(CRED_B)), Map.of(), Map.of(), Map.of(), Map.of(),
-                Map.of(), Map.of(), Map.of(), policies, Map.of(), Map.of());
+                Map.of(CRED_A, credential(CRED_A, PROJECT_A), CRED_B, credential(CRED_B, PROJECT_B)), Map.of(),
+                Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), policies, Map.of(), Map.of());
     }
 
     private static RouteSnapshot.CredentialRecord credential(UUID id, UUID project) {
@@ -101,8 +101,8 @@ class RequestContextResolverCandidatesTest {
     void soleBindingSuffixHitReportsOneCandidate() {
         RouteSnapshot snapshot = soleBinding();
 
-        ResolvedContext context = resolver
-                .resolve(snapshot, keyOf(snapshot), parsedWith("tag-a"), MockServerHttpRequest.get("/v1/messages").build());
+        ResolvedContext context = resolver.resolve(snapshot, keyOf(snapshot), parsedWith("tag-a"),
+                MockServerHttpRequest.get("/v1/messages").build());
 
         assertThat(context.resolutionStatus()).isEqualTo("RESOLVED_SUFFIX");
         assertThat(context.resolutionCandidates()).isEqualTo(1);

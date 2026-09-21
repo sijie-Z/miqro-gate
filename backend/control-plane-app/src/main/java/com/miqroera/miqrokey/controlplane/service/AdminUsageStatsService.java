@@ -331,6 +331,7 @@ public class AdminUsageStatsService {
                 row.lifecycle() != null ? row.lifecycle().wireProtocol() : null,
                 row.lifecycle() != null ? row.lifecycle().requestStatus() : null, priced.cost(), priced.priced(),
                 attribution != null ? attribution.resolutionStatus() : null,
+                attribution != null ? attribution.resolutionCandidates() : null,
                 attribution != null ? attribution.claimSource() : null,
                 attribution != null ? attribution.claimConfidence() : null);
     }

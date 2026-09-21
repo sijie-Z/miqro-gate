@@ -59,6 +59,17 @@ public record UsageRecordPage(List<UsageRecordView> items, long page, long size,
      * claim fields are null both when the client sent nothing and when it sent
      * something the resolver dropped, so they do not mean "no claim was made".
      * </p>
+     *
+     * <p>
+     * {@code resolutionCandidates} (#1139, CAA V72) is the candidate cardinality:
+     * the number of ACTIVE bindings the key held when the ladder ran. It is the
+     * discriminator that separates the two facts {@code RESOLVED_SUFFIX} used to
+     * blur — 1 = the suffix merely matched the key's only binding (nothing to
+     * choose from; the same fact {@code SOLE_BINDING} records), &gt;1 = the ruling
+     * really selected among candidates. {@code null} = a row written before V72:
+     * unknown, and consumers must not guess. A count, deliberately: the binding
+     * details are never exposed.
+     * </p>
      */
     public record UsageRecordView(Instant occurredAt, String modelId, CacheLevel cacheLevel, Long inputTokens,
             Long outputTokens, Long cacheReadInputTokens, Long cacheCreationInputTokens, Long totalTokens,
@@ -66,6 +77,7 @@ public record UsageRecordPage(List<UsageRecordView> items, long page, long size,
             boolean isComplete, boolean usageMissing, UUID virtualKeyId, String clientIp, Long netInputTokens,
             Long netOutputTokens, Long netCacheReadInputTokens, Long netCacheCreationInputTokens, boolean adjusted,
             String providerProductName, Long ttfbMs, String wireProtocol, String requestStatus, BigDecimal cost,
-            boolean priced, String resolutionStatus, String claimSource, String claimConfidence) {
+            boolean priced, String resolutionStatus, Integer resolutionCandidates, String claimSource,
+            String claimConfidence) {
     }
 }

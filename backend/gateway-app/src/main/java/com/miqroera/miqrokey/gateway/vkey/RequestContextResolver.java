@@ -31,6 +31,15 @@ import java.util.UUID;
  * </ol>
  *
  * <p>
+ * Every ruling carries the key's ACTIVE binding count as its candidate
+ * cardinality (#1139): {@code RESOLVED_SUFFIX} with 1 candidate is the same "no
+ * choice existed" fact as {@code SOLE_BINDING} (the suffix happened to match
+ * the only binding — a key is minted with its project's tag as its suffix),
+ * while &gt;1 means the ruling really selected among candidates. Recorded,
+ * never judged: the ladder order and its outcomes are unchanged.
+ * </p>
+ *
+ * <p>
  * Claim headers ({@code X-Miqro-Claim-*}, {@code X-Miqro-Activity},
  * {@code X-Claude-Code-Session-Id}) are recorded verbatim as audit metadata
  * after allowlist/format validation; they never affect authorization. All
@@ -69,6 +78,13 @@ public class RequestContextResolver {
                 CLAIM_CONFIDENCES);
         String claimStatus = allowlisted(bounded(request.getHeaders().getFirst(CLAIM_STATUS_HEADER)), CLAIM_STATUSES);
 
+        // #1139: the candidate cardinality — the key's ACTIVE binding count at
+        // resolution time. Recorded with every ruling the ladder returns, so the
+        // console can tell "the suffix picked among several bindings" (>1) from
+        // "the suffix merely matched the only one" (1). A count only; the binding
+        // details are never exposed.
+        int resolutionCandidates = snapshot.bindingCount(key.keyId());
+
         // 1) Explicit project-id claim.
         String claimedRaw = bounded(request.getHeaders().getFirst(PROJECT_ID_HEADER));
         if (claimedRaw != null) {
@@ -82,22 +98,22 @@ public class RequestContextResolver {
                 throw new AuthFailureException(HttpStatus.FORBIDDEN, "CONTEXT_NOT_ALLOWED",
                         "This key is not bound to the claimed project");
             }
-            return new ResolvedContext(binding, claimed, "RESOLVED_HEADER", claimSource, claimConfidence, claimStatus,
-                    activityId, sessionId);
+            return new ResolvedContext(binding, claimed, "RESOLVED_HEADER", resolutionCandidates, claimSource,
+                    claimConfidence, claimStatus, activityId, sessionId);
         }
 
         // 2) Legacy suffix selector.
         RouteSnapshot.BindingRecord byTag = snapshot.binding(key.keyId(), parsed.projectTag());
         if (byTag != null) {
-            return new ResolvedContext(byTag, null, "RESOLVED_SUFFIX", claimSource, claimConfidence, claimStatus,
-                    activityId, sessionId);
+            return new ResolvedContext(byTag, null, "RESOLVED_SUFFIX", resolutionCandidates, claimSource,
+                    claimConfidence, claimStatus, activityId, sessionId);
         }
 
         // 3) Sole binding — the project is unambiguous.
         RouteSnapshot.BindingRecord sole = snapshot.soleBinding(key.keyId());
         if (sole != null) {
-            return new ResolvedContext(sole, null, "SOLE_BINDING", claimSource, claimConfidence, claimStatus,
-                    activityId, sessionId);
+            return new ResolvedContext(sole, null, "SOLE_BINDING", resolutionCandidates, claimSource, claimConfidence,
+                    claimStatus, activityId, sessionId);
         }
 
         // 4) No binding at all → invalid key; several bindings without context →
@@ -105,15 +121,15 @@ public class RequestContextResolver {
         // tenant configured an unattributed policy, route via its dedicated
         // credential/product/model scope and account to the UNATTRIBUTED
         // bucket; otherwise keep the hard CONTEXT_REQUIRED baseline.
-        if (snapshot.bindingCount(key.keyId()) == 0) {
+        if (resolutionCandidates == 0) {
             throw new AuthFailureException(HttpStatus.NOT_FOUND, "virtual_key_invalid", "Unknown virtual key");
         }
         RouteSnapshot.UnattributedPolicyRecord policy = snapshot.unattributedPolicy(key.tenantId());
         if (policy != null) {
             RouteSnapshot.BindingRecord synthesized = new RouteSnapshot.BindingRecord(key.keyId(), policy.projectId(),
                     null, policy.credentialId(), policy.productId(), null);
-            return new ResolvedContext(synthesized, null, "POLICY_ROUTED", claimSource, claimConfidence, claimStatus,
-                    activityId, sessionId);
+            return new ResolvedContext(synthesized, null, "POLICY_ROUTED", resolutionCandidates, claimSource,
+                    claimConfidence, claimStatus, activityId, sessionId);
         }
         throw new AuthFailureException(HttpStatus.BAD_REQUEST, "CONTEXT_REQUIRED",
                 "This key is bound to several projects; provide X-Miqro-Project-Id");
