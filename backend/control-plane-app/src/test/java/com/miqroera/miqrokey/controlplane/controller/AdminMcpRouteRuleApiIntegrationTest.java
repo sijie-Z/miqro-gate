@@ -217,7 +217,7 @@ class AdminMcpRouteRuleApiIntegrationTest {
                         + "\"pathMode\":\"REGEX\",\"pathValue\":\"^/api/v[0-9]+$\","
                         + "\"hostMode\":\"PREFIX\",\"hostValue\":\"mcp-\",\"methods\":[\"GET\",\"POST\"],"
                         + "\"headers\":[{\"name\":\"X-Tenant-Id\",\"mode\":\"EXACT\",\"value\":\"acme\"},"
-                        + "{\"name\":\"X-Canary\",\"mode\":\"EXACT\",\"value\":\"true\"}]}");
+                        + "{\"name\":\"X-Canary\",\"mode\":\"EXACT\",\"value\":\"true\"}]");
         MvcResult created = mockMvc
                 .perform(post(rulesUrl()).cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
                         .contentType(MediaType.APPLICATION_JSON).content(body))
