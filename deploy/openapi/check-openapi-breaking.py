@@ -10,10 +10,17 @@ head removes or tightens an existing contract:
 - a baseline response code disappears from an operation;
 - a baseline parameter disappears, changes type, becomes required, or changes
   its default;
-- a property becomes newly required (or a required property disappears)
-  inside a shared schema;
-- a property disappears from a shared schema, or its type, format, enum,
-  default, nullability, or numerical/string bounds narrow.
+- a response body or request body is repointed at another schema, reshaped, or
+  loses a media type; a request body becomes required;
+- a property becomes newly required (or a required property disappears) inside
+  a schema;
+- a property disappears, or its type, format, enum, default, nullability, or
+  numerical/string bounds narrow -- and so does anything one level down, in a
+  nested object or in an array's element schema.
+
+The same checks apply wherever a schema is written: in `components.schemas`,
+inline in a response body (springdoc writes every collection response that
+way: `{type: array, items: {$ref: ...}}`), or inline in a request body.
 
 Additions (new paths/operations/codes/parameters/properties) and widenings
 (optional property added, enum value added, bound removed or relaxed, a type
@@ -43,6 +50,12 @@ CEILING_BOUNDS = ("maximum", "exclusiveMaximum", "maxLength", "maxItems", "maxPr
 # declaring it has constrained nothing; springdoc emits it alongside a real
 # `maxLength`, and reporting it would bury the real bounds in noise.
 NO_OP_FLOOR = {"minLength": 0, "minItems": 0, "minProperties": 0}
+
+# How far down nested objects and array elements are compared. A cap is required
+# rather than merely prudent: a self-referential schema (`Node.properties.child`
+# -> `$ref: Node`) would otherwise recurse forever, because `resolve` breaks the
+# cycle only for a single lookup while every nested comparison resolves afresh.
+MAX_DEPTH = 6
 
 
 def ref_name(ref: str) -> str:
@@ -88,10 +101,24 @@ def numeric(value):
 
 
 def compare_schema(prefix: str, label: str, base_node, head_node,
-                   base_schemas: dict, head_schemas: dict, breaking: list, additions: list) -> None:
-    """Report every way `head_node` takes something away from `base_node`."""
+                   base_schemas: dict, head_schemas: dict, breaking: list, additions: list,
+                   depth: int = 0) -> None:
+    """Report every way `head_node` takes something away from `base_node`.
+
+    Descends into `properties` and `items`, so a field that disappears one level
+    down -- or an array whose element schema is repointed at another component --
+    is caught wherever the schema is written: in a shared component, inline in a
+    response body, or inline in a request body.
+    """
     base = resolve(base_node, base_schemas)
     head = resolve(head_node, head_schemas)
+
+    base_required = set(base.get("required") or [])
+    head_required = set(head.get("required") or [])
+    for prop in sorted(head_required - base_required):
+        breaking.append(f"property became required: {label}.{prop}")
+    for prop in sorted(base_required - head_required):
+        breaking.append(f"required property removed: {label}.{prop}")
 
     base_types, head_types = type_set(base), type_set(head)
     lost = base_types - head_types
@@ -147,6 +174,73 @@ def compare_schema(prefix: str, label: str, base_node, head_node,
     if base_nullable and not head_nullable:
         breaking.append(f"{prefix} nullable dropped: {label}")
 
+    if depth >= MAX_DEPTH:
+        return
+
+    base_props = base.get("properties") or {}
+    head_props = head.get("properties") or {}
+    for prop, base_prop in base_props.items():
+        if prop not in head_props:
+            breaking.append(f"property removed: {label}.{prop}")
+            continue
+        compare_schema(prefix, f"{label}.{prop}", base_prop, head_props[prop],
+                       base_schemas, head_schemas, breaking, additions, depth + 1)
+    for prop in sorted(set(head_props) - set(base_props)):
+        additions.append(f"property added: {label}.{prop}")
+
+    base_items, head_items = base.get("items"), head.get("items")
+    if base_items is not None and not isinstance(base_items, list):
+        if head_items is None or isinstance(head_items, list):
+            breaking.append(f"array element schema removed: {label}")
+        else:
+            compare_schema(prefix, f"{label}[]", base_items, head_items,
+                           base_schemas, head_schemas, breaking, additions, depth + 1)
+    elif head_items is not None and not isinstance(head_items, list):
+        additions.append(f"array element schema added: {label}")
+
+
+def compare_content(prefix: str, label: str, base_content: dict, head_content: dict,
+                    base_schemas: dict, head_schemas: dict, breaking: list, additions: list) -> None:
+    """Compare one operation's body (`content`) media type by media type."""
+    for media in sorted(set(base_content) - set(head_content)):
+        breaking.append(f"{prefix} media type removed: {media} on {label}")
+    for media in sorted(set(head_content) - set(base_content)):
+        additions.append(f"{prefix} media type added: {media} on {label}")
+    for media in sorted(set(base_content) & set(head_content)):
+        compare_schema(prefix, f"{label} {media}",
+                       (base_content[media] or {}).get("schema", {}),
+                       (head_content[media] or {}).get("schema", {}),
+                       base_schemas, head_schemas, breaking, additions)
+
+
+def content_of(op: dict, code: str) -> dict:
+    return ((op.get("responses") or {}).get(code) or {}).get("content") or {}
+
+
+def compare_request_body(method: str, path: str, base_op: dict, head_op: dict,
+                         base_schemas: dict, head_schemas: dict,
+                         base_bodies: dict, head_bodies: dict,
+                         breaking: list, additions: list) -> None:
+    """A request body is `$ref`-able in principle (`components.requestBodies`,
+    unused in this repo's baseline) and inline in practice."""
+    label = f"{method.upper()} {path}"
+    base_rb, head_rb = base_op.get("requestBody"), head_op.get("requestBody")
+    if base_rb is None:
+        if head_rb is not None:
+            additions.append(f"request body added: {label}")
+        return
+    if head_rb is None:
+        breaking.append(f"request body removed: {label}")
+        return
+    base_rb = resolve(base_rb, base_bodies)
+    head_rb = resolve(head_rb, head_bodies)
+    # The body was already mandatory or already optional; only a body that
+    # nobody had to send becoming one that everybody must send is a break.
+    if base_rb.get("required") is not True and head_rb.get("required") is True:
+        breaking.append(f"request body became required: {label}")
+    compare_content("request body", label, base_rb.get("content") or {},
+                    head_rb.get("content") or {}, base_schemas, head_schemas, breaking, additions)
+
 
 def compare_parameters(method: str, path: str, base_op: dict, head_op: dict,
                        breaking: list, additions: list) -> None:
@@ -177,6 +271,10 @@ def main() -> int:
 
     base_paths = base.get("paths", {})
     head_paths = head.get("paths", {})
+    base_schemas = (base.get("components") or {}).get("schemas", {})
+    head_schemas = (head.get("components") or {}).get("schemas", {})
+    base_bodies = (base.get("components") or {}).get("requestBodies", {})
+    head_bodies = (head.get("components") or {}).get("requestBodies", {})
 
     for path, ops in base_paths.items():
         if path not in head_paths:
@@ -196,39 +294,27 @@ def main() -> int:
                 breaking.append(f"response removed: {code} {method.upper()} {path}")
             for code in sorted(head_codes - base_codes):
                 additions.append(f"response added: {code} {method.upper()} {path}")
+            for code in sorted(base_codes & head_codes):
+                compare_content("response body", f"{method.upper()} {path} {code}",
+                                content_of(op, code), content_of(head_op, code),
+                                base_schemas, head_schemas, breaking, additions)
             base_param_names = {p.get("name") for p in op.get("parameters", [])}
             head_param_names = {p.get("name") for p in head_op.get("parameters", [])}
             for name in sorted(head_param_names - base_param_names, key=str):
                 additions.append(f"parameter added: {name} on {method.upper()} {path}")
             compare_parameters(method, path, op, head_op, breaking, additions)
+            compare_request_body(method, path, op, head_op, base_schemas, head_schemas,
+                                 base_bodies, head_bodies, breaking, additions)
 
     for path in sorted(set(head_paths) - set(base_paths)):
         additions.append(f"path added: {path}")
 
-    base_schemas = (base.get("components") or {}).get("schemas", {})
-    head_schemas = (head.get("components") or {}).get("schemas", {})
     for name, schema in base_schemas.items():
         if name not in head_schemas:
             breaking.append(f"schema removed: {name}")
             continue
-        head_schema = head_schemas[name]
-        base_required = set(schema.get("required", []))
-        head_required = set(head_schema.get("required", []))
-        for prop in sorted(head_required - base_required):
-            breaking.append(f"property became required: {name}.{prop}")
-        for prop in sorted(base_required - head_required):
-            breaking.append(f"required property removed: {name}.{prop}")
-        base_props = resolve(schema, base_schemas).get("properties") or {}
-        head_props = resolve(head_schema, head_schemas).get("properties") or {}
-        for prop, base_prop in base_props.items():
-            label = f"{name}.{prop}"
-            if prop not in head_props:
-                breaking.append(f"property removed: {label}")
-                continue
-            compare_schema("property", label, base_prop, head_props[prop],
-                           base_schemas, head_schemas, breaking, additions)
-        for prop in sorted(set(head_props) - set(base_props)):
-            additions.append(f"property added: {name}.{prop}")
+        compare_schema("property", name, schema, head_schemas[name],
+                       base_schemas, head_schemas, breaking, additions)
     for name in sorted(set(head_schemas) - set(base_schemas)):
         additions.append(f"schema added: {name}")
 

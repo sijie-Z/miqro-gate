@@ -15,13 +15,16 @@ guard passes on a clean pair; it is that the guard goes red on a broken one, and
 stays green on a legal one. A scenario that passes where it should fail is
 reported as a failure in its own right.
 
-  * must-fail: a property is removed, its type or format changes, an enum value
-    disappears, a constraint narrows, a default moves, a parameter changes type,
-    becomes required or loses its default -- plus the shapes the guard already
-    caught (path, operation, response code, parameter, schema removal,
-    newly-required property).
-  * must-pass: added optional fields, added paths, widened enums, loosened
-    constraints, added parameters.
+  * must-fail: a property is removed (at the top level or inside a nested
+    object), its type or format changes, an enum value disappears, a constraint
+    narrows, a default moves, a parameter changes type, becomes required or
+    loses its default, a request or response body is repointed or reshaped, a
+    media type disappears -- plus the shapes the guard already caught (path,
+    operation, response code, parameter, schema removal, newly-required
+    property).
+  * must-pass: added optional fields (including inside nested objects), added
+    paths, widened enums, loosened constraints, added parameters and media
+    types, a component renamed to an equivalent schema.
 
 Run: python deploy/tests/openapi_breaking_regression.py
 Needs: only python -- no docker, no network, no git history (CI checkouts are
@@ -46,6 +49,15 @@ GUARD = os.path.join(REPO, "deploy", "openapi", "check-openapi-breaking.py")
 PATH = "/api/v1/admin/quota-rules"
 PARAM = "page"
 SCHEMA = "QuotaRuleView"
+# A response whose body is written inline (springdoc does this for every
+# collection endpoint: `{type: array, items: {$ref: ...}}`) rather than
+# referenced at the top level.
+ARRAY_PATH = "/api/v1/admin/quota-rules/active"
+# A response body that carries no `$ref` at all, next to one that does.
+BLOB_PATH = "/api/v1/admin/quota-rules/export"
+REQ_PATH = "/api/v1/admin/quota-rules/{ruleId}"
+OTHER = "ConfigEntry"
+REF = "#/components/schemas/"
 
 RESULTS: list[tuple[str, bool, str]] = []
 
@@ -65,7 +77,8 @@ INT64 = {"type": "integer", "format": "int64"}
 
 def base_spec() -> dict:
     """A minimal spec shaped like the generated one: an operation whose 200 body
-    references a named component schema, plus a paginated query parameter."""
+    references a named component schema, a paginated query parameter, a body
+    written inline, a collection response (`items: $ref`), and a request body."""
     return {
         "openapi": "3.1.0",
         "paths": {
@@ -76,9 +89,35 @@ def base_spec() -> dict:
                          "schema": {"type": "integer", "format": "int32", "default": 1}},
                     ],
                     "responses": {
-                        "200": {"description": "ok", "content": {"application/json": {
-                            "schema": {"$ref": "#/components/schemas/" + SCHEMA}}}},
+                        "200": {"description": "ok", "content": {"*/*": {
+                            "schema": {"$ref": REF + SCHEMA}}}},
                         "400": {"description": "bad request"},
+                    },
+                },
+            },
+            ARRAY_PATH: {
+                "get": {
+                    "responses": {
+                        "200": {"description": "ok", "content": {"*/*": {
+                            "schema": {"type": "array", "items": {"$ref": REF + SCHEMA}}}}},
+                    },
+                },
+            },
+            BLOB_PATH: {
+                "get": {
+                    "responses": {
+                        "200": {"description": "ok", "content": {"*/*": {
+                            "schema": {"type": "string", "format": "byte"}}}},
+                    },
+                },
+            },
+            REQ_PATH: {
+                "put": {
+                    "requestBody": {"content": {"application/json": {
+                        "schema": {"$ref": REF + SCHEMA}}}},
+                    "responses": {
+                        "200": {"description": "ok", "content": {"*/*": {
+                            "schema": {"$ref": REF + SCHEMA}}}},
                     },
                 },
             },
@@ -91,8 +130,11 @@ def base_spec() -> dict:
                         "used": {**INT64, "minimum": 0},
                         "metric": {"type": "string", "enum": ["TOKENS", "REQUESTS", "COST"]},
                         "note": {"type": "string"},
+                        "window": {"type": "object", "properties": {
+                            "start": {"type": "string"}, "end": {"type": "string"}}},
                     },
                 },
+                OTHER: {"type": "object", "properties": {"key": {"type": "string"}}},
             },
         },
     }
@@ -108,6 +150,24 @@ def params(head: dict) -> list[dict]:
 
 def operation(head: dict) -> dict:
     return head["paths"][PATH]["get"]
+
+
+def body(head: dict, path: str, method: str = "get") -> dict:
+    return head["paths"][path][method]["responses"]["200"]["content"]["*/*"]["schema"]
+
+
+def request_body(head: dict, path: str = REQ_PATH, method: str = "put") -> dict:
+    return head["paths"][path][method]["requestBody"]["content"]["application/json"]["schema"]
+
+
+def replace(into: dict, **keywords) -> None:
+    """Rewrite a schema outright. `update` is wrong for a node that is a `$ref`:
+    the guard resolves the reference and ignores sibling keywords (as springdoc
+    does -- none of the baseline's 304 `$ref` nodes carries one), so adding a
+    `type` beside one would change nothing and the scenario would prove nothing.
+    """
+    into.clear()
+    into.update(keywords)
 
 
 def build_cases() -> list[tuple]:
@@ -164,6 +224,52 @@ def build_cases() -> list[tuple]:
                   lambda h: params(h)[0]["schema"].update({"default": 0}),
                   True, PARAM))
 
+    # ---- the shapes that live in `paths`, not in `components` ----------------
+    # 216 of the baseline's response bodies are `$ref`s and 82 are written
+    # inline, but only the components were ever walked -- so a body could be
+    # repointed or rewritten and the guard still said "no breaking changes".
+    cases.append(("response body $ref swapped to a different existing schema",
+                  lambda h: body(h, PATH).update({"$ref": REF + OTHER}),
+                  True, PATH))
+    cases.append(("inline response body type changed string -> object",
+                  lambda h: body(h, BLOB_PATH).update({"type": "object", "format": None}),
+                  True, BLOB_PATH))
+    cases.append(("inline array response: element schema swapped to another component",
+                  lambda h: body(h, ARRAY_PATH)["items"].update({"$ref": REF + OTHER}),
+                  True, ARRAY_PATH))
+    cases.append(("response media type removed",
+                  lambda h: h["paths"][BLOB_PATH]["get"]["responses"]["200"]["content"].pop("*/*"),
+                  True, BLOB_PATH))
+    cases.append(("request body type changed (object -> string)",
+                  lambda h: replace(request_body(h), type="string"),
+                  True, REQ_PATH))
+    cases.append(("request body became required",
+                  lambda h: h["paths"][REQ_PATH]["put"]["requestBody"].update({"required": True}),
+                  True, REQ_PATH))
+    # A property that is itself an inline object is not a leaf: without
+    # descending into it, a field disappearing one level down is invisible.
+    cases.append(("nested property removed (QuotaRuleView.window.end)",
+                  lambda h: prop(h, "window")["properties"].pop("end"),
+                  True, SCHEMA + ".window.end"))
+    cases.append(("nested property type changed (window.start string -> integer)",
+                  lambda h: prop(h, "window")["properties"]["start"].update({"type": "integer"}),
+                  True, SCHEMA + ".window.start"))
+    # `resolve` also merges `allOf`, which is how springdoc renders a component
+    # that extends another. That merge needs binding too: a guard that dropped it
+    # would resolve an `allOf` body to `{}` on BOTH sides and call the pair clean,
+    # so without these two the suite would still score full marks while the
+    # composition path quietly stopped being walked.
+    cases.append(("allOf-composed response body: branch target swapped",
+                  lambda h: replace(body(h, PATH), allOf=[{"$ref": REF + OTHER}]),
+                  True, PATH + " 200 */*.used",
+                  lambda b: replace(body(b, PATH), allOf=[{"$ref": REF + SCHEMA}])))
+    cases.append(("allOf-composed response body: branch makes a property required",
+                  lambda h: replace(body(h, PATH), allOf=[
+                      {"$ref": REF + SCHEMA}, {"required": ["used"]}]),
+                  True, PATH + " 200 */*.used",
+                  lambda b: replace(body(b, PATH), allOf=[
+                      {"$ref": REF + SCHEMA}, {"required": []}])))
+
     # ---- what it already caught: keep it catching them -----------------------
     cases.append(("path removed", lambda h: h.update({"paths": {}}), True, PATH))
     cases.append(("operation removed",
@@ -219,6 +325,35 @@ def build_cases() -> list[tuple]:
     cases.append(("operation added",
                   lambda h: h["paths"][PATH].update({"post": {"responses": {"200": {"description": "ok"}}}}),
                   False, ""))
+    # Adding a level of nesting, or a field inside one, is still an addition.
+    cases.append(("nested optional property added (window.tz)",
+                  lambda h: prop(h, "window")["properties"].update({"tz": {"type": "string"}}),
+                  False, ""))
+    # Component renames stay legal: only the resolved shape is compared, never
+    # the ref name -- a rename that keeps the shape breaks no client.
+    cases.append(("response body $ref renamed to an equivalent new component",
+                  lambda h: (h["components"]["schemas"].update(
+                                 {"QuotaRuleViewV2": copy.deepcopy(h["components"]["schemas"][SCHEMA])}),
+                             body(h, PATH).update({"$ref": REF + "QuotaRuleViewV2"})),
+                  False, ""))
+    # Same shape, re-expressed through `allOf`. springdoc does this whenever a
+    # component extends another, so it is a shape a real baseline contains; the
+    # scenario is load-bearing in the opposite direction from the two above --
+    # a guard that stopped merging `allOf` would see a property-less head here
+    # and cry "property removed" over a change no client can observe.
+    cases.append(("response body $ref rewrapped as an equivalent one-branch allOf",
+                  lambda h: replace(body(h, PATH), allOf=[{"$ref": REF + SCHEMA}]),
+                  False, ""))
+    cases.append(("inline response body widened to accept null",
+                  lambda h: body(h, BLOB_PATH).update({"type": ["string", "null"]}),
+                  False, ""))
+    cases.append(("response media type added",
+                  lambda h: h["paths"][BLOB_PATH]["get"]["responses"]["200"]["content"].update(
+                      {"application/json": {"schema": {"type": "string", "format": "byte"}}}),
+                  False, ""))
+    cases.append(("request body made optional",
+                  lambda h: h["paths"][REQ_PATH]["put"]["requestBody"].update({"required": False}),
+                  False, "", lambda b: b["paths"][REQ_PATH]["put"]["requestBody"].update({"required": True})))
     return cases
 
 
