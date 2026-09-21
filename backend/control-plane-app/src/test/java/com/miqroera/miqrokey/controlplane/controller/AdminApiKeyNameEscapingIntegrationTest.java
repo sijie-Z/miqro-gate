@@ -33,14 +33,14 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * rc.20 prepatch, #1230 M1: {@code AdminApiKeyService} built its audit summaries
- * with a local {@code safeJson} that escaped backslash and quote but left
- * control characters raw — a name with an internal line feed made the jsonb
- * cast reject the summary (PG 22P02, surfaced as 409 RESOURCE_CONFLICT) and
- * rolled the request back. All three sites (issue / scope update / revoke) now
- * go through the shared {@code AuditSummaries.escapeJson}; these tests pin the
- * literal round trip for control-char names and the negative control (quotes,
- * backslashes and CJK keep working end to end).
+ * rc.20 prepatch, #1230 M1: {@code AdminApiKeyService} built its audit
+ * summaries with a local {@code safeJson} that escaped backslash and quote but
+ * left control characters raw — a name with an internal line feed made the
+ * jsonb cast reject the summary (PG 22P02, surfaced as 409 RESOURCE_CONFLICT)
+ * and rolled the request back. All three sites (issue / scope update / revoke)
+ * now go through the shared {@code AuditSummaries.escapeJson}; these tests pin
+ * the literal round trip for control-char names and the negative control
+ * (quotes, backslashes and CJK keep working end to end).
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
@@ -55,8 +55,7 @@ class AdminApiKeyNameEscapingIntegrationTest {
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
         AbstractControlPlaneIntegrationTest.configureProperties(registry);
-        registry.add("miqrokey.bootstrap-secret-file",
-                () -> BootstrapHelper.secretFile().toAbsolutePath().toString());
+        registry.add("miqrokey.bootstrap-secret-file", () -> BootstrapHelper.secretFile().toAbsolutePath().toString());
     }
 
     @Autowired
@@ -162,9 +161,9 @@ class AdminApiKeyNameEscapingIntegrationTest {
     // ------------------------------------------------------------------
 
     private String issueKey(String name) throws Exception {
-        MvcResult issued = mockMvc.perform(
-                post("/api/v1/admin/api-keys").cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                        .contentType(MediaType.APPLICATION_JSON)
+        MvcResult issued = mockMvc
+                .perform(post("/api/v1/admin/api-keys").cookie(sessionCookie, csrfCookie)
+                        .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(Map.of("name", name))))
                 .andExpect(status().isCreated()).andReturn();
         Map<?, ?> body = objectMapper.readValue(issued.getResponse().getContentAsString(), Map.class);
@@ -172,8 +171,10 @@ class AdminApiKeyNameEscapingIntegrationTest {
     }
 
     private String latestSummary(String action) {
-        return jdbc.queryForObject("SELECT change_summary::text FROM admin_audit_events WHERE action = :action "
-                + "ORDER BY chain_position DESC LIMIT 1", new MapSqlParameterSource("action", action), String.class);
+        return jdbc.queryForObject(
+                "SELECT change_summary::text FROM admin_audit_events WHERE action = :action "
+                        + "ORDER BY chain_position DESC LIMIT 1",
+                new MapSqlParameterSource("action", action), String.class);
     }
 
     private static Cookie cookie(MvcResult r, String name) {

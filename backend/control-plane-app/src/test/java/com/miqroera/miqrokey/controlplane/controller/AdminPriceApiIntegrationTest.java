@@ -192,8 +192,10 @@ class AdminPriceApiIntegrationTest {
     }
 
     private String latestSummary(String action) {
-        return jdbc.queryForObject("SELECT change_summary::text FROM admin_audit_events WHERE action = :action "
-                + "ORDER BY chain_position DESC LIMIT 1", new MapSqlParameterSource("action", action), String.class);
+        return jdbc.queryForObject(
+                "SELECT change_summary::text FROM admin_audit_events WHERE action = :action "
+                        + "ORDER BY chain_position DESC LIMIT 1",
+                new MapSqlParameterSource("action", action), String.class);
     }
 
     private static Cookie cookie(MvcResult result, String name) {

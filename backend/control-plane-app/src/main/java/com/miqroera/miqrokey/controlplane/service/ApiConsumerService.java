@@ -156,11 +156,10 @@ public class ApiConsumerService {
         repository.updateCapabilities(consumerId, tenantId, capabilities);
         routeRefreshPublisher.publishChanged();
         String auditedName = AuditSummaries.escapeJson(AuditSummaries.sanitize(consumer.name()));
-        auditService
-                .record(tenantId, adminId, "CONSUMER_SCOPE_UPDATE", "CONSUMER", consumerId,
-                        "{\"name\":\"" + auditedName + "\",\"from\":" + scopeJson(consumer.capabilities())
-                                + ",\"to\":" + scopeJson(capabilities) + "}",
-                        requestId);
+        auditService.record(tenantId, adminId, "CONSUMER_SCOPE_UPDATE", "CONSUMER", consumerId,
+                "{\"name\":\"" + auditedName + "\",\"from\":" + scopeJson(consumer.capabilities()) + ",\"to\":"
+                        + scopeJson(capabilities) + "}",
+                requestId);
         return toView(repository.findByIdAndTenantId(consumerId, tenantId).orElseThrow());
     }
 

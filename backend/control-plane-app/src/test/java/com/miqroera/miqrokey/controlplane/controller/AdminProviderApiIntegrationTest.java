@@ -268,10 +268,11 @@ class AdminProviderApiIntegrationTest {
         String displayName = "Alice \"Ace\"";
         // The SEAT_CREATE summary carries the display name; the raw quote used to
         // make the jsonb cast fail (22P02, surfaced as 409 RESOURCE_CONFLICT).
-        mockMvc.perform(post("/api/v1/admin/subscriptions/" + subscriptionId + "/seats")
-                .contentType(MediaType.APPLICATION_JSON).cookie(sessionCookie, csrfCookie)
-                .header("X-CSRF-Token", csrfToken)
-                .content(objectMapper.writeValueAsString(Map.of("assignedUserId", userId, "displayName", displayName))))
+        mockMvc.perform(
+                post("/api/v1/admin/subscriptions/" + subscriptionId + "/seats").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper
+                                .writeValueAsString(Map.of("assignedUserId", userId, "displayName", displayName))))
                 .andExpect(status().isOk());
 
         assertThat(objectMapper.readTree(latestSummary("SEAT_CREATE")).get("displayName").asText())
@@ -279,8 +280,10 @@ class AdminProviderApiIntegrationTest {
     }
 
     private String latestSummary(String action) {
-        return jdbc.queryForObject("SELECT change_summary::text FROM admin_audit_events WHERE action = :action "
-                + "ORDER BY chain_position DESC LIMIT 1", new MapSqlParameterSource("action", action), String.class);
+        return jdbc.queryForObject(
+                "SELECT change_summary::text FROM admin_audit_events WHERE action = :action "
+                        + "ORDER BY chain_position DESC LIMIT 1",
+                new MapSqlParameterSource("action", action), String.class);
     }
 
     // ------------------------------------------------------------------
