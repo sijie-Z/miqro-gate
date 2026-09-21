@@ -34,8 +34,8 @@ import static org.mockito.Mockito.mock;
 
 /**
  * #1300 accumulation guard: an abandoned OIDC call must hand its connection
- * back, so that N abandoned logins leave the gateway with the same number of
- * open sockets and threads as it started with.
+ * back, so that N abandoned logins leave the peer holding the same number of
+ * sockets as it did before them.
  *
  * <p>
  * The PH57 sweep {@code PlatformOidcOutboundBudgetTest} proves that the budget
@@ -43,6 +43,13 @@ import static org.mockito.Mockito.mock;
  * issue left unmeasured is the accumulation half: whether repeated abandons
  * return their connections or pile up until the process is restarted. This
  * class measures it directly, with a peer that counts sockets.
+ * </p>
+ *
+ * <p>
+ * Only the peer's socket accounting is asserted. Thread counts are printed —
+ * and a {@code jcmd} dump is written to {@code target/} — as context for
+ * whoever reads the log; they are too noisy to assert on, and a thread that
+ * lingers proves nothing about whether a connection came back.
  * </p>
  *
  * <p>
@@ -59,7 +66,7 @@ import static org.mockito.Mockito.mock;
  * The peer runs on 127.0.0.1 only and no credential leaves the machine.
  * </p>
  */
-@DisplayName("#1300 abandoned OIDC calls do not accumulate connections or threads")
+@DisplayName("#1300 abandoned OIDC calls return every connection they take")
 class PlatformOidcAbandonedConnectionAccumulationTest {
 
     /** Same budget shape as the PH57 sweep: far below any transport idle deadline. */
@@ -208,19 +215,37 @@ class PlatformOidcAbandonedConnectionAccumulationTest {
             out.write(("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n\r\n")
                     .getBytes(StandardCharsets.UTF_8));
             out.flush();
-            while (!stopping) {
-                out.write('x');
-                out.flush();
-                Thread.sleep(DRIP_INTERVAL_MS);
-            }
+            drip(out);
         } catch (IOException e) {
-            // Writing into a connection the client let go is the only way the
-            // peer can tell that it was handed back.
-            releasedByClient.incrementAndGet();
+            // The client was gone before the tarpit started: a read of its
+            // request or a write of its response lost a race with the close.
+            // That is not an observation of a handed-back connection, so it is
+            // deliberately not counted as one: releasedByClient moves only
+            // inside drip().
+            System.out.println("[ph70] peer lost the client before dripping: " + e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } finally {
             openSockets.remove(socket);
+        }
+    }
+
+    /**
+     * Writes one byte every {@link #DRIP_INTERVAL_MS} until the client lets go.
+     * A failed write is the only way the peer can see that the connection was
+     * handed back, which makes this the one place {@link #releasedByClient}
+     * moves.
+     */
+    private void drip(OutputStream out) throws InterruptedException {
+        while (!stopping) {
+            try {
+                out.write('x');
+                out.flush();
+            } catch (IOException e) {
+                releasedByClient.incrementAndGet();
+                return;
+            }
+            Thread.sleep(DRIP_INTERVAL_MS);
         }
     }
 
@@ -286,11 +311,15 @@ class PlatformOidcAbandonedConnectionAccumulationTest {
                     String.valueOf(ProcessHandle.current().pid()),
                     "Thread.dump_to_file", "-format=json", "-overwrite", path)
                     .redirectErrorStream(true).start();
-            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            // Wait first, read after: jcmd answers in one short line, far below
+            // the pipe buffer, so this cannot deadlock on a full pipe — while
+            // reading first would block forever on a jcmd that never exits and
+            // make the timeout below unreachable.
             if (!process.waitFor(30, TimeUnit.SECONDS)) {
                 process.destroyForcibly();
                 return path + " (jcmd did not finish)";
             }
+            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
             return path + (output.isEmpty() ? "" : " (" + output.replace('\n', ' ') + ")");
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) {
