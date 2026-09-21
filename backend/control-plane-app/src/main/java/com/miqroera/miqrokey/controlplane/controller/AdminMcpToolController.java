@@ -5,7 +5,7 @@ import com.miqroera.miqrokey.controlplane.service.AdminMcpToolService;
 import com.miqroera.miqrokey.controlplane.service.AdminMcpToolRetryService;
 import com.miqroera.miqrokey.controlplane.service.McpToolRevisionService;
 import com.miqroera.miqrokey.controlplane.service.McpToolSyncService;
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import com.miqroera.miqrokey.domain.model.McpTool;
 import com.miqroera.miqrokey.domain.model.McpToolRevision;
 import com.miqroera.miqrokey.controlplane.service.ToolOpenApiParser;

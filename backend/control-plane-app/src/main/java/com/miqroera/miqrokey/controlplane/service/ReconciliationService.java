@@ -1,7 +1,7 @@
 package com.miqroera.miqrokey.controlplane.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.service.reconciliation.BillReconciliationEngine;
 import com.miqroera.miqrokey.controlplane.service.reconciliation.CanonicalBillParser;
 import com.miqroera.miqrokey.controlplane.service.reconciliation.ReconciliationTypes.BillLine;
