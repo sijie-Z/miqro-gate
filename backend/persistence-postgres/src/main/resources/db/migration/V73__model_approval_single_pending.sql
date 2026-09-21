@@ -22,12 +22,15 @@
 -- "could not create unique index ... is duplicated" 失败并中止整轮迁移，控制面
 -- 卡死在启动且迁移表不留记录，正是 #1249 的形状，不再重演。所以这里先把重复行
 -- 收敛到只剩最早的一条，再建索引。删除是安全的，理由有三：
---   * 被删行与保留行同 (tenant, key, model, requested_by, status)，是同一诉求的
---     冗余副本，不携带任何额外信息；
+--   * 被删行与保留行同 (tenant, key, model, status)，是同一诉求的冗余副本，
+--     不携带任何额外信息（requested_by 一项见下条，是本条的唯一例外）；
 --   * 审计不依赖本表——每个副本各自那条 MODEL_APPROVAL_SUBMITTED 都原样留在
---     admin_audit_events（append-only，本迁移一行都不碰）；
---   * 密钥固定绑定单用户（submit 经 ownedKey 校验），同 (Key, 模型) 的 PENDING
---     不可能来自不同的人，不存在"删掉了别人的申请"。
+--     admin_audit_events（append-only，本迁移一行都不碰），所以追责链完整；
+--   * 密钥在常规路径下固定绑定单用户（submit 经 ownedKey 校验），但 ownedKey 对
+--     SYSTEM_ADMIN 放行他人名下的密钥（ModelApprovalService#ownedKey 的角色分支），
+--     因此同 (Key, 模型) 的 PENDING 可以来自两个不同的人，且被删的可能是管理员
+--     那条。这仍是同一诉求的重复提交、审计也各自留档，删除安全；但**不要用本表
+--     的行数或行内容反推"谁申请过"**，那是 admin_audit_events 的职责。
 --
 -- 核对现状（可选，迁移前后都可跑）：
 --   SELECT virtual_key_id, model_id, count(*) FROM model_approval
