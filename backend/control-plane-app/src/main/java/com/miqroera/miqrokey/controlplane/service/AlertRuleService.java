@@ -167,8 +167,8 @@ public class AlertRuleService {
     }
 
     /**
-     * An optional {@code webhookEndpointId} must name an endpoint of this rule's own
-     * tenant (#1335).
+     * An optional {@code webhookEndpointId} must name an endpoint of this rule's
+     * own tenant (#1335).
      *
      * <p>
      * The column's foreign key used to be single-column, so any endpoint id was

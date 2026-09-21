@@ -293,9 +293,8 @@ class AdminMcpAccessApiIntegrationTest {
         // DataIntegrityViolationException → 409 RESOURCE_CONFLICT. A whole-scope
         // replace is idempotent by definition; which status a caller gets must
         // not depend on whether the nullable column happens to be set.
-        putJson("/api/v1/admin/mcp-services/" + serviceId + "/access/grants",
-                Map.of("toolId", toolId.toString(), "mode", "ALLOW", "consumerIds",
-                        List.of(consumerA.toString(), consumerA.toString())))
+        putJson("/api/v1/admin/mcp-services/" + serviceId + "/access/grants", Map.of("toolId", toolId.toString(),
+                "mode", "ALLOW", "consumerIds", List.of(consumerA.toString(), consumerA.toString())))
                 .andExpect(status().isOk());
 
         assertThat(grantRows(toolId, consumerA)).isOne();
@@ -314,10 +313,8 @@ class AdminMcpAccessApiIntegrationTest {
                         List.of(consumerA.toString(), consumerA.toString(), consumerB.toString())))
                 .andExpect(status().isOk());
 
-        Integer counted = jdbc.queryForObject(
-                "SELECT (change_summary ->> 'consumers')::int FROM admin_audit_events"
-                        + " WHERE action = 'MCP_ACCESS_GRANTS'",
-                new MapSqlParameterSource(), Integer.class);
+        Integer counted = jdbc.queryForObject("SELECT (change_summary ->> 'consumers')::int FROM admin_audit_events"
+                + " WHERE action = 'MCP_ACCESS_GRANTS'", new MapSqlParameterSource(), Integer.class);
         assertThat(counted).isEqualTo(2);
     }
 
@@ -336,22 +333,21 @@ class AdminMcpAccessApiIntegrationTest {
         // nullable tool_id made uq_mcp_access_grant miss these rows entirely, so the
         // service-level list had no uniqueness guarantee at all. V75 adds a partial
         // unique index over exactly the rows the old constraint could not see.
-        assertThatThrownBy(
-                () -> jdbc.update("""
-                        INSERT INTO mcp_access_grants (id, tenant_id, service_access_id, tool_id, consumer_id,
-                                                      mode, created_by)
-                        SELECT :id, tenant_id, service_access_id, NULL, consumer_id, mode, created_by
-                          FROM mcp_access_grants
-                         WHERE service_access_id = :accessId AND tool_id IS NULL
-                        """, new MapSqlParameterSource("id", UUID.randomUUID()).addValue("accessId", accessId)))
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO mcp_access_grants (id, tenant_id, service_access_id, tool_id, consumer_id,
+                                              mode, created_by)
+                SELECT :id, tenant_id, service_access_id, NULL, consumer_id, mode, created_by
+                  FROM mcp_access_grants
+                 WHERE service_access_id = :accessId AND tool_id IS NULL
+                """, new MapSqlParameterSource("id", UUID.randomUUID()).addValue("accessId", accessId)))
                 .isInstanceOf(DataIntegrityViolationException.class)
                 .hasMessageContaining("uq_mcp_access_grant_server_list");
     }
 
     private int grantRows(UUID toolId, UUID consumerId) {
-        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM mcp_access_grants"
-                + " WHERE consumer_id = :consumerId"
-                + " AND ((:toolId::uuid IS NULL AND tool_id IS NULL) OR tool_id = :toolId::uuid)",
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM mcp_access_grants" + " WHERE consumer_id = :consumerId"
+                        + " AND ((:toolId::uuid IS NULL AND tool_id IS NULL) OR tool_id = :toolId::uuid)",
                 new MapSqlParameterSource("consumerId", consumerId).addValue("toolId", toolId), Integer.class);
         return count == null ? 0 : count;
     }

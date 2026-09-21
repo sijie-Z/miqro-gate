@@ -52,14 +52,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>
  * The column's foreign key used to be single-column, so a rule could reference
- * another tenant's endpoint. Both sides of that state were invisible: the delete
- * guard filtered on {@code tenant_id} and therefore could not see the foreign
- * referrer (deleting the endpoint nulled the rule's delivery target behind its
- * owner's back), and the dispatcher — which looks the endpoint up under the
- * rule's own tenant — answered 404 on every delivery. Schema-level fixes live in
- * {@code V74}; the write path rejects the reference up front with a readable 4xx,
- * and the delete guard blocks on <em>any</em> referrer while still naming only
- * same-tenant rules.
+ * another tenant's endpoint. Both sides of that state were invisible: the
+ * delete guard filtered on {@code tenant_id} and therefore could not see the
+ * foreign referrer (deleting the endpoint nulled the rule's delivery target
+ * behind its owner's back), and the dispatcher — which looks the endpoint up
+ * under the rule's own tenant — answered 404 on every delivery. Schema-level
+ * fixes live in {@code V74}; the write path rejects the reference up front with
+ * a readable 4xx, and the delete guard blocks on <em>any</em> referrer while
+ * still naming only same-tenant rules.
  * </p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -307,7 +307,8 @@ class AlertRuleEndpointTenantScopeTest {
     private void insertForeignRuleIgnoringFk(String name, UUID endpointId) {
         // A connection of its own, never returned to the pool: the role is set for
         // this session only and cannot follow the insert into another test.
-        try (Connection connection = DriverManager.getConnection(AbstractControlPlaneIntegrationTest.POSTGRES.getJdbcUrl(),
+        try (Connection connection = DriverManager.getConnection(
+                AbstractControlPlaneIntegrationTest.POSTGRES.getJdbcUrl(),
                 AbstractControlPlaneIntegrationTest.POSTGRES.getUsername(),
                 AbstractControlPlaneIntegrationTest.POSTGRES.getPassword());
                 Statement statement = connection.createStatement()) {

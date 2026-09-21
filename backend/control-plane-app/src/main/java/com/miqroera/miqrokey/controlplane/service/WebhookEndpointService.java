@@ -195,8 +195,8 @@ public class WebhookEndpointService {
         if (!referrers.isEmpty()) {
             List<ResourceDependency> ownDependents = referrers.stream().filter(r -> r.tenantId().equals(tenantId))
                     .map(AlertRuleReferrer::dependency).toList();
-            throw new ResourceInUseException(
-                    "该 Webhook 端点被 " + referrers.size() + " 条告警规则引用，请先删除或改配这些规则。", ownDependents);
+            throw new ResourceInUseException("该 Webhook 端点被 " + referrers.size() + " 条告警规则引用，请先删除或改配这些规则。",
+                    ownDependents);
         }
         jdbc.update("DELETE FROM webhook_endpoints WHERE id = :id AND tenant_id = :tenantId",
                 new MapSqlParameterSource("id", endpointId).addValue("tenantId", tenantId));
