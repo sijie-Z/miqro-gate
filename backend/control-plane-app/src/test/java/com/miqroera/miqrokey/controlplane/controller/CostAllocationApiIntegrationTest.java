@@ -139,12 +139,15 @@ class CostAllocationApiIntegrationTest {
 
         // 12h of the 30-day period (2026-08-01T00:00Z..2026-08-31T00:00Z) is
         // 1/60 of the 100.00 plan price: 100 * 0.5 / 30 = 1.6666666667.
-        mockMvc.perform(post("/api/v1/admin/subscriptions/" + fx.subscriptionId + "/cost-allocation/allocate")
-                .param("from", "2026-08-10T00:00:00Z").param("to", "2026-08-10T12:00:00Z")
-                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1)).andExpect(jsonPath("$[0].usageCost").value(0.002))
+        MvcResult result = mockMvc
+                .perform(post("/api/v1/admin/subscriptions/" + fx.subscriptionId + "/cost-allocation/allocate")
+                        .param("from", "2026-08-10T00:00:00Z").param("to", "2026-08-10T12:00:00Z")
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].usageCost").value(0.002))
                 .andExpect(jsonPath("$[0].fixedCost").value(1.6666666667))
-                .andExpect(jsonPath("$[0].allocatedAmount").value(1.6686666667));
+                .andExpect(jsonPath("$[0].allocatedAmount").value(1.6686666667)).andReturn();
+        System.out.println("[PH72] 12h window row: " + result.getResponse().getContentAsString());
     }
 
     @Test
@@ -154,11 +157,16 @@ class CostAllocationApiIntegrationTest {
         fx.insertPrices();
         fx.insertUsage(fx.projectA, "req-a-1", 1_000L, 500L); // occurred 2026-08-10T00:00:00Z
 
-        // 36h of the 30-day period is 1.5 days: 100 * 1.5 / 30 = 5.0000000000.
-        mockMvc.perform(post("/api/v1/admin/subscriptions/" + fx.subscriptionId + "/cost-allocation/allocate")
-                .param("from", "2026-08-10T00:00:00Z").param("to", "2026-08-11T12:00:00Z")
-                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1)).andExpect(jsonPath("$[0].fixedCost").value(5.0));
+        // 36h of the 30-day period is 1.5 days: 100 * 1.5 / 30 = 5.0000000000,
+        // on top of the 0.0020000000 metered cost of the 1500 tokens in the window.
+        MvcResult result = mockMvc
+                .perform(post("/api/v1/admin/subscriptions/" + fx.subscriptionId + "/cost-allocation/allocate")
+                        .param("from", "2026-08-10T00:00:00Z").param("to", "2026-08-11T12:00:00Z")
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].usageCost").value(0.002)).andExpect(jsonPath("$[0].fixedCost").value(5.0))
+                .andExpect(jsonPath("$[0].allocatedAmount").value(5.002)).andReturn();
+        System.out.println("[PH72] 36h window row: " + result.getResponse().getContentAsString());
     }
 
     @Test
@@ -172,12 +180,15 @@ class CostAllocationApiIntegrationTest {
         // token-weighted split is undefined — but the plan fixed cost of the
         // window (full 30-day period here: 100.00) must still be attributed
         // rather than crashing the allocation.
-        mockMvc.perform(post("/api/v1/admin/subscriptions/" + fx.subscriptionId + "/cost-allocation/allocate")
-                .param("from", "2026-08-01T00:00:00Z").param("to", "2026-08-31T00:00:00Z")
-                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1)).andExpect(jsonPath("$[0].weightTokens").value(0))
+        MvcResult result = mockMvc
+                .perform(post("/api/v1/admin/subscriptions/" + fx.subscriptionId + "/cost-allocation/allocate")
+                        .param("from", "2026-08-01T00:00:00Z").param("to", "2026-08-31T00:00:00Z")
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].weightTokens").value(0))
                 .andExpect(jsonPath("$[0].fixedCost").value(100.0))
-                .andExpect(jsonPath("$[0].allocatedAmount").value(100.0));
+                .andExpect(jsonPath("$[0].allocatedAmount").value(100.0)).andReturn();
+        System.out.println("[PH72] tokenless window row: " + result.getResponse().getContentAsString());
     }
 
     @Test
