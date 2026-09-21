@@ -25,6 +25,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.nio.charset.StandardCharsets;
+import java.sql.Timestamp;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -823,6 +824,8 @@ class AdminOrgApiIntegrationTest {
                 INSERT INTO projects (id, tenant_id, code, name, status, project_tag, system, version)
                 VALUES (:id, :tenantId, 'UNATTRIBUTED', 'Squatter', 'ACTIVE', 'unattributed', FALSE, 0)
                 """, new MapSqlParameterSource("id", squatterId).addValue("tenantId", fx.tenantId));
+        Timestamp updatedAtBefore = jdbc.queryForObject("SELECT updated_at FROM projects WHERE id = :id",
+                new MapSqlParameterSource("id", squatterId), Timestamp.class);
 
         mockMvc.perform(put("/api/v1/admin/unattributed-policy").contentType(MediaType.APPLICATION_JSON)
                 .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
@@ -830,12 +833,16 @@ class AdminOrgApiIntegrationTest {
                         "providerProductId", fx.productId.toString(), "models", List.of("model-a")))))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("BUCKET_PROJECT_CONFLICT"));
 
-        // The conflicting row was neither adopted nor mutated…
-        Map<String, Object> row = jdbc.queryForMap("SELECT name, system, version FROM projects WHERE id = :id",
+        // The conflicting row was neither adopted nor mutated — name/system/version
+        // catch an adopt-or-rewrite, project_tag/updated_at catch any bare UPDATE.
+        Map<String, Object> row = jdbc.queryForMap(
+                "SELECT name, system, version, project_tag, updated_at FROM projects WHERE id = :id",
                 new MapSqlParameterSource("id", squatterId));
         assertThat(row.get("name")).isEqualTo("Squatter");
         assertThat(row.get("system")).isEqualTo(false);
         assertThat(((Number) row.get("version")).longValue()).isZero();
+        assertThat(row.get("project_tag")).isEqualTo("unattributed");
+        assertThat(row.get("updated_at")).isEqualTo(updatedAtBefore);
         // …and no policy was written by the failed attempt.
         Integer policies = jdbc.queryForObject("SELECT count(*) FROM unattributed_policy WHERE tenant_id = :tenantId",
                 new MapSqlParameterSource("tenantId", fx.tenantId), Integer.class);
