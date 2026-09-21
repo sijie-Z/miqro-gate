@@ -1,7 +1,7 @@
 package com.miqroera.miqrokey.controlplane.security;
 
 import com.miqroera.miqrokey.domain.crypto.ConsumerJwtVerifier;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
