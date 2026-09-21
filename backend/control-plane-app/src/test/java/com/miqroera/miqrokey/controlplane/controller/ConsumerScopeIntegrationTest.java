@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.controller.AdminProviderApiIntegrationTest.BootstrapHelper;
@@ -177,5 +178,30 @@ class ConsumerScopeIntegrationTest {
         assertThat(objectMapper.readTree(patchScope(consumerId, "{\"capabilities\":[\"billing:read\",\"mcp:call\"]}"))
                 .get("capabilities").toString()).isEqualTo("[\"billing:read\",\"mcp:call\"]");
         mockMvc.perform(get("/api/v1/billing/summary").header("X-API-Key", apiKey)).andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("#1230: a quoted consumer name round-trips through the scope-update audit summary")
+    void quotedConsumerNameSurvivesScopeUpdateAudit() throws Exception {
+        String name = "scope \"quoted\" consumer";
+        mockMvc.perform(post("/api/v1/admin/api-consumers").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("name", name)))).andExpect(status().isCreated());
+        String consumerId = jdbc.queryForObject("SELECT id FROM api_consumers WHERE name = :name",
+                new MapSqlParameterSource("name", name), UUID.class).toString();
+
+        // The update writes the stored consumer name into the change summary; the raw
+        // quote used to make the jsonb cast fail (22P02, surfaced as 409
+        // RESOURCE_CONFLICT).
+        mockMvc.perform(patch("/api/v1/admin/api-consumers/" + consumerId + "/scope").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"capabilities\":[\"mcp:call\"]}")).andExpect(status().isOk());
+
+        JsonNode summary = objectMapper.readTree(jdbc.queryForObject("""
+                SELECT change_summary::text FROM admin_audit_events
+                WHERE action = 'CONSUMER_SCOPE_UPDATE' ORDER BY chain_position DESC LIMIT 1
+                """, new MapSqlParameterSource(), String.class));
+        assertThat(summary.get("name").asText()).isEqualTo(name);
+        assertThat(summary.get("to").get(0).asText()).isEqualTo("mcp:call");
     }
 }
