@@ -359,6 +359,61 @@ class ModelApprovalApiIntegrationTest {
                 + " AND model_id = :model)", keyId, MODEL_NEW)).as("submit audits").isEqualTo(1);
     }
 
+    /**
+     * The whitelist branch of the same case (#1333).
+     * {@code uq_model_approval_pending} only covers rows that stay PENDING, but the
+     * auto-approve branch flips the winner's row to APPROVED inside the submitting
+     * transaction. That releases the partial-index slot while a loser's INSERT is
+     * still waiting on it, so the loser re-evaluates against a committed APPROVED
+     * row and inserts a second record — with its own audit trail and alert event.
+     * The per-(key, model) advisory lock in {@code submit} serialises the pair; the
+     * losers then leave through MODEL_ALREADY_AVAILABLE. As in the PENDING case the
+     * database counts are the assertion that matters, not the status codes.
+     */
+    @Test
+    @DisplayName("concurrent submits of a whitelisted model auto-approve exactly once")
+    void concurrentWhitelistSubmitsAutoApproveOnce() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        UUID keyId = createKey(MODEL_A);
+        String payload = objectMapper
+                .writeValueAsString(Map.of("virtualKeyId", keyId.toString(), "modelId", MODEL_AUTO));
+
+        int attempts = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(attempts);
+        List<Integer> statuses = new ArrayList<>();
+        try {
+            CyclicBarrier barrier = new CyclicBarrier(attempts);
+            List<Future<Integer>> pending = new ArrayList<>();
+            for (int i = 0; i < attempts; i++) {
+                pending.add(pool.submit(() -> {
+                    barrier.await(30, TimeUnit.SECONDS);
+                    return mockMvc.perform(post("/api/v1/me/model-approvals").contentType(MediaType.APPLICATION_JSON)
+                            .cookie(adminSession, adminCsrf).header("X-CSRF-Token", adminCsrfToken).content(payload))
+                            .andReturn().getResponse().getStatus();
+                }));
+            }
+            for (Future<Integer> f : pending) {
+                statuses.add(f.get(60, TimeUnit.SECONDS));
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+
+        // Winner: 201 APPROVED. Losers: the model is on the key by then, so 400.
+        assertThat(statuses).containsOnly(201, 400);
+        assertThat(statuses).containsOnlyOnce(201);
+        assertThat(countBy("SELECT count(*) FROM model_approval WHERE virtual_key_id = :key AND model_id = :model"
+                + " AND status = 'APPROVED'", keyId, MODEL_AUTO)).as("auto-approved rows for one logical submit")
+                .isEqualTo(1);
+        assertThat(countBy("SELECT count(*) FROM admin_audit_events WHERE action = 'MODEL_APPROVAL_SUBMITTED'"
+                + " AND target_id IN (SELECT id FROM model_approval WHERE virtual_key_id = :key"
+                + " AND model_id = :model)", keyId, MODEL_AUTO)).as("submit audits").isEqualTo(1);
+        assertThat(countBy("SELECT count(*) FROM admin_audit_events WHERE action = 'MODEL_APPROVAL_APPROVED'"
+                + " AND target_id IN (SELECT id FROM model_approval WHERE virtual_key_id = :key"
+                + " AND model_id = :model)", keyId, MODEL_AUTO)).as("auto-approve audits").isEqualTo(1);
+    }
+
     @Test
     @DisplayName("approve refuses when the key or the grant is no longer active")
     void approveRefusesInactiveTargets() throws Exception {

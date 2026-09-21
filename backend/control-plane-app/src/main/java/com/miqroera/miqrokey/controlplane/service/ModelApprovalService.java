@@ -26,6 +26,9 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -61,9 +64,13 @@ import java.util.function.Function;
  * generic 404 (no enumeration).</li>
  * <li>Only PENDING requests can be reviewed (409 ALREADY_REVIEWED); the
  * optimistic {@code version} column makes the transition race-safe.</li>
- * <li>One (key, model) pair carries at most one PENDING request — enforced by
- * the partial unique index {@code uq_model_approval_pending}, not by the
- * pre-insert SELECT alone, which cannot see concurrent writers (#1305).</li>
+ * <li>One (key, model) pair carries at most one request awaiting review — the
+ * pre-insert SELECT alone cannot see concurrent writers (#1305), so overlapping
+ * submits are serialised by a per-(key, model) advisory lock (#1333) and the
+ * partial unique index {@code uq_model_approval_pending} stays as the
+ * structural backstop. The lock also covers the whitelist branch, which flips
+ * the row to APPROVED inside the same transaction and would otherwise release
+ * that index slot while a loser's INSERT is still waiting on it.</li>
  * <li>Review summaries never contain key material.</li>
  * </ul>
  */
@@ -118,6 +125,18 @@ public class ModelApprovalService {
                     "该虚拟密钥当前状态为「" + keyStatusLabel(key.status()) + "」，无法接收新模型；请在状态为「可用」的密钥上提交申请");
         }
         String modelId = validatedModel(request.modelId());
+        // #1333: everything below is a check-then-act pair with the insert at the
+        // end, and READ COMMITTED lets two overlapping submits both pass. On the
+        // default path the loser is still stopped by uq_model_approval_pending
+        // (V73), but the whitelist branch flips the winner's row to APPROVED
+        // inside this same transaction, which releases that partial index slot —
+        // the loser's INSERT then re-evaluates against a committed APPROVED row
+        // and succeeds, stacking a duplicate approval, audit record and alert
+        // event. A transaction-scoped advisory lock serialises the pair per
+        // (key, model); the loser re-reads after the winner commits and leaves
+        // through DUPLICATE_PENDING or MODEL_ALREADY_AVAILABLE. Same mechanism as
+        // ReconciliationService#findOrCreateReport and the audit chain.
+        lockSubmit(key.id(), modelId);
         Set<String> keyModels = keyRepository.findModelIds(key.id());
         if (keyModels.contains(modelId)) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "MODEL_ALREADY_AVAILABLE", "该模型已在此密钥的可用范围内，无需重复申请");
@@ -482,5 +501,31 @@ public class ModelApprovalService {
     private static String escapeJson(String s) {
         return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t",
                 "\\t");
+    }
+
+    /**
+     * Takes the per-(key, model) submit lock for the current transaction. Must run
+     * before the first read of {@link #submit}'s check-then-act pair; released by
+     * the commit or rollback of that same transaction.
+     */
+    private void lockSubmit(UUID virtualKeyId, String modelId) {
+        jdbc.getJdbcTemplate().query("SELECT pg_advisory_xact_lock(?)", rs -> {
+        }, submitLockKey(virtualKeyId, modelId));
+    }
+
+    /**
+     * 64-bit advisory-lock key for one (key, model) submit identity. Hashing keeps
+     * the key in range; a collision between unrelated identities only queues two
+     * submits that were never going to be duplicates (#1333).
+     */
+    static long submitLockKey(UUID virtualKeyId, String modelId) {
+        String identity = virtualKeyId + "|" + modelId;
+        try {
+            return ByteBuffer
+                    .wrap(MessageDigest.getInstance("SHA-256").digest(identity.getBytes(StandardCharsets.UTF_8)))
+                    .getLong();
+        } catch (Exception e) {
+            throw new IllegalStateException("SHA-256 not available", e);
+        }
     }
 }
