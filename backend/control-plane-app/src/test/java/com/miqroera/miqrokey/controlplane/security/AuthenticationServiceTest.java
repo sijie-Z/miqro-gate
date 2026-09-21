@@ -12,6 +12,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.env.Environment;
@@ -175,6 +176,88 @@ class AuthenticationServiceTest {
 
             var result = service.login("admin", "correct", "req-1");
             assertThat(result).isNotNull();
+        }
+    }
+
+    /**
+     * #1327: the lock-duration multiplier used to be computed as
+     * {@code 1L << Math.max(0, newFailCount - loginMaxFailures)} and then passed
+     * through {@code Math.min(multiplier, 1024)}. That cap did not protect the
+     * shift itself: with the default {@code loginMaxFailures=5} the shift reaches
+     * 63 at the 68th consecutive failure, and {@code 1L << 63} is
+     * {@code Long.MIN_VALUE}. A negative multiplier survives {@code Math.min} and
+     * makes {@code Duration.multipliedBy} throw. The counter keeps incrementing
+     * while an account is locked ({@code rejectLocked} only forces
+     * {@code passwordValid = false}; the {@code !passwordValid} branch still calls
+     * {@code recordFailedLogin}), so the 68th unauthenticated wrong-password
+     * request reaches this arithmetic. These tests pin the boundary on both sides
+     * of the shift.
+     */
+    @Nested
+    @DisplayName("Lockout multiplier boundary (#1327)")
+    class LockoutMultiplierBoundary {
+
+        @Test
+        @DisplayName("lock duration is capped at loginLockBase x 1024 below the overflow point")
+        void lockDurationIsCappedBelowOverflowPoint() {
+            // 63rd failure → shift 58 → 2^58, already capped to 1024 minutes.
+            User user = buildUser(62, Instant.now().minus(Duration.ofMinutes(1)), UserStatus.LOCKED);
+            when(userRepository.findByIdForUpdate(USER_ID)).thenReturn(Optional.of(user));
+
+            service.recordFailedLogin(user, "req-1");
+
+            ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+            verify(userRepository).update(captor.capture());
+            User saved = captor.getValue();
+            assertThat(saved.failedLoginCount()).isEqualTo(63);
+            assertThat(saved.status()).isEqualTo(UserStatus.LOCKED);
+            assertThat(saved.lockedUntil()).isAfter(Instant.now().plus(Duration.ofMinutes(1023)));
+        }
+
+        @Test
+        @DisplayName("the 68th failure must cap the multiplier, not overflow to Long.MIN_VALUE")
+        void recordFailedLoginCapsMultiplierAtOverflowPoint() {
+            User user = buildUser(67, Instant.now().minus(Duration.ofMinutes(1)), UserStatus.LOCKED);
+            when(userRepository.findByIdForUpdate(USER_ID)).thenReturn(Optional.of(user));
+
+            service.recordFailedLogin(user, "req-1");
+
+            ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+            verify(userRepository).update(captor.capture());
+            User saved = captor.getValue();
+            assertThat(saved.failedLoginCount()).isEqualTo(68);
+            assertThat(saved.status()).isEqualTo(UserStatus.LOCKED);
+            assertThat(saved.lockedUntil()).isAfter(Instant.now().plus(Duration.ofMinutes(1023)));
+        }
+
+        @Test
+        @DisplayName("a wrong password at the boundary is still a 401 AuthenticationException, not a 500")
+        void loginStaysAClientErrorAtCounterBoundary() {
+            User user = buildUser(67, Instant.now().minus(Duration.ofMinutes(1)), UserStatus.LOCKED);
+            when(userRepository.findByTenantIdAndUsername(TENANT_ID, "admin")).thenReturn(Optional.of(user));
+            when(userRepository.findByIdForUpdate(USER_ID)).thenReturn(Optional.of(user));
+
+            assertThatThrownBy(() -> service.login("admin", "wrong", "req-1"))
+                    .isInstanceOf(AuthenticationException.class)
+                    .hasMessage(AuthenticationService.LOGIN_FAILED);
+        }
+
+        @Test
+        @DisplayName("the cap holds past the shift wrap point instead of collapsing to 1 minute")
+        void lockDurationStaysCappedPastShiftWrapPoint() {
+            // Shift 195: without the clamp this would be 1L << 195 == 1L, i.e. a 1-minute
+            // lock — the lockout silently getting weaker the harder it is hammered.
+            User user = buildUser(200, Instant.now().minus(Duration.ofMinutes(1)), UserStatus.LOCKED);
+            when(userRepository.findByIdForUpdate(USER_ID)).thenReturn(Optional.of(user));
+
+            service.recordFailedLogin(user, "req-1");
+
+            ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+            verify(userRepository).update(captor.capture());
+            User saved = captor.getValue();
+            assertThat(saved.failedLoginCount()).isEqualTo(201);
+            assertThat(saved.status()).isEqualTo(UserStatus.LOCKED);
+            assertThat(saved.lockedUntil()).isAfter(Instant.now().plus(Duration.ofMinutes(1023)));
         }
     }
 
