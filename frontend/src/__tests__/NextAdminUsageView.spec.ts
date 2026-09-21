@@ -171,6 +171,15 @@ const hourlyReport: HourlyUsageReport = {
   ],
 };
 
+/** The hourly report with its one row relabelled, so two answers in flight at
+ * once can be told apart in the rendered table. */
+function hourlyReportFor(dimensionLabel: string): HourlyUsageReport {
+  return {
+    ...hourlyReport,
+    rows: [{ ...hourlyReport.rows![0]!, dimensionLabel }],
+  };
+}
+
 function summaryCalls() {
   return mockApi.adminUsageSummary.mock.calls.map(([query]) => query);
 }
@@ -838,6 +847,40 @@ describe('NextAdminUsageView', () => {
     await wrapper.find('[data-testid="hourly-days-7"]').trigger('click');
     await flushPromises();
     expect(mockApi.adminUsageHourly).toHaveBeenLastCalledWith(expect.objectContaining({ days: 7 }));
+  });
+
+  // #1224: loadHourly had no response-sequence guard, so a slow answer could
+  // still land after a newer one and repaint the table with stale rows. The
+  // day-range buttons are not disabled while a request is in flight, so two
+  // answers really can be outstanding at once.
+  it('drops an hourly response that a newer request has already superseded', async () => {
+    const pending: Array<(report: HourlyUsageReport) => void> = [];
+    mockApi.adminUsageHourly.mockImplementation(
+      () =>
+        new Promise<HourlyUsageReport>((resolve) => {
+          pending.push(resolve);
+        }),
+    );
+
+    const wrapper = mountView();
+    await flushPromises();
+    expect(pending).toHaveLength(1); // the mount request is still open
+
+    // the user asks for another window while the first request is in flight
+    await wrapper.find('[data-testid="hourly-days-7"]').trigger('click');
+    expect(pending).toHaveLength(2);
+
+    // the newer request answers first …
+    pending[1]!(hourlyReportFor('新窗口'));
+    await flushPromises();
+    expect(wrapper.find('[data-testid="usage-hourly-table"]').text()).toContain('新窗口');
+
+    // … then the abandoned one dribbles in and must not win
+    pending[0]!(hourlyReportFor('旧窗口'));
+    await flushPromises();
+    const table = wrapper.find('[data-testid="usage-hourly-table"]').text();
+    expect(table).toContain('新窗口');
+    expect(table).not.toContain('旧窗口');
   });
 
   it('opens the call timeline drawer from the request ID column (#707)', async () => {
