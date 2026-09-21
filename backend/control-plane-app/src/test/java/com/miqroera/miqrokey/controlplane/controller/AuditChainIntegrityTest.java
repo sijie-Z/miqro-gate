@@ -609,4 +609,33 @@ class AuditChainIntegrityTest {
         assertThat(e.currentEventHash()).as("stored hash reproduces from the persisted row").isEqualTo(computed);
         assertThat(e.createdAt().getNano() % 1000).as("persisted timestamp is microsecond-aligned").isZero();
     }
+
+    @Test
+    @DisplayName("regression #1328: an oversized admin_request_id is bounded before hashing, so the stored hash "
+            + "still reproduces from the persisted row")
+    void oversizedRequestIdIsBoundedBeforeHashing() {
+        String oversized = "r".repeat(127) + "X";
+
+        auditService.record(SEED_TENANT_ID, UUID.randomUUID(), "OVERSIZED_REQUEST_ID", "TARGET", UUID.randomUUID(),
+                "1", oversized);
+
+        // verifyFullChain() recomputes every hash from the persisted row, so this
+        // passes only if the bound was applied BEFORE computeEventHash. Bounding at
+        // INSERT time instead would leave value and hash disagreeing.
+        List<AdminAuditEvent> events = verifyFullChain(1);
+        assertThat(events.get(0).adminRequestId()).as("stored value is the bounded head of the supplied value")
+                .isEqualTo("r".repeat(64));
+
+        // A 64-code-point value built from surrogate pairs occupies 128 UTF-16
+        // units but exactly fits the varchar(64) column: bounding by UTF-16 length
+        // would have dropped data, and bounding by code points must not split a
+        // pair (a lone surrogate would not survive the UTF-8 encode in hashing).
+        String astral = new String(Character.toChars(0x1F511)).repeat(64);
+        auditService.record(SEED_TENANT_ID, UUID.randomUUID(), "ASTRAL_REQUEST_ID", "TARGET", UUID.randomUUID(),
+                "2", astral);
+        AdminAuditEvent astralStored = readAllByChainPosition().stream()
+                .filter(e -> "ASTRAL_REQUEST_ID".equals(e.action())).findFirst().orElseThrow();
+        assertThat(astralStored.adminRequestId()).as("64 code points fit the column whole").isEqualTo(astral);
+        verifyFullChain(2);
+    }
 }
