@@ -149,7 +149,10 @@ public class AlertRuleService {
             "USAGE_QUEUE_SATURATION", "UPSTREAM_RATE_LIMITED", "KEY_REQUEST_RATE");
 
     private static void validateType(String type) {
-        if (!RULE_TYPES.contains(type)) {
+        // #1252: `type` is optional in the submitted baseline, so "absent" reaches
+        // here as null — and `List.of(...)` throws on contains(null) instead of
+        // answering false. A missing type is a client error, not an internal one.
+        if (type == null || !RULE_TYPES.contains(type)) {
             // The message lists the list itself: it used to drift (the two key-expiry
             // types were accepted but undocumented in the error), so an operator was
             // told their valid input was invalid.
