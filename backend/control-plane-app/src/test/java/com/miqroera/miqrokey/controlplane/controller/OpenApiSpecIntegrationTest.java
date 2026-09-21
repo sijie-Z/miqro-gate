@@ -164,6 +164,33 @@ class OpenApiSpecIntegrationTest {
     }
 
     /**
+     * The {@code tools/import} endpoint accepts an arbitrary OpenAPI document and
+     * models it as {@link tools.jackson.databind.JsonNode} — a free-form JSON
+     * value, which the committed baseline declares as {@code JsonNode: {}}.
+     * springdoc instead reads that type as a bean and publishes Jackson's own
+     * accessors ({@code array}, {@code empty}, {@code pojo}, {@code nodeType}, …)
+     * as if they were request-body fields, so a client generated from the served
+     * spec sends a document the endpoint cannot parse. Anything that is not
+     * JsonNode (a DTO, a Map) must keep its fields, so the guard is scoped to the
+     * free-form component.
+     */
+    @Test
+    @DisplayName("free-form JSON bodies stay free-form: JsonNode is not introspected as a bean")
+    void freeFormJsonBodiesAreNotIntrospected() throws Exception {
+        MvcResult result = mockMvc.perform(get("/v3/api-docs").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk()).andReturn();
+        JsonNode schemas = objectMapper.readTree(result.getResponse().getContentAsByteArray()).path("components")
+                .path("schemas");
+
+        JsonNode jsonNode = schemas.path("JsonNode");
+        assertThat(jsonNode.isMissingNode()).as("JsonNode component (tools/import request body)").isFalse();
+        Set<String> advertised = new TreeSet<>();
+        jsonNode.path("properties").propertyNames().forEach(advertised::add);
+        assertThat(advertised).as("JsonNode must stay free-form; the served spec advertises its Jackson accessors")
+                .isEmpty();
+    }
+
+    /**
      * Compares required-fields and, per property, the constraint keywords — by
      * name, so a keyword present on one face and absent on the other fails rather
      * than passing a substring check.
