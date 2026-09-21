@@ -15,7 +15,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -37,9 +36,13 @@ import java.util.stream.Collectors;
  * an unlock path ADR-0020 explicitly rejected. So a rule that is no longer
  * EXCEEDED carries its recorded block forward while
  * {@code window_end} is still in the future and the rule itself has not been
- * touched since the block was recorded. Both documented recovery paths survive:
- * rolling into a new window drops the stale verdict, and any admin write to the
- * rule (raise the limit, disable it, delete it) lifts the block immediately.
+ * touched since the block was recorded. A rule that is still EXCEEDED extends
+ * its block into the window the live reading was taken in — {@code window_end}
+ * moves forward with the window while the block's decision time stays put, so
+ * the block survives a deletion in every window it was over the limit in, not
+ * just the first. Both documented recovery paths survive: rolling into a new
+ * window drops the stale verdict, and any admin write to the rule (raise the
+ * limit, disable it, delete it) lifts the block immediately.
  * </p>
  */
 @Service
@@ -68,10 +71,19 @@ public class QuotaEnforcementService {
         Map<UUID, RecordedBlock> recorded = recordedBlocks();
         List<BlockedRule> exceeded = new ArrayList<>();
         for (QuotaRule rule : rules) {
+            RecordedBlock previous = recorded.get(rule.id());
             try {
                 QuotaWatermarks.Watermark watermark = watermarks.evaluate(rule.tenantId(), rule);
                 if (watermark.exceeded()) {
-                    exceeded.add(new BlockedRule(rule, watermark.to(), now));
+                    // Still over the limit. Record the window the live reading was taken
+                    // in: a block that started in an earlier window must not keep a
+                    // window_end that has already passed, or the sticky branch below
+                    // would drop it the first time the reading dips — which is exactly
+                    // what a retention deletion does (#1316). The decision time of the
+                    // continuous block is carried over, so the admin-edit escape keeps
+                    // its baseline instead of drifting forward every cycle.
+                    exceeded.add(new BlockedRule(rule, watermark.to(),
+                            previous == null ? now : previous.blockedAt()));
                     continue;
                 }
             } catch (RuntimeException e) {
@@ -84,7 +96,6 @@ public class QuotaEnforcementService {
             // watermark is derived from is not one of the two documented recovery
             // paths, and a failed watermark derivation must not resume traffic
             // either (ADR-0020 §4).
-            RecordedBlock previous = recorded.get(rule.id());
             if (previous != null && previous.windowEnd().isAfter(now)
                     && !rule.updatedAt().isAfter(previous.blockedAt())) {
                 exceeded.add(new BlockedRule(rule, previous.windowEnd(), previous.blockedAt()));
@@ -93,8 +104,13 @@ public class QuotaEnforcementService {
             }
         }
 
-        Set<UUID> before = Set.copyOf(jdbc.queryForList("SELECT rule_id FROM quota_enforcement", Map.of(), UUID.class));
-        Set<UUID> after = exceeded.stream().map(blocked -> blocked.rule().id()).collect(Collectors.toUnmodifiableSet());
+        // Compared per rule *and* window: the ids alone would report "unchanged" while a
+        // continuously exceeded rule crosses into a new window, and the table would keep
+        // the window_end of the window that just ended (#1316).
+        Map<UUID, Instant> before = recorded.entrySet().stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, entry -> entry.getValue().windowEnd()));
+        Map<UUID, Instant> after = exceeded.stream().collect(
+                Collectors.toMap(blocked -> blocked.rule().id(), BlockedRule::windowEnd, (first, second) -> first));
         if (before.equals(after)) {
             return;
         }

@@ -20,6 +20,7 @@ import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -34,7 +35,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>
  * 集成测试（{@code QuotaBlockSurvivesUsageDeletionIntegrationTest}）在真库上覆盖"删数据"与
  * "跨窗口 / 提额"两条端到端路径；这里补它造不出来的那一格：水位计算抛异常。断言方式是"没有发生
- * 重写"——判定集不变时服务直接返回，不 DELETE、不广播，网关快照因此保持原样。
+ * 重写"——(规则, 窗口) 对不变时服务直接返回，不 DELETE、不广播，网关快照因此保持原样。
  * </p>
  */
 class QuotaEnforcementServiceStickyVerdictTest {
@@ -68,7 +69,6 @@ class QuotaEnforcementServiceStickyVerdictTest {
 
         Mockito.when(rules.findAllActiveReject()).thenReturn(List.of(rule(RULE_UNTOUCHED_SINCE)));
         givenRecorded(RULE, WINDOW_END, BLOCKED_AT);
-        givenBlockedRuleIds(RULE);
     }
 
     @Test
@@ -116,10 +116,11 @@ class QuotaEnforcementServiceStickyVerdictTest {
 
     @Test
     @DisplayName("结转的判定写回它自己的 window_end 与判定时刻：窗口不会漂移、管理员改动的比较基准不变")
-    void carriedVerdictKeepsItsOriginalWindowEndAndDecisionTime() {
+    void carriedVerdictKeepsItsOriginalWindowEndAndDecisionTime() throws Exception {
         Mockito.when(watermarks.evaluate(Mockito.any(), Mockito.any())).thenReturn(reading());
-        // Another rule's verdict changed, so the table does get rewritten this cycle.
-        givenBlockedRuleIds(RULE, OTHER_RULE);
+        // A row the new cycle no longer produces, so the table does get rewritten this cycle.
+        givenRecorded(new RecordedRow(RULE, WINDOW_END, BLOCKED_AT),
+                new RecordedRow(OTHER_RULE, Instant.now().plusSeconds(7_200), BLOCKED_AT));
 
         service.evaluate();
 
@@ -127,6 +128,40 @@ class QuotaEnforcementServiceStickyVerdictTest {
         Mockito.verify(jdbc).update(Mockito.contains("INSERT INTO quota_enforcement"), params.capture());
         assertThat(params.getValue().getValue("windowEnd")).isEqualTo(Timestamp.from(WINDOW_END));
         assertThat(params.getValue().getValue("blockedAt")).isEqualTo(Timestamp.from(BLOCKED_AT));
+        Mockito.verify(publisher).publishChanged();
+    }
+
+    @Test
+    @DisplayName("跨窗口仍超限时，记录的 window_end 前进到当前窗口，判定时刻保持为这段 block 的起点（#1316）")
+    void liveReadingStillExceededAdvancesTheRecordedWindow() throws Exception {
+        // The recorded verdict belongs to the window that just ended.
+        givenRecorded(RULE, Instant.now().minusSeconds(600), BLOCKED_AT);
+        Mockito.when(watermarks.evaluate(Mockito.any(), Mockito.any())).thenReturn(exceededReading());
+
+        service.evaluate();
+
+        ArgumentCaptor<MapSqlParameterSource> params = ArgumentCaptor.forClass(MapSqlParameterSource.class);
+        Mockito.verify(jdbc).update("DELETE FROM quota_enforcement", Map.of());
+        Mockito.verify(jdbc).update(Mockito.contains("INSERT INTO quota_enforcement"), params.capture());
+        assertThat(params.getValue().getValue("windowEnd")).as("判定必须在当前窗口里继续有效").isEqualTo(Timestamp.from(WINDOW_END));
+        assertThat(params.getValue().getValue("blockedAt")).as("同一段连续 block 的判定时刻不能被刷新，否则管理员改动的比较基准会跟着漂")
+                .isEqualTo(Timestamp.from(BLOCKED_AT));
+        Mockito.verify(publisher).publishChanged();
+    }
+
+    @Test
+    @DisplayName("没有历史判定行的超限规则按当前时刻新建 block")
+    void liveReadingExceededWithoutARecordedRowStartsANewBlock() throws Exception {
+        givenNoRecordedRow();
+        Mockito.when(watermarks.evaluate(Mockito.any(), Mockito.any())).thenReturn(exceededReading());
+
+        service.evaluate();
+
+        ArgumentCaptor<MapSqlParameterSource> params = ArgumentCaptor.forClass(MapSqlParameterSource.class);
+        Mockito.verify(jdbc).update(Mockito.contains("INSERT INTO quota_enforcement"), params.capture());
+        assertThat(params.getValue().getValue("windowEnd")).isEqualTo(Timestamp.from(WINDOW_END));
+        assertThat(((Timestamp) params.getValue().getValue("blockedAt")).toInstant())
+                .isBetween(Instant.now().minusSeconds(60), Instant.now());
         Mockito.verify(publisher).publishChanged();
     }
 
@@ -147,27 +182,46 @@ class QuotaEnforcementServiceStickyVerdictTest {
                 Instant.now().minusSeconds(3_600), WINDOW_END);
     }
 
+    /** A live watermark reading that is still EXCEEDED in the current window. */
+    private QuotaWatermarks.Watermark exceededReading() {
+        return new QuotaWatermarks.Watermark(BigDecimal.valueOf(2_000), BigDecimal.valueOf(2_000), "EXCEEDED", null, null,
+                Instant.now().minusSeconds(600), WINDOW_END);
+    }
+
+    /** The table is empty: no verdict was carried over from an earlier window. */
+    private void givenNoRecordedRow() throws Exception {
+        Mockito.doAnswer(invocation -> List.of()).when(jdbc).query(Mockito.anyString(), Mockito.anyMap(),
+                Mockito.<RowMapper<Object>>any());
+    }
+
     /**
-     * The verdict row the service maps out of {@code quota_enforcement}. {@code doAnswer}
+     * One verdict row the service maps out of {@code quota_enforcement}. {@code doAnswer}
      * rather than {@code when(...).thenAnswer(...)}: a later test re-records the table, and
      * plain stubbing would run the previous answer during the stubbing call itself (with the
      * argument matchers' nulls) before the new row ever lands.
      */
     private void givenRecorded(UUID ruleId, Instant windowEnd, Instant blockedAt) throws Exception {
-        ResultSet rs = Mockito.mock(ResultSet.class);
-        Mockito.when(rs.getObject("rule_id")).thenReturn(ruleId);
-        Mockito.when(rs.getTimestamp("window_end")).thenReturn(Timestamp.from(windowEnd));
-        Mockito.when(rs.getTimestamp("blocked_at")).thenReturn(Timestamp.from(blockedAt));
+        givenRecorded(new RecordedRow(ruleId, windowEnd, blockedAt));
+    }
+
+    /** The verdict rows the previous cycle left behind; each needs its own {@code ResultSet}. */
+    private void givenRecorded(RecordedRow... rows) throws Exception {
         Mockito.doAnswer(invocation -> {
             RowMapper<Object> mapper = invocation.getArgument(2);
-            return List.of(mapper.mapRow(rs, 0));
+            List<Object> mapped = new ArrayList<>(rows.length);
+            for (int i = 0; i < rows.length; i++) {
+                ResultSet rs = Mockito.mock(ResultSet.class);
+                Mockito.when(rs.getObject("rule_id")).thenReturn(rows[i].ruleId());
+                Mockito.when(rs.getTimestamp("window_end")).thenReturn(Timestamp.from(rows[i].windowEnd()));
+                Mockito.when(rs.getTimestamp("blocked_at")).thenReturn(Timestamp.from(rows[i].blockedAt()));
+                mapped.add(mapper.mapRow(rs, i));
+            }
+            return mapped;
         }).when(jdbc).query(Mockito.anyString(), Mockito.anyMap(), Mockito.<RowMapper<Object>>any());
     }
 
-    /** The rule ids the previous cycle left behind. */
-    private void givenBlockedRuleIds(UUID... ruleIds) {
-        Mockito.when(jdbc.queryForList("SELECT rule_id FROM quota_enforcement", Map.of(), UUID.class))
-                .thenReturn(List.of(ruleIds));
+    /** A row as {@code quota_enforcement} would hold it. */
+    private record RecordedRow(UUID ruleId, Instant windowEnd, Instant blockedAt) {
     }
 
     /**

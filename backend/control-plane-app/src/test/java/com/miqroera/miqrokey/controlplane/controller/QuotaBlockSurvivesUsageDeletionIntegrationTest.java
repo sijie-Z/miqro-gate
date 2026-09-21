@@ -166,9 +166,58 @@ class QuotaBlockSurvivesUsageDeletionIntegrationTest {
         assertThat(blockedRuleRows()).as("限额提到 5000、窗口内用量 2000 → 判定必须消失").isZero();
     }
 
+    @Test
+    @DisplayName("跨窗口仍超限时，记录里的 window_end 必须前进到当前窗口（#1316 的第二窗口）")
+    void recordedWindowEndAdvancesWhileTheRuleStaysExceeded() {
+        // What the table holds when a rule stays exceeded across a window rollover: the
+        // verdict of the window that just ended, while the live reading is taken in the
+        // current one and still says EXCEEDED.
+        ageRule();
+        seedRecordedBlock(Instant.now().minusSeconds(600), Instant.now().minusSeconds(3_600));
+
+        quotaEnforcement.evaluate();
+
+        System.out.println("[PH67] rollover: block row=" + blockRows() + " (rule still exceeded)");
+        assertThat(blockedWindowEnd()).as("规则仍然超限 → 记录必须跟上当前窗口；冻结在上一窗口的 window_end 一滚过去，"
+                + "下一次水位下跌（例如管理员删用量）就会把判定当成过期丢掉").isAfter(Instant.now());
+    }
+
+    @Test
+    @DisplayName("跨窗口持续超限之后再删当前窗口用量：block 必须仍然在（#1316 的第二窗口）")
+    void usageDeletionInTheNextWindowStillCannotLiftAContinuousBlock() {
+        ageRule();
+        seedRecordedBlock(Instant.now().minusSeconds(600), Instant.now().minusSeconds(3_600));
+        quotaEnforcement.evaluate();
+        assertThat(blockedRuleRows()).as("precondition: 仍超限的规则必须继续留在表里").isEqualTo(1);
+
+        Instant from = LocalDate.now(ZoneOffset.UTC).atStartOfDay(ZoneOffset.UTC).toInstant();
+        Instant to = Instant.now().plusSeconds(1);
+        UsageDeletionService.DeletionRequest request = deletions.create(TENANT, ADMIN, from, to);
+        long deleted = deletions.confirm(TENANT, request.id(), request.confirmToken()).deletedCount();
+        assertThat(deleted).as("删除必须真的删掉窗口内的行（否则本测试无判定力）").isEqualTo(WINDOW_EVENTS);
+
+        quotaEnforcement.evaluate();
+        System.out.println("[PH67] 2nd window: block rows after deletion=" + blockedRuleRows() + " detail=" + blockRows());
+
+        assertThat(blockedRuleRows()).as("窗口滚过一次之后删用量同样是'删除即解封'——#1316 在第二窗口原样复现").isEqualTo(1);
+    }
+
     // ------------------------------------------------------------------
     // helpers
     // ------------------------------------------------------------------
+
+    /** The rule was last touched two hours ago: the admin-edit escape must not fire here. */
+    private void ageRule() {
+        jdbc.update("UPDATE quota_rules SET updated_at = now() - interval '2 hours' WHERE id = :rule",
+                new MapSqlParameterSource("rule", RULE));
+    }
+
+    /** The window end the recorded verdict carries, i.e. when the block lets go by itself. */
+    private Instant blockedWindowEnd() {
+        Timestamp end = jdbc.queryForObject("SELECT window_end FROM quota_enforcement WHERE rule_id = :rule",
+                new MapSqlParameterSource("rule", RULE), Timestamp.class);
+        return end == null ? null : end.toInstant();
+    }
 
     /** A verdict row as the previous enforcement cycle would have left it. */
     private void seedRecordedBlock(Instant windowEnd, Instant blockedAt) {
