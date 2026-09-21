@@ -69,8 +69,9 @@ public class PlatformOidcAuthService {
      * observable there (#1300): {@code cancel(true)} on the future returned by
      * {@code sendAsync} closes the socket, while interrupting a virtual thread
      * parked on a {@code RestClient} read does not — measured against a peer that
-     * drips a body, the interrupted reader held its connection for the full 46 s of
-     * the run, until the JVM exited.
+     * drips a body, the abandoned connection was still open ≈45.5 s after the
+     * budget expired (1.09 s after the probe JVM's own teardown request), until
+     * that JVM exited.
      *
      * <p>
      * Redirects are not followed: the token and userinfo URIs are configured per
@@ -231,11 +232,14 @@ public class PlatformOidcAuthService {
      *
      * <p>
      * Abandoning the call must also release the socket, or every expired budget
-     * leaves one upstream connection and its reader behind for the life of the JVM.
-     * Measured: {@code cancel(true)} on the future from {@code sendAsync} closes
-     * the connection about a second after the budget expires, while the previous
-     * shape (a virtual thread parked on a blocking read, interrupted) left it open
-     * for the whole 46 s of the measurement, until the JVM exited.
+     * leaves an upstream connection behind for the life of the JVM. Measured on the
+     * peer: {@code cancel(true)} on the future from {@code sendAsync} closes the
+     * connection about a second after the budget expires (1.05 s), while the
+     * previous shape (a virtual thread parked on a blocking read, interrupted) left
+     * it open ≈45.5 s past the budget, until the JVM exited. Only the socket is
+     * measured — the peer cannot see threads; that the interrupted reader outlives
+     * the budget along with it follows from the same mechanism, it was not
+     * observed.
      *
      * <p>
      * An overrunning call is reported as {@code failureCode} — the same ASCII code
