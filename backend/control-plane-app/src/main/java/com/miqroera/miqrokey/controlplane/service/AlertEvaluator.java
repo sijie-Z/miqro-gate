@@ -81,11 +81,29 @@ public class AlertEvaluator {
             List<AlertRuleService.AlertRule> rules = jdbc.query("SELECT * FROM alert_rules WHERE enabled = TRUE",
                     new MapSqlParameterSource(), RULE_ROW_MAPPER);
             for (AlertRuleService.AlertRule rule : rules) {
-                evaluate(rule);
+                // #1168: one sick rule must not abort the cycle — the remaining
+                // rules are still evaluated, and the failure is logged with its
+                // ruleId (the debugging anchor).
+                try {
+                    evaluate(rule);
+                } catch (Exception e) {
+                    LOG.warn("Alert rule evaluation failed (ruleId={}, type={}): {}", rule.id(), rule.type(),
+                            e.getMessage(), e);
+                }
             }
+        } catch (Exception e) {
+            // Only the rule query itself can still land here — nothing was
+            // evaluated, but the due-retry sweep below must not be skipped.
+            LOG.warn("Alert evaluation cycle failed", e);
+        }
+        // #1168: the due-retry sweep runs whatever happened in the evaluation
+        // stage — a sick rule postponing every armed retry would widen its fault
+        // to all alert delivery. Order unchanged (evaluate first, sweep after);
+        // a sweep failure gets its own WARN instead of killing the cycle.
+        try {
             dispatcher.retryDue();
         } catch (Exception e) {
-            LOG.warn("Alert evaluation cycle failed", e);
+            LOG.warn("Alert retry sweep failed", e);
         }
     }
 
