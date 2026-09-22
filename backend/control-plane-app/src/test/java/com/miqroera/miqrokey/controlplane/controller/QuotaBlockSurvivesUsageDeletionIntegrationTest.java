@@ -74,8 +74,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>
  * {@link #staleVerdictIsDroppedOnceItsWindowHasEnded()}、
  * {@link #recordedWindowEndAdvancesWhileTheRuleStaysExceeded()} 与
- * {@link #usageDeletionInTheNextWindowStillCannotLiftAContinuousBlock()} 需要 {@code observed_used}
- * 这一列（V73），在改前的 schema 上跑不起来——它们不是"改前会红"，是"改前不存在"。
+ * {@link #usageDeletionInTheNextWindowStillCannotLiftAContinuousBlock()} 需要
+ * {@code observed_used} 这一列（V73），在改前的 schema 上跑不起来——它们不是"改前会红"，是"改前不存在"。
  * </p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
