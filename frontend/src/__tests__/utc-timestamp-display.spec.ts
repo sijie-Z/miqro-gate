@@ -43,15 +43,6 @@ function isComment(line: string): boolean {
  * `[file, snippet]` so the entry dies if the line moves or is rewritten.
  */
 const SLICES_AN_API_VALUE_ON_PURPOSE: Array<[string, string]> = [
-  ['NextAdminDeletionsView.vue', "(asDeletion(row).periodFrom ?? '').slice(0, 10)"],
-  ['NextAdminDeletionsView.vue', "(asDeletion(row).periodTo ?? '').slice(0, 10)"],
-  // These two views take the period as free-text ISO (`起始时间（ISO）`, default
-  // `2026-08-01T00:00:00Z`) and send the typed string verbatim as the API
-  // parameter. The row therefore echoes the operator's *own* text, in the
-  // operator's own notation, matching the input directly above it. Converting
-  // only the echo would make the row disagree with the field that produced it.
-  ['NextAdminExportsView.vue', '(row as ExportTask).periodFrom?.slice(0, 10)'],
-  ['NextAdminExportsView.vue', '(row as ExportTask).periodTo?.slice(0, 10)'],
   // A download filename, not a rendered timestamp: `cache-roi-2026-09-01_….csv`.
   // The window inside it is the report's own UTC range, so the name is stable
   // for a given report regardless of who downloads it.
