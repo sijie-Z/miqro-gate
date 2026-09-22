@@ -39,10 +39,25 @@ public interface McpServiceRepository {
     McpService updateStatus(UUID tenantId, UUID serviceId, String status);
 
     /**
-     * Replaces the full row (status switch and admin edits with optimistic lock;
+     * Replaces the whole row (status switch and admin edits with optimistic lock;
      * health telemetry goes through {@link #updateHealth}).
+     *
+     * <p>
+     * Named {@code replace} on purpose (#1152): the {@code SET} clause must write
+     * <em>all mutable columns owned by this method</em>. A deliberately narrow
+     * write gets a purpose-named method ({@code updateStatus},
+     * {@code updateHealth}, {@code updateBackendAuth}) instead — so "the name says
+     * full replace but the SQL silently drops a column" stops being possible to
+     * miss in review.
+     *
+     * <p>
+     * "Owned by this method" is the operative phrase, not "every column in the
+     * table": the backend-credential columns ({@code backend_auth_mode},
+     * {@code backend_secret_*}) are <em>intentionally</em> owned by
+     * {@link #updateBackendAuth} — credential ciphertext never enters this record.
+     * Adding a new <em>ordinary</em> configuration column means adding it here.
      */
-    McpService update(McpService service, long expectedVersion);
+    McpService replace(McpService service, long expectedVersion);
 
     /**
      * Sets the upstream backend authentication (#320): {@code API_KEY} with an

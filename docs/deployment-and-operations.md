@@ -81,7 +81,7 @@ Micrometer/Prometheus 指标至少包括：
 
 - 镜像使用明确语义版本和 digest。
 - Flyway migration 向前执行，破坏性迁移必须拆成 expand/migrate/contract。
-- 升级前自动检查备份新鲜度。
+- **升级前必须人工确认备份新鲜度——系统不自动检查**：唯一的升级入口 `deploy/deploy.sh`（见 §8.1）和升级前门禁 `deploy/preflight/miqrokey-migration-preflight.sh` 都不读备份；口径是 §7 的「最近一次成功备份距今不超过 26 小时」，做法见 operations-runbook §9b.1 与 §9b.5。没有 undo 迁移，回滚只能靠升级前的备份。
 - Gateway 和 Control Plane 可分别滚动升级；Docker Compose 首版允许短暂控制面维护，但尽量不影响在途推理。
 - 供应商签名目录可独立更新和回滚。
 

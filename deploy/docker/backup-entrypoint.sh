@@ -23,7 +23,11 @@ while true; do
     if bash /opt/miqrokey/backup/miqrokey-backup.sh; then
       echo "[backup] $(date) done"
     else
-      echo "[backup] $(date) FAILED rc=$? (webhook notification handled by the script)"
+      # Save the status before anything else runs: the $(date) below is a
+      # command substitution and would overwrite $? with its own, so a failed
+      # dump, a failed retention pass and a failed notification all read rc=0.
+      rc=$?
+      echo "[backup] $(date) FAILED rc=$rc (webhook notification handled by the script)"
     fi
   fi
   sleep 60

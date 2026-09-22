@@ -181,9 +181,14 @@ public class PlatformOidcAuthService {
         SessionToken tokens = sessionService.createSession(user);
         Instant sessionExpires = Instant.now().plus(authProperties.getSessionAbsoluteTimeout());
         sessionService.setCookies(response, tokens, sessionExpires);
+        // #1382: `sub` is third-party data from the IdP userinfo response and the
+        // idp code is configuration. Both were spliced into the summary by hand,
+        // so a control character in either made the summary non-JSON and the
+        // ::jsonb round-trip in AuditServiceImpl rejected it. This runs after
+        // createSession/setCookies, so that failure left a real session with no
+        // OAUTH_LOGIN/OAUTH_PROVISION row. Serialize instead of splicing.
         auditService.record(tenantId, user.id(), provisioned ? "OAUTH_PROVISION" : "OAUTH_LOGIN", "USER", user.id(),
-                "{\"idp\":\"" + safeJson(authProperties.getPlatformOidcIdpCode()) + "\",\"sub\":\""
-                        + safeJson(identity.sub()) + "\"}",
+                AuditSummaries.summary("idp", authProperties.getPlatformOidcIdpCode(), "sub", identity.sub()),
                 request.getHeader("X-Request-Id"));
         return "/app/keys";
     }
@@ -531,13 +536,6 @@ public class PlatformOidcAuthService {
 
     private static boolean blank(String v) {
         return v == null || v.isBlank();
-    }
-
-    private static String safeJson(String v) {
-        if (v == null) {
-            return "";
-        }
-        return v.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     private record OidcIdentity(String sub, String username, String nickname) {

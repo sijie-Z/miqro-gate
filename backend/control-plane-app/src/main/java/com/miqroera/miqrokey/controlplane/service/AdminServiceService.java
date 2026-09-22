@@ -112,7 +112,7 @@ public class AdminServiceService {
                 checkPath != null && !checkPath.isBlank() ? checkPath : service.checkPath());
         InternalService saved;
         try {
-            saved = serviceRepository.update(updated, service.version());
+            saved = serviceRepository.replace(updated, service.version());
         } catch (OptimisticLockingFailureException e) {
             throw new ApiException(HttpStatus.CONFLICT, "SERVICE_STATE_CONFLICT", "并发状态变更，请刷新后重试。");
         }

@@ -26,6 +26,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -571,6 +572,46 @@ class ModelApprovalApiIntegrationTest {
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("PARAM_INVALID"));
     }
 
+    @Test
+    @DisplayName("the cursor walk returns a whole sub-millisecond burst (#1392)")
+    void queuePaginationReturnsRowsInsideOneMillisecond() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        UUID keyId = createKey(MODEL_A);
+
+        // Four requests in one millisecond — 500us, 400us, 300us, 200us past the
+        // second. `Instant.now()` under concurrent submits produces exactly this,
+        // and `created_at` is a timestamptz, so PostgreSQL keeps the microseconds.
+        Instant base = Instant.parse("2026-06-01T00:00:00.000500Z");
+        List<UUID> expected = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            expected.add(insertPendingApproval(keyId, "burst-" + i, base.minusNanos(i * 100_000L)));
+        }
+
+        // Walk the queue the way the approval console does: size=1 plus whatever
+        // nextCursor came back, until the server stops offering one.
+        List<String> seen = new ArrayList<>();
+        String before = null;
+        for (int page = 0; page < 10; page++) {
+            Map<?, ?> body = page("/api/v1/admin/model-approvals?status=PENDING&size=1"
+                    + (before == null ? "" : "&before=" + before));
+            for (Object item : (List<?>) body.get("items")) {
+                seen.add((String) ((Map<?, ?>) item).get("id"));
+            }
+            Object next = body.get("nextCursor");
+            if (next == null) {
+                break;
+            }
+            before = (String) next;
+        }
+
+        // A millisecond-truncating cursor dropped three of the four: the walk
+        // returned page 1, skipped past the rows still inside that millisecond and
+        // reported no next page at all.
+        assertThat(seen).as("every PENDING row must be handed out exactly once")
+                .containsExactlyInAnyOrderElementsOf(expected.stream().map(UUID::toString).toList());
+    }
+
     // ------------------------------------------------------------------
     // tenant isolation
     // ------------------------------------------------------------------
@@ -632,6 +673,25 @@ class ModelApprovalApiIntegrationTest {
 
     private Long approvalCount() {
         return jdbc.queryForObject("SELECT count(*) FROM model_approval", new MapSqlParameterSource(), Long.class);
+    }
+
+    /**
+     * A PENDING approval written straight to the table at an exact
+     * {@code created_at}. Going through the API would stamp the row with
+     * {@code Instant.now()}, and the #1392 regression is about timestamps that only
+     * differ below the millisecond.
+     */
+    private UUID insertPendingApproval(UUID keyId, String modelId, Instant createdAt) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO model_approval (id, tenant_id, virtual_key_id, model_id, requested_by, status, version,
+                                            created_at, updated_at)
+                VALUES (:id, :tenantId, :keyId, :modelId, :requestedBy, 'PENDING', 0, :createdAt, :createdAt)
+                """,
+                new MapSqlParameterSource("id", id).addValue("tenantId", fx.tenantId).addValue("keyId", keyId)
+                        .addValue("modelId", modelId).addValue("requestedBy", fx.userId)
+                        .addValue("createdAt", Timestamp.from(createdAt)));
+        return id;
     }
 
     /** Row count for a statement parameterised on the key/model pair under test. */

@@ -5,6 +5,12 @@
 # migration is known to fail, so the gate happens BEFORE the control plane
 # starts instead of as a crash loop after it.
 #
+# Scope: database state only — V70's index and duplicate reversals. It does NOT
+# check backup freshness, and neither does any other part of the upgrade path
+# (deploy/deploy.sh has no backup awareness at all). Confirming that a recent
+# backup exists before upgrading is a manual step: see
+# docs/deployment-and-operations.md §8 and docs/operations-runbook.md §9b.5 (#1414).
+#
 #   deploy/preflight/miqrokey-migration-preflight.sh [--print-sql]
 #
 # Connection comes from the same variables as the backup scripts:

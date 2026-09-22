@@ -268,6 +268,7 @@ UPDATE projects p SET project_tag = g.tag || '-' || g.rn
 
 - **不要改动任何已进入共享环境的迁移文件**：改一个字节就是校验和变化，所有已升级的库下次启动都会 `validate` 失败。修复只能靠**追加新迁移**或本节的人工处置。
 - **没有 undo / 回滚迁移**：回滚 = 用 §10 的备份恢复到升级前状态。升级前先完成备份。
+  恢复到**线上那个已有库**时必须走 `miqrokey-restore.sh --replace <备份> <库名>`（先把目标库 DROP 再重建，因为 `pg_restore` 会重建每一个对象，撞上已存在的对象就整笔回滚；#1423）。不带 `--replace` 的恢复只接受**空库**，目标库非空时脚本在 pre-flight 直接拒绝并说明怎么改。`--replace` 需要该角色有 `CREATEDB` 权限，并会强制断开目标库上的活动连接——推荐顺序仍是**先停控制面与 Gateway，再回滚，最后启动**。对象级明细与实测见 §10。
 - 处置前先备份；处置后确认 `flyway_schema_history` 的最大已应用版本符合预期，且 `SELECT * FROM flyway_schema_history WHERE success = false` 为空。
 - 本节结论的实测环境：PostgreSQL 17.11 + Flyway 12.4.0（与 `backend/` 的 Spring Boot 4.1.1 BOM 同版本）。
 - 本节各条「实测」的复现方式（在**本地** PG 17 容器上，逐条命令与原始输出见 #1249 与 PR #1288 的复现记录）：
@@ -426,8 +427,9 @@ Master key 丢失无法从数据库恢复真实凭证；使用受保护备份恢
 |---|---|
 | `miqrokey-backup.sh` | pg_dump(custom) → gzip → AES-256-CBC(PBKDF2 200k) → `<BACKUP_PATH>/miqrokey-<UTC 时间戳>.sql.gz.enc` + SHA-256 manifest；保留（#438）：最新 `DAILY_KEEP` 个日备份（默认 7）+ 其余中每 ISO 周（周一起）最新 1 个、至多 `WEEKLY_KEEP` 周（默认 4）——同一次备份只计一次，其余连 manifest 剪除；失败不残留半成品。成功/失败经 Webhook（可选 HMAC-SHA256 签名 `X-MiQroKey-Signature: sha256=...`）通知 |
 | `miqrokey-verify.sh <file>` | 校验 manifest + 解密干跑（`pg_restore --list`），不触碰任何库 |
-| `miqrokey-restore.sh <file> [target-db]` | 校验 manifest → 解密 → `pg_restore --exit-on-error --single-transaction`（**单事务原子恢复**：#438，中途失败整体回滚、目标库不留半程状态）；恢复前目标库必须存在 |
-| `test-restore.sh` | 真实恢复演练：双 Postgres 容器 → 播种 1000 行 → 真备份 → 校验 → 恢复 → 行数一致断言（已验证 PASS） |
+| `miqrokey-restore.sh <file> [target-db]` | 校验 manifest → 解密 → `pg_restore --exit-on-error --single-transaction`（**单事务原子恢复**：#438，中途失败整体回滚、目标库不留半程状态）。恢复前目标库必须存在，且**必须为空**（`pg_restore` 会重建每个对象，非空库上必然在第一个对象失败）；非空时脚本在 pre-flight 拒绝并提示改用 `--replace` |
+| `miqrokey-restore.sh --replace <file> <target-db>` | **灾难回滚模式**（#1423）：先 `DROP DATABASE ... WITH (FORCE)` 再按原 owner/encoding/collation 从 `template0` 重建，然后恢复——这是 §9b.5「回滚 = 恢复到升级前状态」能落地的唯一路径。破坏性：必须显式给出库名（绝不从 URL 默认值推断）、需要 `MIQROKEY_RESTORE_CONFIRM=yes`、拒绝作用于 `postgres/template0/template1`，且该角色要有 `CREATEDB` 权限 |
+| `test-restore.sh` | 真实恢复演练：双 Postgres 容器 → 播种 1000 行 → 真备份 → 校验 → 恢复 → 行数一致断言；**再加回滚腿**：先删光目标表数据（schema 完好，即真实灾难形态）→ 断言不带 `--replace` 的恢复被拒且目标库未被改动 → 断言 `--replace` 把 1000 行原样找回（已验证 PASS） |
 | `test-retention.sh` | 保留语义夹具测试（无 Docker）：日历周精确保留集（20 → 10：最新 7 日 + W36/W35/W34 各 1）+ 幂等 + 失败零残留断言（已验证 PASS） |
 | `test-retention-webhook.sh` | 保留上限与 Webhook 签名通知测试（已验证 PASS） |
 
@@ -443,6 +445,7 @@ Master key 丢失无法从数据库恢复真实凭证；使用受保护备份恢
 ### 恢复演练要求
 
 - 每季度至少一次 `test-restore.sh` 或对最新备份执行 `verify + restore` 到隔离实例。
+- **演练的目标库必须是「非空」的那种**才算覆盖回滚路径：恢复到空库只验证了备份本身能不能解开，验证不了出事时那条路（#1423）。`test-restore.sh` 现在两条腿都跑。
 - 上面这三个 `test-*.sh` 是**人工演练脚本，未接入 CI**（它们要起真实 Postgres 容器，属于季度演练而非每次提交的闸门）。**别把「已验证 PASS」读成「每次提交都会跑」**——这里的 PASS 是人工执行、记录在案的结果。
 - 备份加密密钥离线/分离保管；`restore` 与 `verify` 均强校验 SHA-256 manifest。
 

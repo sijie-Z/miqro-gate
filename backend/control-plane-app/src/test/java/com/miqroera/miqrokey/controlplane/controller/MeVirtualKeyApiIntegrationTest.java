@@ -366,6 +366,53 @@ class MeVirtualKeyApiIntegrationTest {
                 .andExpect(jsonPath("$.code").value("KEY_NOT_RENAMEABLE"));
     }
 
+    /**
+     * #1382 (same family): {@code VirtualKeyService} built its change summary with
+     * a private {@code escapeJson} that handled {@code \}, {@code "} and the three
+     * short escapes but left every OTHER control character raw. A JSON body may
+     * carry a form-feed escape, which Jackson decodes to a real U+000C control
+     * character; nothing in the request validation rejects it, and {@code sanitize}
+     * only rewrites quotes and line breaks — so the raw byte reached the
+     * {@code ::jsonb} cast in {@code AuditServiceImpl.record}. The create then
+     * threw and rolled back instead of creating the key, i.e. a key name decided
+     * whether the audited action happened at all.
+     *
+     * <p>
+     * The control character is built with {@code (char) 0x0C} rather than written
+     * as a backslash-u source escape: the lexer expands those before parsing, which
+     * would put a raw control byte in this file.
+     * </p>
+     */
+    @Test
+    @DisplayName("a control character in the key name does not break the audit summary (#1382)")
+    void controlCharacterInNameIsAudited() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+
+        String name = "ctrl" + (char) 0x0C + "name";
+        MvcResult created = postJson("/api/v1/me/virtual-keys",
+                Map.of("name", name, "projectId", fx.projectId, "providerProductId", fx.productId, "credentialGrantId",
+                        fx.grantId, "purpose", "CLAUDE_CODE", "allowedModels", List.of(MODEL_A)))
+                .andExpect(status().isCreated()).andReturn();
+        UUID keyId = UUID.fromString(
+                (String) objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id"));
+
+        assertThat(jdbc.queryForObject("SELECT name FROM virtual_keys WHERE id = :id",
+                new MapSqlParameterSource("id", keyId), String.class))
+                .as("the name is stored verbatim, control character included").isEqualTo(name);
+
+        // Read back through ::text and parse it: the summary must be a JSON
+        // document that round-trips the name, not a splice that happens to hold the
+        // right bytes.
+        String summary = jdbc.queryForObject(
+                "SELECT change_summary::text FROM admin_audit_events WHERE action = 'VIRTUAL_KEY_CREATE' "
+                        + "AND target_id = :id",
+                new MapSqlParameterSource("id", keyId), String.class);
+        Map<?, ?> parsed = objectMapper.readValue(summary, Map.class);
+        assertThat(parsed.get("name")).as("the audited name is the decoded value").isEqualTo(name);
+        assertThat(parsed.get("purpose")).isEqualTo("CLAUDE_CODE");
+    }
+
     @Test
     @DisplayName("disable/rename on an unknown key is a uniform 404")
     void disableAndRenameUnknownKeyAre404() throws Exception {

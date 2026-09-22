@@ -483,6 +483,64 @@ class VirtualKeyAuthContractTest {
         }
 
         @Test
+        @DisplayName("wire protocol is part of the key: a chat-cached answer never replays into /v1/messages (#1236)")
+        void wireProtocolIsPartOfTheKey() throws InterruptedException {
+            // Prime the cache through the OpenAI chat endpoint. The body is a
+            // plain chat body whose semantic scope (system + last user message)
+            // is extracted from the bytes alone, so the same bytes sent to a
+            // different endpoint used to produce one shared cache key (#1236).
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
+            String body = """
+                    {"model":"gpt-4o-mini","messages":[{"role":"user","content":"cache probe 1236 cross protocol"}]}""";
+            webTestClient.post().uri("/v1/chat/completions").header(CacheEligibility.CACHEABLE_HEADER, "1")
+                    .bodyValue(body).exchange().expectStatus().isOk().expectHeader()
+                    .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss");
+            awaitCacheFill();
+
+            // The same bytes through the Anthropic endpoint: the wire protocol
+            // decides the response shape — #444's argument one level up — so
+            // this must MISS and fetch its own Anthropic-shaped answer.
+            // Replaying the OpenAI-shaped first response would hand an
+            // Anthropic client a body it cannot parse.
+            String anthropicShaped = "{\"id\":\"msg_1236\",\"type\":\"message\",\"role\":\"assistant\","
+                    + "\"content\":[{\"type\":\"text\",\"text\":\"pong\"}],\"stop_reason\":\"end_turn\"}";
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(anthropicShaped).build());
+            byte[] second = webTestClient.post().uri("/v1/messages").header(CacheEligibility.CACHEABLE_HEADER, "1")
+                    .bodyValue(body).exchange().expectStatus().isOk().expectHeader()
+                    .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss").expectBody().returnResult()
+                    .getResponseBody();
+
+            assertThat(new String(second, StandardCharsets.UTF_8)).isEqualTo(anthropicShaped);
+            assertThat(mockProvider.getCapturedRequests()).hasSize(2);
+        }
+
+        @Test
+        @DisplayName("same endpoint still hits: the protocol dimension does not disable the cache (#1236)")
+        void sameProtocolStillHits() throws InterruptedException {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
+
+            String body = """
+                    {"model":"gpt-4o-mini","messages":[{"role":"user","content":"cache probe 1236 same protocol"}]}""";
+            webTestClient.post().uri("/v1/messages").header(CacheEligibility.CACHEABLE_HEADER, "1").bodyValue(body)
+                    .exchange().expectStatus().isOk().expectHeader()
+                    .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss");
+            awaitCacheFill();
+
+            // The same bytes to the same endpoint: still an L1 hit — the new
+            // key dimension must not cost the cache its hits (#1236 guard).
+            webTestClient.post().uri("/v1/messages").header(CacheEligibility.CACHEABLE_HEADER, "1").bodyValue(body)
+                    .exchange().expectStatus().isOk().expectHeader()
+                    .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "L1");
+
+            // Exactly one upstream exchange: the second request was served from
+            // the cache.
+            assertThat(mockProvider.getCapturedRequests()).hasSize(1);
+        }
+
+        @Test
         @DisplayName("cache I/O runs on the bounded scheduler, never on the event loop (#444)")
         void cacheIoRunsOffTheEventLoop() throws Exception {
             mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)

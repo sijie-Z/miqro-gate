@@ -22,25 +22,30 @@ import java.util.Set;
  *
  * <p>
  * Key = SHA-256 of
- * {@code tenantId|projectId|virtualKeyId|productId|model|purpose|format|gen|scope}
+ * {@code tenantId|projectId|virtualKeyId|productId|model|purpose|format|family|gen|scope}
  * where {@code format} is {@code stream=1/0} (a streamed SSE response must
- * never replay into a buffered JSON request, or vice versa — #444), {@code gen}
- * is a fingerprint of the output-shaping generation parameters present in the
- * body (temperature / top_p / top_k / token budgets / stop sequences /
- * penalties / logprobs / reasoning effort / thinking budget / … — chat bodies
- * keep only the conversation scope below, so these must be an explicit key
- * dimension or two requests that differ only in sampling configuration would
- * share one entry — see {@link #GENERATION_FIELDS} for the exact list and why
- * every protocol's spelling of a knob has to be listed, nested object spellings
- * such as the Responses {@code text} / {@code reasoning} included), and
- * {@code scope} is the <em>semantic scope</em> of the conversation: the system
- * prompt plus the <b>last user message</b> (aligned with Tencent's "latest user
- * message" and Higress's GJSON content extraction — see
- * docs/ai-gateway-comparison.md). The system part covers chat {@code system}
- * messages, the Anthropic top-level {@code system} field, and the OpenAI
- * Responses {@code instructions} field; earlier conversation turns do not
- * change the key, so a repeated question inside different histories still hits
- * the cache.
+ * never replay into a buffered JSON request, or vice versa — #444),
+ * {@code family} is the wire protocol family of the endpoint that received the
+ * request ({@code OPENAI_CHAT_COMPLETIONS} / {@code ANTHROPIC_MESSAGES} /
+ * {@code OPENAI_RESPONSES}) — one and the same body sent to two endpoints
+ * yields two different response shapes, so a family-blind key replays a chat
+ * answer into a messages client — #444's argument one level up (#1236),
+ * {@code gen} is a fingerprint of the output-shaping generation parameters
+ * present in the body (temperature / top_p / top_k / token budgets / stop
+ * sequences / penalties / logprobs / reasoning effort / thinking budget / … —
+ * chat bodies keep only the conversation scope below, so these must be an
+ * explicit key dimension or two requests that differ only in sampling
+ * configuration would share one entry — see {@link #GENERATION_FIELDS} for the
+ * exact list and why every protocol's spelling of a knob has to be listed,
+ * nested object spellings such as the Responses {@code text} /
+ * {@code reasoning} included), and {@code scope} is the <em>semantic scope</em>
+ * of the conversation: the system prompt plus the <b>last user message</b>
+ * (aligned with Tencent's "latest user message" and Higress's GJSON content
+ * extraction — see docs/ai-gateway-comparison.md). The system part covers chat
+ * {@code system} messages, the Anthropic top-level {@code system} field, and
+ * the OpenAI Responses {@code instructions} field; earlier conversation turns
+ * do not change the key, so a repeated question inside different histories
+ * still hits the cache.
  * </p>
  *
  * <p>
@@ -121,8 +126,15 @@ public final class CacheKeyFactory {
     /**
      * Computes the cache key. Chat-shaped bodies use the semantic scope (system +
      * last user message); anything else falls back to the full normalized body.
+     *
+     * @param wireProtocol
+     *            the wire protocol family of the endpoint that received the request
+     *            (derived from the path, see
+     *            {@code ProxyController#wireProtocolOf}) — the response body shape
+     *            follows the endpoint, so the family is a key dimension of its own
+     *            (#1236).
      */
-    public CacheKey compute(AuthContext ctx, String modelName, byte[] body) {
+    public CacheKey compute(AuthContext ctx, String modelName, byte[] body, String wireProtocol) {
         // Hot path: the body is already buffered by the caller and is never
         // mutated here, so it is parsed exactly once and the tree is shared by
         // every key dimension. Parsing per dimension made this method the most
@@ -133,7 +145,8 @@ public final class CacheKeyFactory {
         String canonical = ctx.tenantId() + "|" + ctx.projectId() + "|" + ctx.key().keyId() + "|" + ctx.productId()
                 + "|" + (modelName == null ? "" : modelName) + "|"
                 + (ctx.key().purpose() == null ? "" : ctx.key().purpose()) + "|"
-                + (streamFlag(root) ? "stream=1" : "stream=0") + "|" + generationFingerprint(root) + "|" + normalized;
+                + (streamFlag(root) ? "stream=1" : "stream=0") + "|" + "family="
+                + (wireProtocol == null ? "" : wireProtocol) + "|" + generationFingerprint(root) + "|" + normalized;
         return CacheKey.from(sha256(canonical.getBytes(StandardCharsets.UTF_8)));
     }
 

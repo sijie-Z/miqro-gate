@@ -1,9 +1,34 @@
 # ADR-0021：同产品凭证回退——多凭证切换与「每笔唯一归属」的兼容设计
 
 - 日期：2026-09-18
-- 状态：**Proposed（待所有者拍板）**——本 ADR 只给出决策点、选项、代价与建议，**不含任何已实施的代码**。文中的「建议」「推荐」均为**待 owner 裁决的提案**，不是既成结论。本文件若被 owner 否决，记录的价值等同：issue #717 允许「不做」也是有效产出。
-- 效力（仅在被 Accepted 后生效）：将修订 [CLAUDE.md](../../CLAUDE.md) §2「不自动故障切换」与 [architecture.md](../architecture.md) 的「禁止跨供应商或跨真实凭证故障切换」。**修订范围严格限定为：同一供应商产品内、首字节前、凭证级的显式回退**。跨供应商/跨产品的自动路由与故障切换维持红线不变（feature-backlog F46 维持 DECLINED）。
+- 状态：**Accepted（有条件）——2026-09-22 owner 拍板「有条件采纳」**，条件见 §0。**本文其余章节保留提出时的提案原文与论证，不代表已被逐条实现、更不代表其中的选项取舍已全部生效**；实现跟踪见 issue #704（ADR 先行）。
+- 效力（经 §0 条件限定后生效）：将修订 [CLAUDE.md](../../CLAUDE.md) §2「不自动故障切换」与 [architecture.md](../architecture.md) 的「禁止跨供应商或跨真实凭证故障切换」。**修订范围严格限定为：同一供应商产品内、首字节前、凭证级的显式回退**。跨供应商/跨产品的自动路由与故障切换维持红线不变（feature-backlog F46 维持 DECLINED）。**该修订尚未执行**，见 §0 末尾的待决项。
 - 关联：issue #717（本 ADR 的提出）、issue #704（实现跟踪，**ADR 先行**）；[ADR-0002](0002-transparent-proxy.md)（透明代理——本议题不改写请求内容）；[ADR-0018](0018-single-key-multi-project.md)（key×project 多绑定，`grant_id` 的来源）；[ADR-0020](0020-quota-soft-landing.md)（opt-in + 默认关闭的取舍风格、配额判定集）；feature-backlog F46（跨供应商切换，DECLINED）/ F50（多服务绑定，ADR）；[ai-gateway-comparison](../ai-gateway-comparison.md) §「多 Key 均衡/Key 池轮询」；[operations-runbook](../operations-runbook.md) §5（供应商故障处置）；[bill-reconciliation-contract](../bill-reconciliation-contract.md)（F19 对账）；V1/V6/V8/V57（见 §1.3）、V9/V64/V67（见 §2-Q4、§2-Q2 与 §4）。
+
+---
+
+## 0. 采纳条件（owner 2026-09-22 拍板）
+
+方向**采纳**，但**范围与不变量先钉死**，满足后才进入实现：
+
+- **首期只允许「同供应商 + 同 product/model 兼容池内」的显式回退。**
+  **不**放开跨供应商语义切换（`DeepSeek → Kimi`、`DeepSeek → GLM`）—— **跨供应商 fallback 另开 ADR。**
+  > **「兼容池」的判定谓词尚未定义**（同 product 不同 model / model alias 不同 / capability 不同 /
+  > 同 `provider_product` 下多个 model —— 哪些算同一个池？）。它在**本 ADR 里只是自然语言约束**；
+  > 具体 predicate 属 **#704 实现设计**，必须在实现时形成**确定的判定函数并写入测试**，
+  > 否则这条硬条件无法被机器检验（review #1365 的 P3）。
+- `virtual_key_id`、`project_id`、`gateway_request_id` **在整条 fallback 链中不变**。
+- **每一次 credential attempt 都有自己的可追踪记录** —— 不能最后只留下「这次请求用了 credential C」。
+  否则出现「第一次 credential A 已发出请求 → 上游有无计费不确定 → 第二次换 credential B 成功」时，
+  **根本无法做可信对账**。
+- 不改变 tenant / project / key 归属；**不能绕过 quota**。
+- 成功 / 失败的**计量规则明确**；全部 credential 失败时的行为**固定**。
+- **默认关闭。**
+
+### 待决（本 ADR 未覆盖，需 owner 另行拍板）
+
+上一条「效力」要求修订 `CLAUDE.md` §2「不自动故障切换」与 `architecture.md` 的相应表述。
+**该修订尚未执行** —— 是否按本 ADR 的限定范围落地，待 owner 明确（未拍板前，`CLAUDE.md` 的红线原样有效）。
 
 ---
 
@@ -64,7 +89,7 @@
 | 「首字节前最多重试一次……**真实凭证只在第一次尝试前解析一次，重试复用同一凭证**」 | `architecture.md:159` | **直接冲突（第二条被遗漏的红线）**：该句字面规定了「重试复用同一凭证」，正是本 ADR 要改的语义。它与 `:161` 是**并列的两条**，owner 只看 `:161` 不足以覆盖本条 |
 | 「不做供应商之间的自动路由、负载均衡或故障切换」 | `product-requirements.md:27` | **不冲突**：限定词是「供应商**之间**」。同产品内凭证回退不在其字面范围内 |
 | 「上游业务错误原样返回，不跨凭证/产品自动重试」 | `provider-adapter-contract.md:126` | **冲突**，需修订为「不跨产品；是否跨凭证由本 ADR 决定」 |
-| 「网络连接建立前且请求体尚未发送时，可按统一策略进行一次安全重试；流式开始或非幂等请求发送后禁止重试」 | `provider-adapter-contract.md:127` | **支持本 ADR 的一条授权基础**：回退正是「请求体已发送前」的安全重试在同一产品内的有序扩展。**本 ADR 明确不动这一行**——它与 `architecture.md:159` 的幂等性论证是同一来源 |
+| 「重试窗口以**首字节**为界，**不以「请求体是否已送达」为界**：尚未观察到上游首字节、且失败属连接阶段错误（非任何超时）时，可按统一策略进行一次安全重试；一旦出首字节（流式与非流式）即禁止重试」 | `provider-adapter-contract.md:127` | **支持本 ADR 的一条授权基础**：回退正是「首字节前」的安全重试在同一产品内的有序扩展。**本 ADR 明确不动这一行**——它与 `architecture.md:159` 的幂等性论证是同一来源。（**引文已被 #1387 重述，本行随之更新**：原文为「网络连接建立前且请求体尚未发送时……流式开始或非幂等请求发送后禁止重试」，比 `CLAUDE.md:36` 的产品决策更严、且代码里没有实现对应。授权关系不因这次重述改变：`:127` 约束的仍是同一件事——首字节前的安全重试——本 ADR 也仍然不改它。） |
 | 「供应商故障不自动切换」 | `provider-adapter-contract.md:128`、`operations-runbook.md:99` | **不冲突**：两者都指**跨供应商**；同产品回退是另一层 |
 | 「Adapter 的后台失败只标记能力陈旧，**不自动吊销凭证**」 | `provider-adapter-contract.md:125` | **支持本 ADR 的一条约束**：切换不得伴随自动吊销/自动禁用凭证 |
 | 「Higress 多 Key 均衡/Key 池轮询——**刻意不采纳**（1:1 固定绑定；**Key 池轮询破坏审计映射**）」 | `ai-gateway-comparison.md:93` | **必须正面回答的反对理由之一**。注意其否决对象是**轮询/均衡**（无差别的选择），而回退是**有明确触发条件与固定顺序**的选择——§3 的「方案 C 的正面复用说明」正是对它的正面回答 |
@@ -84,7 +109,9 @@
 
 ## 2. 决策点（逐条回答 #717 的六问）
 
-> 本节每条给出**问题 → 现状 → 建议结论 → 理由 → 备选**。所有「建议结论」待 owner 拍板。
+> 本节每条给出**问题 → 现状 → 建议结论 → 理由 → 备选**，是**提出时的论证记录**。
+> 其中的「建议结论」若与 §0 的 owner 拍板条件冲突，**一律以 §0 为准**；写成「待 owner 拍板」的地方
+> 不表示今天仍未决——**当前未决项只有 §0 末尾那一处**（`CLAUDE.md` / `architecture.md` 的修订）。
 
 ### Q1 审计锚点：`credential_id` 记首次还是最终？多次尝试要不要各记一行？
 
@@ -260,7 +287,7 @@
 
 - **必须改写（红线/冲突句，需 owner 逐字同意）**：`CLAUDE.md:36`、`architecture.md:159`、`architecture.md:161`（**三处并列，缺一处即内部自相矛盾**）、`provider-adapter-contract.md:126`（「不跨凭证/产品自动重试」）、`ai-gateway-comparison.md:33`（对标表结论行）。
 - **仅需补注（不改结论）**：`ai-gateway-comparison.md:93/94/123`（补「已由 ADR-0021 收窄到同产品凭证级」）、`tencent-ai-gateway-mapping.md:22`（第 13 行状态由「冲突」改为记录本 ADR 结论）、`feature-backlog.md:109`（F46 维持 DECLINED，补注「同产品凭证回退已由 ADR-0021 单独裁决」）、`operations-runbook.md` §5、`api-contract.md`、`configuration-reference.md`。
-- **明确不改**：`provider-adapter-contract.md:127`（首字节前安全重试——本 ADR 的**授权基础**）、`:128`、`:125`、`product-requirements.md:27`、`product-requirements.md:33`、`CLAUDE.md:35`。**把 `:127` 列入「必须改写」是错误**：它约束的正是本 ADR 想扩展的那条安全重试，改写它反而会削弱授权基础。
+- **明确不改**：`provider-adapter-contract.md:127`（首字节前安全重试——本 ADR 的**授权基础**；该行措辞已由 #1387 对齐到实测窗口，见 §1.4 与 `architecture.md:159` 的风险披露——本 ADR 依旧不动它）、`:128`、`:125`、`product-requirements.md:27`、`product-requirements.md:33`、`CLAUDE.md:35`。**把 `:127` 列入「必须改写」是错误**：它约束的正是本 ADR 想扩展的那条安全重试，改写它反而会削弱授权基础。
 
 **风险与缓解**：
 

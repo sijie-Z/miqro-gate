@@ -842,4 +842,64 @@ describe('NextUsageView', () => {
       expect(text.split(id)).toHaveLength(2);
     }
   });
+  // #PH89: the CSV is the table, in a file — every other column is copied
+  // verbatim, so the 时间 column has to be the time the exporter read on screen.
+  // `occurredAt` arrives as a UTC ISO string; writing it raw means the same
+  // record says 09:30 in the table and 01:30Z in the file.
+  it('#PH89: 导出 CSV 的时间列与屏幕同口径，不写后端 UTC 串', async () => {
+    const occurredAt = '2026-09-22T01:30:00Z';
+    mockApi.usageRecords.mockResolvedValue({
+      ...records,
+      items: [{ ...records.items![0]!, occurredAt }],
+    });
+
+    // jsdom's Blob has no .text(); capture the source string at construction.
+    const parts: string[] = [];
+    const RealBlob = globalThis.Blob;
+    class CapturingBlob extends RealBlob {
+      constructor(partList: BlobPart[], options?: BlobPropertyBag) {
+        super(partList, options);
+        parts.push(partList.join(''));
+      }
+    }
+    vi.stubGlobal('Blob', CapturingBlob);
+    Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() });
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="usage-export"]').trigger('click');
+    await flushPromises();
+    vi.unstubAllGlobals();
+
+    expect(parts).toHaveLength(1);
+    // The blob opens with a UTF-8 BOM so Excel reads it as UTF-8.
+    const raw = parts[0]!.split(String.fromCharCode(0xfeff)).join('');
+    const lines = raw.split('\n');
+    const header = lines[0]!.split(',');
+    expect(header[0]).toBe('"时间"');
+
+    const timeCell = lines[1]!.split(',')[0]!;
+    // Derived with local getters, so this holds in whatever zone it runs in.
+    const d = new Date(occurredAt);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const localDate = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const localClock = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+    expect(timeCell).toContain(localDate);
+    expect(timeCell).toContain(localClock);
+    // ...and the offset is written down. A bare local time in a file that will
+    // be read in another zone is ambiguous; this is what makes the cell an
+    // unambiguous instant again.
+    const offset = -d.getTimezoneOffset();
+    const abs = Math.abs(offset);
+    expect(timeCell).toContain(
+      `${offset < 0 ? '-' : '+'}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`,
+    );
+    // The raw UTC instant must not be what leaves the console. Only meaningful
+    // where it differs from the local rendering (at UTC+0 they are the same
+    // string and asserting absence would fail against correct code).
+    if (!localDate.startsWith(occurredAt.slice(0, 10)) || localClock !== '01:30') {
+      expect(timeCell).not.toContain(occurredAt);
+    }
+  });
 });

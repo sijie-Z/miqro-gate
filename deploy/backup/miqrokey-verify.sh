@@ -15,8 +15,16 @@ BACKUP_FILE="${1:?usage: miqrokey-verify.sh <file.sql.gz.enc>}"
 
 MANIFEST="$BACKUP_FILE.sha256"
 [ -f "$MANIFEST" ] || { echo "verify failed: missing manifest" >&2; exit 1; }
-(cd "$(dirname "$BACKUP_FILE")" && sha256sum -c "$(basename "$MANIFEST")" >/dev/null 2>&1) \
-  || { echo "verify failed: checksum mismatch" >&2; exit 1; }
+[ -f "$BACKUP_FILE" ] || { echo "verify failed: no such backup file $BACKUP_FILE" >&2; exit 1; }
+# Digest the archive we were handed, not whatever path the manifest happens to
+# name next to the digest — a backup restored off the box that produced it must
+# still verify (#1381).
+EXPECTED=$(head -n1 "$MANIFEST" | cut -d' ' -f1)
+ACTUAL=$(sha256sum "$BACKUP_FILE" | cut -d' ' -f1)
+if [ -z "$EXPECTED" ] || [ "$EXPECTED" != "$ACTUAL" ]; then
+  echo "verify failed: checksum mismatch" >&2
+  exit 1
+fi
 
 openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass file:"$(winpath "$MIQROKEY_BACKUP_KEY_FILE")" \
   -in "$BACKUP_FILE" | gunzip | pg_restore --list >/dev/null
