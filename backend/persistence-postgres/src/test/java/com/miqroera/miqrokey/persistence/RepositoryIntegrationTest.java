@@ -47,6 +47,10 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
     private AdminAuditEventRepository auditRepo;
     @Autowired
     private NamedParameterJdbcTemplate jdbc;
+    @Autowired
+    private McpServiceRepository mcpServiceRepo;
+    @Autowired
+    private InternalServiceRepository internalServiceRepo;
 
     // Use seed tenant from V1 migration
     private static final UUID TENANT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
@@ -438,6 +442,53 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
                     UserStatus.ACTIVE, false, 0, null, null, original.version() + 1, NOW, NOW);
             assertThatThrownBy(() -> userRepo.update(stale)).isInstanceOf(OptimisticLockingFailureException.class)
                     .hasMessageContaining("Optimistic lock failure");
+        }
+    }
+
+    @Nested
+    @DisplayName("replace() is a whole-row write (#1152)")
+    class ReplaceSemantics {
+
+        @Test
+        @DisplayName("mcp service replace persists a renamed row")
+        void mcpReplacePersistsName() {
+            McpService seeded = mcpServiceRepo.insert(new McpService(UUID.randomUUID(), TENANT_ID, "mcp-" + suffix,
+                    "Test MCP", "https://example.invalid/mcp", "STREAMABLE_HTTP", "ONLINE", "UNKNOWN", null, 0, 0, 30,
+                    5, 3, 1, "/health", 0, user.id(), NOW, NOW));
+
+            McpService renamed = new McpService(seeded.id(), seeded.tenantId(), "renamed-" + suffix,
+                    seeded.description(), seeded.endpoint(), seeded.transport(), seeded.status(), seeded.healthStatus(),
+                    seeded.healthCheckedAt(), seeded.consecutiveFailures(), seeded.consecutiveSuccesses(),
+                    seeded.checkIntervalSeconds(), seeded.checkTimeoutSeconds(), seeded.failThreshold(),
+                    seeded.recoverThreshold(), seeded.checkPath(), seeded.version(), seeded.createdBy(),
+                    seeded.createdAt(), seeded.updatedAt());
+            McpService saved = mcpServiceRepo.replace(renamed, seeded.version());
+
+            assertThat(saved.name()).as("returned row carries the new name").isEqualTo("renamed-" + suffix);
+            assertThat(mcpServiceRepo.findByIdAndTenantId(seeded.id(), TENANT_ID).orElseThrow().name())
+                    .as("the column is written, not silently dropped").isEqualTo("renamed-" + suffix);
+        }
+
+        @Test
+        @DisplayName("internal service replace persists a renamed row (name and kind)")
+        void internalServiceReplacePersistsNameAndKind() {
+            InternalService seeded = internalServiceRepo
+                    .insert(new InternalService(UUID.randomUUID(), TENANT_ID, "svc-" + suffix, "HTTP", "Test Service",
+                            "https://example.invalid", "ACTIVE", 0, user.id(), NOW, NOW));
+
+            InternalService renamed = new InternalService(seeded.id(), seeded.tenantId(), "renamed-" + suffix, "OTHER",
+                    seeded.description(), seeded.baseUrl(), seeded.status(), seeded.version(), seeded.createdBy(),
+                    seeded.createdAt(), seeded.updatedAt(), seeded.healthStatus(), seeded.healthCheckedAt(),
+                    seeded.consecutiveFailures(), seeded.consecutiveSuccesses(), seeded.checkIntervalSeconds(),
+                    seeded.checkTimeoutSeconds(), seeded.failThreshold(), seeded.recoverThreshold(),
+                    seeded.checkPath());
+            InternalService saved = internalServiceRepo.replace(renamed, seeded.version());
+
+            assertThat(saved.name()).as("returned row carries the new name").isEqualTo("renamed-" + suffix);
+            assertThat(saved.kind()).as("returned row carries the new kind").isEqualTo("OTHER");
+            InternalService stored = internalServiceRepo.findByIdAndTenantId(seeded.id(), TENANT_ID).orElseThrow();
+            assertThat(stored.name()).as("the column is written, not silently dropped").isEqualTo("renamed-" + suffix);
+            assertThat(stored.kind()).as("the column is written, not silently dropped").isEqualTo("OTHER");
         }
     }
 }

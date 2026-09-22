@@ -37,6 +37,13 @@ public interface InternalServiceRepository {
     /** ACTIVE services only — the health checker's probe list (#326). */
     List<InternalService> findAllActiveByTenantId(UUID tenantId);
 
-    /** Full-row update with optimistic lock (health checker writes, #326). */
-    InternalService update(InternalService service, long expectedVersion);
+    /**
+     * Replaces the whole row with optimistic lock (admin edits and status switch).
+     *
+     * <p>
+     * Named {@code replace} on purpose (#1152): the {@code SET} clause must write
+     * <em>every</em> mutable column. A deliberately narrow write gets a
+     * purpose-named method ({@code updateStatus}, {@code updateHealth}) instead.
+     */
+    InternalService replace(InternalService service, long expectedVersion);
 }

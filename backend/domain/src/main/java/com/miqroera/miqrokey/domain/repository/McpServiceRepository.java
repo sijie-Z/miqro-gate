@@ -39,10 +39,17 @@ public interface McpServiceRepository {
     McpService updateStatus(UUID tenantId, UUID serviceId, String status);
 
     /**
-     * Replaces the full row (status switch and admin edits with optimistic lock;
+     * Replaces the whole row (status switch and admin edits with optimistic lock;
      * health telemetry goes through {@link #updateHealth}).
+     *
+     * <p>
+     * Named {@code replace} on purpose (#1152): the {@code SET} clause must write
+     * <em>every</em> mutable column. A deliberately narrow write gets a
+     * purpose-named method ({@code updateStatus}, {@code updateHealth},
+     * {@code updateBackendAuth}) instead — so "the name says full replace but the
+     * SQL silently drops a column" stops being possible to miss in review.
      */
-    McpService update(McpService service, long expectedVersion);
+    McpService replace(McpService service, long expectedVersion);
 
     /**
      * Sets the upstream backend authentication (#320): {@code API_KEY} with an
