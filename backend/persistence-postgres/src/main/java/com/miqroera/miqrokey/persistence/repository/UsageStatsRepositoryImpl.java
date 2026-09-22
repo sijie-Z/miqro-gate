@@ -798,8 +798,8 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
      *
      * <p>
      * {@code ORDER BY ue.occurred_at DESC, ue.id DESC} — the id is the tiebreaker
-     * that makes "newest first" a total order. Without it, rows written in the
-     * same second (the normal case for a gateway: a batch of calls lands with one
+     * that makes "newest first" a total order. Without it, rows written in the same
+     * second (the normal case for a gateway: a batch of calls lands with one
      * timestamp granularity) come back in whatever order the plan happens to
      * produce, and a page boundary that falls inside a tie group is not stable
      * across two calls.
