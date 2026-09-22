@@ -238,8 +238,7 @@ class AuthenticationServiceTest {
             when(userRepository.findByIdForUpdate(USER_ID)).thenReturn(Optional.of(user));
 
             assertThatThrownBy(() -> service.login("admin", "wrong", "req-1"))
-                    .isInstanceOf(AuthenticationException.class)
-                    .hasMessage(AuthenticationService.LOGIN_FAILED);
+                    .isInstanceOf(AuthenticationException.class).hasMessage(AuthenticationService.LOGIN_FAILED);
         }
 
         @Test

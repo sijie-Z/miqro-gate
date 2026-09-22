@@ -237,12 +237,16 @@ public class AuthenticationService {
         UserStatus newStatus = fresh.status();
 
         if (newFailCount >= authProperties.getLoginMaxFailures()) {
-            // #1327: clamp the SHIFT, not just the product. Clamping only the multiplier left
-            // the shift free to reach 63 (1L << 63 == Long.MIN_VALUE) at the 68th failure with
+            // #1327: clamp the SHIFT, not just the product. Clamping only the multiplier
+            // left
+            // the shift free to reach 63 (1L << 63 == Long.MIN_VALUE) at the 68th failure
+            // with
             // the default loginMaxFailures=5; the negative value survived Math.min and made
-            // Duration.multipliedBy throw, rolling back this REQUIRES_NEW transaction so the
+            // Duration.multipliedBy throw, rolling back this REQUIRES_NEW transaction so
+            // the
             // counter never advanced past 67 — every later attempt re-overflowed, and the
-            // LOGIN_FAILED/ACCOUNT_LOCKED audit rows below were discarded with it. 2^10 is the
+            // LOGIN_FAILED/ACCOUNT_LOCKED audit rows below were discarded with it. 2^10 is
+            // the
             // documented ~17h cap, so behaviour below the cap is unchanged.
             long shift = Math.min(Math.max(0, newFailCount - authProperties.getLoginMaxFailures()),
                     MAX_LOCK_MULTIPLIER_SHIFT);
