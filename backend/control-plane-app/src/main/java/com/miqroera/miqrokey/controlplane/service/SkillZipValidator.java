@@ -4,17 +4,18 @@ import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 
-import java.io.ByteArrayInputStream;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.zip.CRC32;
 import java.util.zip.DataFormatException;
 import java.util.zip.Inflater;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 
 /**
  * Validates SkillHub uploads against the Anthropic Agent Skills format (P2.2):
@@ -67,65 +68,54 @@ public final class SkillZipValidator {
         if (zip.length > MAX_ZIP_BYTES) {
             throw invalid("SKILL_TOO_LARGE", "技能包超过 %d MB 上限。".formatted(MAX_ZIP_BYTES / 1024 / 1024));
         }
-        // #1242: the stream walk below is only the validator's own view of the
-        // package. Verify it against the central directory — what ZipFile,
-        // python's zipfile, .NET and PowerShell extractors follow — before
-        // anything is charged, so the caps always cover what will be extracted.
-        verifyTwoViews(zip);
+        // #1242: the walk below is only the validator's own view of the package.
+        // Verify it against the central directory — what ZipFile, python's
+        // zipfile, .NET and PowerShell extractors follow — before anything is
+        // charged, so the caps always cover what will be extracted. The walk then
+        // runs on the verified entries themselves, never on a
+        // java.util.zip.ZipInputStream: that reader misparses the unsigned
+        // data-descriptor spelling this class accepts (a CRC32 equal to the
+        // signature value, review r2 P2a), and nothing here may hinge on a reader
+        // quirk the two-view check has already ruled out.
+        List<VerifiedEntry> verified = verifyTwoViews(zip);
         String rootDir = null;
         String skillMdText = null;
-        int entries = 0;
         long decompressedBytes = 0;
-        try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(zip))) {
-            ZipEntry entry;
-            while ((entry = zis.getNextEntry()) != null) {
-                if (++entries > MAX_ENTRIES) {
-                    throw invalid("SKILL_TOO_MANY_ENTRIES", "技能包条目数超过上限。");
+        for (VerifiedEntry entry : verified) {
+            String path = normalizedEntryPath(strictUtf8Name(entry.name()));
+            int slash = path.indexOf('/');
+            String top = slash > 0 ? path.substring(0, slash) : path;
+            if (rootDir == null) {
+                rootDir = top;
+            } else if (!top.equals(rootDir)) {
+                throw invalid("SKILL_MULTIPLE_ROOTS", "技能包必须只包含一个技能目录（根目录下不能有多余文件）。");
+            }
+            if (!entry.isDirectory() && path.equals(rootDir + "/SKILL.md")) {
+                // #427: the two-view check measured the entry by inflating it, so
+                // usize is the actual decompressed size whatever the local header
+                // declared (streamed zips carry 0/-1 there) — both bounds below
+                // apply to the data itself.
+                if (entry.usize() > MAX_SKILL_MD_BYTES) {
+                    throw invalid("SKILL_MD_TOO_LARGE", "SKILL.md 超过大小上限。");
                 }
-                String path = normalizedEntryPath(entry.getName());
-                int slash = path.indexOf('/');
-                String top = slash > 0 ? path.substring(0, slash) : path;
-                if (rootDir == null) {
-                    rootDir = top;
-                } else if (!top.equals(rootDir)) {
-                    throw invalid("SKILL_MULTIPLE_ROOTS", "技能包必须只包含一个技能目录（根目录下不能有多余文件）。");
+                byte[] skillMd = readEntryBytes(zip, entry);
+                if (skillMd.length > MAX_SKILL_MD_BYTES) {
+                    throw invalid("SKILL_MD_TOO_LARGE", "SKILL.md 超过大小上限。");
                 }
-                if (!entry.isDirectory() && path.equals(rootDir + "/SKILL.md")) {
-                    if (entry.getSize() > MAX_SKILL_MD_BYTES) {
-                        throw invalid("SKILL_MD_TOO_LARGE", "SKILL.md 超过大小上限。");
-                    }
-                    // #427: the declared size above can be 0/-1 for streamed zips
-                    // (data-descriptor mode) — bound the actual decompressed READ
-                    // as well: a small zip must never inflate SKILL.md past the
-                    // cap (zip-bomb guard the class claims).
-                    byte[] skillMd = zis.readNBytes(MAX_SKILL_MD_BYTES + 1);
-                    if (skillMd.length > MAX_SKILL_MD_BYTES) {
-                        throw invalid("SKILL_MD_TOO_LARGE", "SKILL.md 超过大小上限。");
-                    }
-                    skillMdText = new String(skillMd, StandardCharsets.UTF_8);
-                    decompressedBytes += skillMd.length;
-                } else {
-                    // #1233: a declared size is never trusted for the cap — it is -1
-                    // on streamed (data-descriptor) zips, which must not read as "0",
-                    // and a crafted zip can declare any small number over a deflate
-                    // stream that inflates to gigabytes. The declared value may only
-                    // fail fast; the cap is charged with the bytes actually inflated.
-                    if (entry.getSize() > MAX_TOTAL_DECOMPRESSED_BYTES - decompressedBytes) {
-                        throw decompressedTooLarge();
-                    }
-                    decompressedBytes = countDecompressedBytes(zis, decompressedBytes);
-                }
-                if (decompressedBytes > MAX_TOTAL_DECOMPRESSED_BYTES) {
+                skillMdText = new String(skillMd, StandardCharsets.UTF_8);
+                decompressedBytes += skillMd.length;
+            } else {
+                // #1233: the cap is charged with the measured decompressed size of
+                // the entry — verifyTwoViews inflated this very data — never with a
+                // declared size (streamed zips declare -1, crafted ones lie).
+                if (entry.usize() > MAX_TOTAL_DECOMPRESSED_BYTES - decompressedBytes) {
                     throw decompressedTooLarge();
                 }
+                decompressedBytes += entry.usize();
             }
-        } catch (java.io.IOException | IllegalArgumentException e) {
-            // IllegalArgumentException: entry names are decoded strictly, so a name
-            // in a non-UTF-8 encoding (GBK, as bsdtar on a zh-CN box writes them)
-            // throws here — a malformed package, not a server fault. Pre-existing
-            // since develop; refused with the same verdict as the other zip-shape
-            // errors (#1242 review round).
-            throw invalid("SKILL_ZIP_INVALID", "技能包不是有效的 zip 文件。");
+            if (decompressedBytes > MAX_TOTAL_DECOMPRESSED_BYTES) {
+                throw decompressedTooLarge();
+            }
         }
         if (rootDir == null) {
             // No entries at all: shorter than the minimal zip (22-byte EOCD)
@@ -180,23 +170,68 @@ public final class SkillZipValidator {
     }
 
     /**
-     * Reads the current entry through the inflater and returns the new running
-     * total of decompressed bytes, rejecting as soon as the cap is passed. The true
-     * size comes from the inflater, never from the declared
-     * {@link ZipEntry#getSize()}: counting costs nothing extra here because
-     * skipping ahead to the next entry already inflates this same data.
+     * One entry as verified by {@link #verifyTwoViews}: both views agree on the
+     * name, compression method and sizes, and for deflated entries the sizes were
+     * measured by inflating the data. The walk in {@link #validate} is driven by
+     * these entries.
      */
-    private static long countDecompressedBytes(ZipInputStream zis, long alreadyCounted) throws java.io.IOException {
-        byte[] buffer = new byte[8192];
-        long total = alreadyCounted;
-        int read;
-        while ((read = zis.read(buffer)) != -1) {
-            total += read;
-            if (total > MAX_TOTAL_DECOMPRESSED_BYTES) {
-                throw decompressedTooLarge();
-            }
+    private record VerifiedEntry(byte[] name, int method, long csize, long usize, long dataStart) {
+        boolean isDirectory() {
+            return name.length > 0 && name[name.length - 1] == '/';
         }
-        return total;
+    }
+
+    /**
+     * Decodes an entry-name byte string the way the streaming reader did: strict
+     * UTF-8, malformed input refused. A name in another encoding (GBK, as bsdtar on
+     * a zh-CN box writes them) becomes a clean invalid-package verdict instead of
+     * the stream reader's uncaught IllegalArgumentException (#1242 review round).
+     */
+    private static String strictUtf8Name(byte[] name) {
+        try {
+            return StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(name)).toString();
+        } catch (CharacterCodingException e) {
+            throw zipInvalid();
+        }
+    }
+
+    /**
+     * Materializes one verified entry's bytes — only ever called for SKILL.md,
+     * whose size is bounded by {@link #MAX_SKILL_MD_BYTES} one check above: stored
+     * data is copied straight out of the package, deflated data inflated over the
+     * span the verification measured.
+     */
+    private static byte[] readEntryBytes(byte[] zip, VerifiedEntry entry) {
+        if (entry.method() == 0) {
+            return Arrays.copyOfRange(zip, (int) entry.dataStart(), (int) (entry.dataStart() + entry.csize()));
+        }
+        Inflater inflater = new Inflater(true);
+        try {
+            byte[] out = new byte[(int) entry.usize()];
+            inflater.setInput(zip, (int) entry.dataStart(), (int) entry.csize());
+            int filled = 0;
+            while (filled < out.length) {
+                int n = inflater.inflate(out, filled, out.length - filled);
+                if (n > 0) {
+                    filled += n;
+                } else if (inflater.finished()) {
+                    break; // the data ended short of the measured size: refused below
+                } else {
+                    throw structureInvalid(); // malformed deflate data: no forward progress
+                }
+            }
+            if (filled != out.length) {
+                // Cannot happen for an entry verifyTwoViews measured; kept as an
+                // explicit fail-closed assertion.
+                throw structureInvalid();
+            }
+            return out;
+        } catch (DataFormatException e) {
+            throw zipInvalid();
+        } finally {
+            inflater.end();
+        }
     }
 
     private static SkillValidationException decompressedTooLarge() {
@@ -208,8 +243,8 @@ public final class SkillZipValidator {
     // #1242: two-view structure verification
     //
     // A zip can be read through two views that need not agree: the sequential
-    // local-header chain (what ZipInputStream walks, and what the caps below
-    // are charged through) and the central directory (what java.util.zip
+    // local-header chain (what streaming readers walk, and what the walk in
+    // validate() is driven by) and the central directory (what java.util.zip
     // .ZipFile, python's zipfile, .NET and PowerShell follow when extracting).
     // A crafted package whose central directory describes different data than
     // its local headers lets the validator see a small package while an
@@ -227,6 +262,20 @@ public final class SkillZipValidator {
     private static final long ZIP64_EOCD_LOCATOR_SIG = 0x07064B50L;
     private static final int ZIP64_EXTRA_ID = 0x0001;
     /**
+     * Maximum EOCD comment length: the record's own 16-bit comment-length field
+     * (APPNOTE 4.3.16). A comment is arbitrary data in which the EOCD signature
+     * bytes may legally appear, so the bytes it declares are exempt from the
+     * second-EOCD scan.
+     */
+    private static final int MAX_EOCD_COMMENT = 0xFFFF;
+    /**
+     * Maximum trailing padding tolerated after the EOCD (+ comment): the block fill
+     * streaming archivers write (bsdtar/libarchive style). Bounds both how far the
+     * EOCD search must reach back and how much of the tail the second-EOCD scan
+     * must cover.
+     */
+    private static final int MAX_TRAILING_PADDING = 0xFFFF;
+    /**
      * Entry flag bits that change how an entry is interpreted. Bits 1–2 (the
      * deflate compression-level hints) are excluded: they are pure hints whose
      * spelling in the two views may differ without changing the data.
@@ -241,7 +290,7 @@ public final class SkillZipValidator {
     private record Inflated(long csize, long usize, long crc, long end) {
     }
 
-    private static void verifyTwoViews(byte[] zip) {
+    private static List<VerifiedEntry> verifyTwoViews(byte[] zip) {
         int eocd = findEocd(zip);
         if (eocd < 0) {
             throw zipInvalid();
@@ -271,17 +320,46 @@ public final class SkillZipValidator {
             // data) or an overlap makes the layout ambiguous.
             throw structureInvalid();
         }
-        for (int at = eocd + 1; at + 4 <= zip.length; at++) {
-            // Bytes after the chosen record may only be padding (the block fill a
-            // streaming archiver writes): a further EOCD signature would let some
-            // reader pick a different record than this validator read.
+        // The chosen record's comment is the commentLength bytes that follow it;
+        // bytes past that are padding (the block fill a streaming archiver
+        // writes). A comment is arbitrary declared data and may contain the EOCD
+        // signature bytes — that is not a second record — so the scan starts
+        // after the comment (review r2, P2b: it used to start right after the
+        // record and refused a signature inside a declared comment, which java
+        // .util.zip.ZipFile and .NET both read). The padding must stay free of a
+        // further EOCD signature: one there could let a reader (python's rfind,
+        // .NET's backward scan) pick a different record than this validator read,
+        // so the whole padding region is still scanned.
+        int commentLength = u16(zip, eocd + 20);
+        int eocdEnd = eocd + 22 + commentLength;
+        if (eocdEnd > zip.length) {
+            throw structureInvalid(); // a comment cannot extend past the file
+        }
+        for (int at = eocdEnd; at + 4 <= zip.length; at++) {
             if (u32(zip, at) == EOCD_SIG) {
                 throw structureInvalid();
             }
         }
         CdEntry[] cd = parseCentralDirectory(zip, eocd, totalEntries, cdOffset, cdSize);
+        // Pair each local header with the directory record that points at it
+        // ("relative offset of local header"), not with the record at the same
+        // index (review r2, P1): the zip spec does not require the two lists in
+        // the same order, and every extractor (python's zipfile,
+        // java.util.zip.ZipFile, .NET) resolves entries through the offset. The
+        // pairing stays a verified bijection — each offset must name exactly one
+        // record and every record must be reached exactly once — so a directory
+        // whose order differs is accepted only while the offsets and every
+        // compared field still agree.
+        Map<Long, CdEntry> cdByOffset = new HashMap<>();
+        for (CdEntry record : cd) {
+            if (cdByOffset.put(record.offset(), record) != null) {
+                throw structureInvalid(); // two records claiming one local header
+            }
+        }
+        List<VerifiedEntry> verified = new ArrayList<>();
         int at = 0;
         long decompressed = 0;
+        int matched = 0;
         for (int i = 0; i < totalEntries; i++) {
             if (at + 30 > cdOffset) {
                 throw structureInvalid();
@@ -360,19 +438,32 @@ public final class SkillZipValidator {
             if (decompressed > MAX_TOTAL_DECOMPRESSED_BYTES) {
                 throw decompressedTooLarge();
             }
-            CdEntry entry = cd[i];
+            CdEntry entry = cdByOffset.get((long) at);
+            if (entry == null) {
+                throw structureInvalid(); // a local header no directory record points at
+            }
+            matched++;
             if (!Arrays.equals(name, entry.name()) || (flags & SEMANTIC_FLAGS) != (entry.flags() & SEMANTIC_FLAGS)
-                    || method != entry.method() || at != entry.offset() || csize != entry.csize()
-                    || usize != entry.usize() || crc != entry.crc()) {
+                    || method != entry.method() || csize != entry.csize() || usize != entry.usize()
+                    || crc != entry.crc()) {
                 throw structureInvalid();
             }
+            verified.add(new VerifiedEntry(name, method, csize, usize, dataStart));
             at = (int) next;
+        }
+        if (matched != totalEntries) {
+            // Bijection invariant, kept as an explicit fail-closed assertion: the
+            // duplicate-offset rejection above and the null lookup in the walk
+            // already guarantee it, so this cannot fire unless the two fall out of
+            // step (in which case silence would be a hole, not a false alarm).
+            throw structureInvalid();
         }
         if (at != cdOffset) {
             // Bytes between the last local entry and the central directory are
             // attributable to neither view.
             throw structureInvalid();
         }
+        return verified;
     }
 
     private static CdEntry[] parseCentralDirectory(byte[] zip, int eocd, int totalEntries, long cdOffset, long cdSize) {
@@ -460,48 +551,48 @@ public final class SkillZipValidator {
     }
 
     /**
-     * Reads the data descriptor after a bit-3 entry's deflated data and requires it
-     * to describe the bytes that were actually inflated (the conventional
-     * 0x08074b50 signature is optional per APPNOTE; both spellings are read).
+     * Reads the data descriptor after a bit-3 entry's deflated data. APPNOTE makes
+     * the conventional 0x08074b50 signature optional, so both spellings occur in
+     * the wild. The 16-byte signed form is adopted only when its three values match
+     * the bytes actually inflated; the 12-byte unsigned form is tried otherwise,
+     * and a descriptor that fits neither is refused. Checking the signed values
+     * before adopting them is what keeps a legitimately unsigned descriptor
+     * readable when the entry's CRC32 happens to equal the signature value
+     * 0x08074b50 (review r2, P2a): the old code took the matching first word as
+     * proof of the signature form and misread the whole descriptor.
      */
     private static long readDescriptor(byte[] zip, long at, Inflated inflated, long limit) {
-        if (at + 12 > limit) {
-            throw structureInvalid();
+        if (at + 16 <= limit && u32(zip, (int) at) == EXTSIG && u32(zip, (int) at + 4) == inflated.crc()
+                && u32(zip, (int) at + 8) == inflated.csize() && u32(zip, (int) at + 12) == inflated.usize()) {
+            return at + 16;
         }
-        long crc = u32(zip, (int) at);
-        long csize = u32(zip, (int) at + 4);
-        long usize = u32(zip, (int) at + 8);
-        long end = at + 12;
-        if (crc == EXTSIG) {
-            if (at + 16 > limit) {
-                throw structureInvalid();
-            }
-            crc = u32(zip, (int) at + 4);
-            csize = u32(zip, (int) at + 8);
-            usize = u32(zip, (int) at + 12);
-            end = at + 16;
+        if (at + 12 <= limit && u32(zip, (int) at) == inflated.crc() && u32(zip, (int) at + 4) == inflated.csize()
+                && u32(zip, (int) at + 8) == inflated.usize()) {
+            return at + 12;
         }
-        if (crc != inflated.crc() || csize != inflated.csize() || usize != inflated.usize()) {
-            throw structureInvalid();
-        }
-        return end;
+        throw structureInvalid();
     }
 
     /**
      * Locates the end-of-central-directory record the way the directory-based
-     * readers do: the last occurrence of the signature in the trailing window (the
-     * last 64 KiB + 22 bytes, matching python's rfind, Java's backward scan and
-     * .NET's SeekBackwardsToSignature). Bytes after the record — block padding
-     * written by streaming archivers such as bsdtar/libarchive — are tolerated;
-     * they must not carry a second EOCD signature (enforced by the uniqueness scan
-     * in {@link #verifyTwoViews}) and the record must still abut the central
-     * directory.
+     * readers do: the last occurrence of the signature in the trailing window. The
+     * window covers the largest tolerated tail — a full comment
+     * ({@link #MAX_EOCD_COMMENT}) plus the full trailing padding
+     * ({@link #MAX_TRAILING_PADDING}) — or a package combining both would have its
+     * record out of reach (review r2, P2b: .NET's backward scan reads such
+     * packages; python's rfind and Java's comment-to-EOF scan stop at ~64 KiB, but
+     * the tolerance rules of this validator must compose with its own search).
+     * Bytes after the record — the comment and block padding written by streaming
+     * archivers such as bsdtar/libarchive — are tolerated; they must not carry a
+     * second EOCD record (enforced by the scan in {@link #verifyTwoViews}) and the
+     * record must still abut the central directory.
      */
     private static int findEocd(byte[] zip) {
         if (zip.length < 22) {
             return -1;
         }
-        for (int at = zip.length - 22; at >= Math.max(0, zip.length - 22 - 0xFFFF); at--) {
+        int window = 22 + MAX_EOCD_COMMENT + MAX_TRAILING_PADDING;
+        for (int at = zip.length - 22; at >= Math.max(0, zip.length - window); at--) {
             if (u32(zip, at) == EOCD_SIG) {
                 return at;
             }
