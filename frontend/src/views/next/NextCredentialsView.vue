@@ -198,6 +198,10 @@ function openValidate(cred: CredentialView) {
   validateResult.value = null;
   validateError.value = '';
   validateRequestId.value = '';
+  // The abandoned request's own `finally` only clears this flag while its seq is
+  // still current, so once we bump the seq nothing else will ever clear it — a
+  // fresh dialog has to start un-busy itself or 测试 spins disabled forever.
+  validating.value = false;
 }
 
 async function runValidate() {

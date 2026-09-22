@@ -5,7 +5,11 @@ import { computed, defineComponent, h } from 'vue';
 import NextCredentialsView from '@/views/next/NextCredentialsView.vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import type { CredentialView, SubscriptionView } from '@/types/generated-api';
+import type {
+  CredentialView,
+  SubscriptionView,
+  ValidateCredentialResponse,
+} from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   listCredentials: vi.fn(),
@@ -136,6 +140,46 @@ describe('NextCredentialsView', () => {
     });
   }
 
+  /** Opens a row's kebab menu and clicks 测试密钥 — the same radix flow as the #1231 test. */
+  async function openValidateDialog(
+    wrapper: ReturnType<typeof mountView>,
+    credentialId: string,
+  ): Promise<void> {
+    const kebab = wrapper.find(`[data-testid="credential-actions-${credentialId}"]`)
+      .element as HTMLElement;
+    kebab.click();
+    await flushPromises();
+    // Take the newest match: a menu opened earlier in the same test can still be in the DOM.
+    const items = document.body.querySelectorAll<HTMLElement>(
+      '[data-testid="credential-validate"]',
+    );
+    const item = items[items.length - 1]?.closest('[role="menuitem"]') as HTMLElement | null;
+    expect(item, 'validate menu item should render').toBeTruthy();
+    item!.focus();
+    item!.click();
+    await flushPromises();
+  }
+
+  /**
+   * The validate dialog is portalled into document.body (UiDialog → radix
+   * DialogPortal), so wrapper.find cannot see it. Address it through the
+   * document the way the #1231 drawer test does.
+   */
+  function validateDialog(): HTMLElement | null {
+    const anchor = document.body.querySelector('[data-testid="credential-validate-secret"]');
+    // `anchor?.closest()` yields undefined when the dialog is gone; normalise to null
+    // so `toBeNull()` asserts "closed" rather than tripping over undefined.
+    return (anchor?.closest('.ui-dialog__content') as HTMLElement | null | undefined) ?? null;
+  }
+
+  function validateRunButton(): HTMLButtonElement {
+    const button = document.body.querySelector<HTMLButtonElement>(
+      '[data-testid="credential-validate-run"]',
+    );
+    expect(button, '测试 button should render').toBeTruthy();
+    return button!;
+  }
+
   it('renders credentials with masked fingerprints and Chinese statuses', async () => {
     const wrapper = mountView();
     await flushPromises();
@@ -259,5 +303,54 @@ describe('NextCredentialsView', () => {
     // …the table shows the failure with a retry instead.
     expect(drawer!.querySelector('[data-testid="table-load-failed"]')).toBeTruthy();
     expect(drawer!.querySelector('[data-testid="table-load-retry"]')).toBeTruthy();
+  });
+
+  it('#PH69R2B: 放弃一次验证后再打开弹窗，测试按钮不会永久转圈禁用', async () => {
+    // Hold the validation open so the admin can walk away from it.
+    let release!: (value: ValidateCredentialResponse) => void;
+    mockApi.validateCredential.mockImplementation(
+      () =>
+        new Promise<ValidateCredentialResponse>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const wrapper = mountView();
+    await flushPromises();
+
+    await openValidateDialog(wrapper, '0190-0000-0000-0030');
+    const secret = document.body.querySelector<HTMLInputElement>(
+      '[data-testid="credential-validate-secret"]',
+    );
+    expect(secret, 'secret input should render').toBeTruthy();
+    secret!.value = 'sk-candidate';
+    secret!.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushPromises();
+    validateRunButton().click();
+    await flushPromises();
+
+    // In flight the button is meant to be busy — this part is correct.
+    expect(validateRunButton().disabled).toBe(true);
+
+    // The admin gives up on it: closes the dialog and goes to look at another credential.
+    const close = [...(validateDialog()?.querySelectorAll('button') ?? [])].find(
+      (b) => b.textContent?.trim() === '关闭',
+    );
+    expect(close, '关闭 button should render').toBeTruthy();
+    close!.click();
+    await flushPromises();
+    expect(validateDialog(), 'dialog should be gone after 关闭').toBeNull();
+    await openValidateDialog(wrapper, 'c2');
+    // The dialog on screen belongs to the other credential now.
+    expect(document.body.textContent).toContain(
+      '测试候选密钥是否与「moonshot-main」当前生效版本一致。',
+    );
+
+    // The abandoned answer finally lands — it was never this dialog's business.
+    release({ matchesActive: true, providerStatus: 'NOT_CHECKED' } as ValidateCredentialResponse);
+    await flushPromises();
+
+    // This dialog never had a request in flight, so its 测试 button must be usable.
+    expect(validateRunButton().disabled).toBe(false);
+    expect(validateRunButton().getAttribute('aria-busy')).toBeNull();
   });
 });
