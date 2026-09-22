@@ -482,13 +482,22 @@ function changeGroupBy(value: string) {
 async function exportRecords() {
   const size = 200; // records API upper bound
   const all: UsageRecord[] = [];
-  let pageNo = 1;
+  // #1368: walk the cursor, not a page count. Counting pages assumes the table holds
+  // still — the gateway keeps writing usage while this loop runs, and an insert above
+  // the reader shifts every later page down: one row comes out twice and another is
+  // never reached (a delete does the mirror image). `before` names the last row
+  // already handed out, so the walk keeps its place whatever lands above it. The
+  // boundary advances strictly every round (it is one row lower in the sort order),
+  // so the walk terminates — and it ends when the server stops handing out a cursor,
+  // not when a locally computed page count says the end must be near.
+  let before: string | undefined;
   try {
     for (;;) {
-      const batch = await api.usageRecords({ page: pageNo, size, ...windowFromTo() });
+      const batch = await api.usageRecords({ size, before, ...windowFromTo() });
       all.push(...(batch.items ?? []));
-      if (pageNo * size >= (batch.total ?? 0)) break;
-      pageNo += 1;
+      const next = batch.nextCursor;
+      if (!next) break;
+      before = next;
     }
   } catch (error) {
     toast.error(error instanceof ApiError ? error.message : '导出失败，请稍后重试。');

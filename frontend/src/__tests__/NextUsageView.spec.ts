@@ -785,14 +785,20 @@ describe('NextUsageView', () => {
     const exportCalls: Array<{ size?: number; page?: number; before?: string }> = [];
     const exportPages: UsageRecordPage[] = [
       {
-        items: [exportRow('req-a', '2026-09-03T08:00:00Z'), exportRow('req-b', '2026-09-03T07:00:00Z')],
+        items: [
+          exportRow('req-a', '2026-09-03T08:00:00Z'),
+          exportRow('req-b', '2026-09-03T07:00:00Z'),
+        ],
         page: 1,
         size: 200,
         total: 5,
         nextCursor: 'cur-1',
       },
       {
-        items: [exportRow('req-c', '2026-09-03T06:00:00Z'), exportRow('req-d', '2026-09-03T05:00:00Z')],
+        items: [
+          exportRow('req-c', '2026-09-03T06:00:00Z'),
+          exportRow('req-d', '2026-09-03T05:00:00Z'),
+        ],
         page: 1,
         size: 200,
         total: 5,
