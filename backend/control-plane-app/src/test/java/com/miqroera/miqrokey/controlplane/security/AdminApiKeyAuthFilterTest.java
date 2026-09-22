@@ -29,6 +29,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -272,6 +273,38 @@ class AdminApiKeyAuthFilterTest {
         assertThat(summary.getValue()).as("the summary must be a JSON document PostgreSQL's jsonb parser accepts")
                 .satisfies(
                         value -> assertThatCode(() -> new ObjectMapper().readTree(value)).doesNotThrowAnyException());
+    }
+
+    /**
+     * #1408: {@code auditDenied} runs outside any transaction and before
+     * {@code forbiddenScope}, so an exception from the audit write used to escape
+     * the filter and replace the denial with a 500. Reproduced against a real
+     * PostgreSQL by renaming {@code admin_audit_events}: the same over-privileged
+     * GET that answered {@code 403 ADMIN_API_SCOPE_DENIED} with {@code audit Δ1}
+     * answered {@code 500 Internal Server Error} with the table missing. A denied
+     * caller that gets a 500 learns the audit path is down and, more importantly,
+     * gets an answer that no longer says "denied".
+     */
+    @Test
+    @DisplayName("a failing audit write cannot turn the scope denial into a 500 (#1408)")
+    void auditFailureDoesNotReplaceDenial() throws Exception {
+        UUID issuer = UUID.randomUUID();
+        AdminApiKey scoped = new AdminApiKey(keyId, tenant, "usage-only", new byte[32], "mqk_admin_", issuer, null,
+                null, Instant.now(), List.of(AdminApiKeyCapabilities.USAGE_READ));
+        when(repository.findActiveByDigest(any())).thenReturn(Optional.of(scoped));
+        doThrow(new IllegalStateException("admin_audit_events is unavailable")).when(auditService).record(any(), any(),
+                any(), any(), any(), any(), any());
+
+        MockHttpServletRequest denied = new MockHttpServletRequest();
+        denied.setRequestURI("/api/v1/admin-api/alert-rules");
+        denied.addHeader("Authorization", "Bearer mqk_admin_usage-only-token");
+        MockHttpServletResponse deniedResponse = new MockHttpServletResponse();
+        filter.doFilter(denied, deniedResponse, chain);
+
+        assertThat(deniedResponse.getStatus()).as("the denial is the decision; the audit write is best-effort")
+                .isEqualTo(403);
+        assertThat(deniedResponse.getContentAsString()).contains("ADMIN_API_SCOPE_DENIED");
+        verify(chain, never()).doFilter(any(), any());
     }
 
     @Test
