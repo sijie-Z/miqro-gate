@@ -484,13 +484,13 @@ public final class SkillZipValidator {
 
     /**
      * Locates the end-of-central-directory record the way the directory-based
-     * readers do: the last occurrence of the signature in the trailing window
-     * (the last 64 KiB + 22 bytes, matching python's rfind, Java's backward scan
-     * and .NET's SeekBackwardsToSignature). Bytes after the record — block
-     * padding written by streaming archivers such as bsdtar/libarchive — are
-     * tolerated; they must not carry a second EOCD signature (enforced by the
-     * uniqueness scan in {@link #verifyTwoViews}) and the record must still abut
-     * the central directory.
+     * readers do: the last occurrence of the signature in the trailing window (the
+     * last 64 KiB + 22 bytes, matching python's rfind, Java's backward scan and
+     * .NET's SeekBackwardsToSignature). Bytes after the record — block padding
+     * written by streaming archivers such as bsdtar/libarchive — are tolerated;
+     * they must not carry a second EOCD signature (enforced by the uniqueness scan
+     * in {@link #verifyTwoViews}) and the record must still abut the central
+     * directory.
      */
     private static int findEocd(byte[] zip) {
         if (zip.length < 22) {
