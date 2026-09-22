@@ -219,17 +219,18 @@ class ContextRegistryIntegrationTest {
     }
 
     /**
-     * #1400: {@code context_registry_unavailable} asserts <em>we gave up waiting</em>.
-     * A read that fails for any other reason must not borrow that claim — with the
-     * table gone the read cannot even be parsed, which is a {@code DataAccessException}
-     * but not a {@code QueryTimeoutException}, and the caller has to be able to tell
-     * the two apart without reading gateway logs.
+     * #1400: {@code context_registry_unavailable} asserts <em>we gave up
+     * waiting</em>. A read that fails for any other reason must not borrow that
+     * claim — with the table gone the read cannot even be parsed, which is a
+     * {@code DataAccessException} but not a {@code QueryTimeoutException}, and the
+     * caller has to be able to tell the two apart without reading gateway logs.
      *
      * <p>
-     * The table is dropped rather than renamed so the failure also survives pgjdbc's
-     * cached server-side prepared statements (a rename keeps the relation's OID, a
-     * drop does not), then recreated from {@code V56__project_repositories.sql} and
-     * re-seeded, so the fixture is exactly what the other tests expect.
+     * The table is dropped rather than renamed so the failure also survives
+     * pgjdbc's cached server-side prepared statements (a rename keeps the
+     * relation's OID, a drop does not), then recreated from
+     * {@code V56__project_repositories.sql} and re-seeded, so the fixture is
+     * exactly what the other tests expect.
      * </p>
      */
     @Test
@@ -259,7 +260,8 @@ class ContextRegistryIntegrationTest {
                         CONSTRAINT uq_project_repositories_tenant_repo UNIQUE (tenant_id, repo_key)
                     )
                     """);
-            sql.getJdbcTemplate().execute("CREATE INDEX idx_project_repositories_project ON project_repositories (project_id)");
+            sql.getJdbcTemplate()
+                    .execute("CREATE INDEX idx_project_repositories_project ON project_repositories (project_id)");
             map(sql, GatewayTestKeys.PROJECT_ID, "github.com/acme/alpha");
             map(sql, GatewayTestKeys.OTHER_PROJECT_ID, "github.com/acme/beta");
         }

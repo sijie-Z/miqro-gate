@@ -64,8 +64,7 @@ public class ContextRegistryController {
      * means "no limit" in JDBC, so a shortened {@link #REGISTRY_TIMEOUT} must not
      * silently disable the bound this constant exists to provide.
      */
-    private static final int STATEMENT_TIMEOUT_SECONDS = Math.max(1,
-            Math.toIntExact(REGISTRY_TIMEOUT.toSeconds()) - 2);
+    private static final int STATEMENT_TIMEOUT_SECONDS = Math.max(1, Math.toIntExact(REGISTRY_TIMEOUT.toSeconds()) - 2);
 
     private static final String REPOSITORY_QUERY = "SELECT project_id, repo_key FROM project_repositories WHERE tenant_id = ? AND project_id IN (%s) "
             + "ORDER BY repo_key";
