@@ -44,10 +44,18 @@ public interface McpServiceRepository {
      *
      * <p>
      * Named {@code replace} on purpose (#1152): the {@code SET} clause must write
-     * <em>every</em> mutable column. A deliberately narrow write gets a
-     * purpose-named method ({@code updateStatus}, {@code updateHealth},
-     * {@code updateBackendAuth}) instead — so "the name says full replace but the
-     * SQL silently drops a column" stops being possible to miss in review.
+     * <em>all mutable columns owned by this method</em>. A deliberately narrow
+     * write gets a purpose-named method ({@code updateStatus},
+     * {@code updateHealth}, {@code updateBackendAuth}) instead — so "the name says
+     * full replace but the SQL silently drops a column" stops being possible to
+     * miss in review.
+     *
+     * <p>
+     * "Owned by this method" is the operative phrase, not "every column in the
+     * table": the backend-credential columns ({@code backend_auth_mode},
+     * {@code backend_secret_*}) are <em>intentionally</em> owned by
+     * {@link #updateBackendAuth} — credential ciphertext never enters this record.
+     * Adding a new <em>ordinary</em> configuration column means adding it here.
      */
     McpService replace(McpService service, long expectedVersion);
 
