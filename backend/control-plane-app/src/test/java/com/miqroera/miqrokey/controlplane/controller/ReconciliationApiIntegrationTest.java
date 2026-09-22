@@ -748,7 +748,13 @@ class ReconciliationApiIntegrationTest {
         assertThat(report.get("errorMessage").asText()).contains("100000").contains("上限");
         assertThat(report.get("totalRows").isNull()).isTrue();
         assertThat(reportRowCount(reportId)).isZero();
-        assertThat(eventCount("RECONCILIATION_FAILED")).isEqualTo(1);
+        // Exactly one failure for *this* report: awaiting because `status` is
+        // written before the audit row, scoping because other reports' runs are
+        // still in flight (see awaitFailureEventCount).
+        assertThat(awaitFailureEventCount(reportId, 1))
+                .withFailMessage("expected exactly 1 RECONCILIATION_FAILED for report %s within 5s, saw %d", reportId,
+                        failureEventCount(reportId))
+                .isTrue();
     }
 
     @Test
@@ -881,6 +887,38 @@ class ReconciliationApiIntegrationTest {
     private long eventCount(String action) {
         return jdbc.queryForObject("SELECT count(*) FROM admin_audit_events WHERE action = :action",
                 new MapSqlParameterSource("action", action), Long.class);
+    }
+
+    /**
+     * Failures recorded against one report, polled — same status-then-audit gap as
+     * {@link #awaitCount}, with the count scoped to {@code target_id}.
+     *
+     * <p>
+     * Scoping is the point, not decoration: a reconciliation runs on a pool thread
+     * that outlives the request that started it, so a run left over from an earlier
+     * test can write its own failure after this test's wipe. When its report row
+     * has already been dropped by that wipe the write dies on
+     * {@code reconciliation_rows_report_id_fkey} (both before and after the write
+     * paging — the parent row, not the batching, is what went missing), the
+     * catch-all calls {@code fail()}, and a second {@code RECONCILIATION_FAILED}
+     * lands in the table. A tenant-global count reads that as this test's failure;
+     * a count keyed to this report cannot.
+     */
+    private boolean awaitFailureEventCount(String reportId, long expected) throws Exception {
+        for (int i = 0; i < 25; i++) {
+            if (failureEventCount(reportId) == expected) {
+                return true;
+            }
+            Thread.sleep(200);
+        }
+        return false;
+    }
+
+    private long failureEventCount(String reportId) {
+        return jdbc.queryForObject("""
+                SELECT count(*) FROM admin_audit_events
+                WHERE action = 'RECONCILIATION_FAILED' AND target_type = 'RECONCILIATION' AND target_id = :id
+                """, new MapSqlParameterSource("id", UUID.fromString(reportId)), Long.class);
     }
 
     private static byte[] gzip(byte[] input) throws Exception {
