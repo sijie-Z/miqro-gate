@@ -108,6 +108,7 @@ public class AdminProviderService {
             Long quotaTotal, String quotaUnit, Instant periodStart, Instant periodEnd, Instant renewalAt) {
         productRepository.findById(providerProductId).orElseThrow(
                 () -> new ApiException(HttpStatus.NOT_FOUND, "PRODUCT_NOT_FOUND", "Provider product not found"));
+        validateSubscriptionPeriod(periodStart, periodEnd);
         UpstreamSubscription subscription = new UpstreamSubscription(UUID.randomUUID(), tenantId, providerProductId,
                 name, null, billingMode != null ? billingMode : BillingMode.FIXED_SUBSCRIPTION,
                 planScope != null ? planScope : PlanScope.NONE, subscriptionPrice, currency, periodStart, periodEnd,
@@ -123,13 +124,14 @@ public class AdminProviderService {
             BigDecimal subscriptionPrice, String currency, Long quotaTotal, String quotaUnit, SubscriptionStatus status,
             Instant periodStart, Instant periodEnd, Instant renewalAt) {
         UpstreamSubscription subscription = requireSubscription(tenantId, subscriptionId);
+        Instant mergedPeriodStart = periodStart != null ? periodStart : subscription.periodStart();
+        Instant mergedPeriodEnd = periodEnd != null ? periodEnd : subscription.periodEnd();
+        validateSubscriptionPeriod(mergedPeriodStart, mergedPeriodEnd);
         UpstreamSubscription updated = new UpstreamSubscription(subscription.id(), subscription.tenantId(),
                 subscription.providerProductId(), name != null ? name : subscription.name(),
                 subscription.externalAccountRef(), subscription.billingMode(), subscription.planScope(),
                 subscriptionPrice != null ? subscriptionPrice : subscription.subscriptionPrice(),
-                currency != null ? currency : subscription.currency(),
-                periodStart != null ? periodStart : subscription.periodStart(),
-                periodEnd != null ? periodEnd : subscription.periodEnd(),
+                currency != null ? currency : subscription.currency(), mergedPeriodStart, mergedPeriodEnd,
                 renewalAt != null ? renewalAt : subscription.renewalAt(),
                 quotaTotal != null ? quotaTotal : subscription.quotaTotal(),
                 quotaUnit != null ? quotaUnit : subscription.quotaUnit(),
@@ -238,6 +240,35 @@ public class AdminProviderService {
     }
 
     // ------------------------------------------------------------------
+
+    /**
+     * The subscription-period invariant (#1330 / #1361 review P1): the two bounds
+     * are written together or not at all, and a written pair must be a real
+     * interval — start strictly before end. A null pair is legal (a pay-as-you-go
+     * subscription has no period); a half pair is not, because no window can be
+     * formed from one end. A PATCH is validated on the <em>merged</em> values: it
+     * is a sparse merge (absent/null = keep), so a one-sided update can land the
+     * pair on or before its stored other end and that is refused like any other
+     * invalid pair.
+     *
+     * <p>
+     * The invariant is load-bearing for billing: {@code CostAllocationService
+     * .fixedCostFor} prorates the plan price by {@code Duration.between(start,
+     * end)} clamped to a floor of 1 ms, so a reversed or equal pair would measure
+     * the billing window in that single millisecond (a 30-day window on a 100.00
+     * plan yields 2.592e11 instead of a prorated share).
+     * </p>
+     */
+    private static void validateSubscriptionPeriod(Instant periodStart, Instant periodEnd) {
+        if ((periodStart == null) != (periodEnd == null)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "TIME_RANGE_INVALID",
+                    "periodStart and periodEnd must be provided together");
+        }
+        if (periodStart != null && !periodStart.isBefore(periodEnd)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "TIME_RANGE_INVALID",
+                    "periodStart must be strictly before periodEnd");
+        }
+    }
 
     private UpstreamSubscription requireSubscription(UUID tenantId, UUID subscriptionId) {
         UpstreamSubscription subscription = subscriptionRepository.findById(subscriptionId).orElseThrow(
