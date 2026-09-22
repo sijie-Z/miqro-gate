@@ -266,7 +266,7 @@ public class ProxyController {
             // the body is in hand and never reset. Every step below that can wait
             // on a bounded scheduler lane — the L2 cache read, the credential
             // decrypt, the SSRF DNS check — shares this single budget, so the
-            // documented overall cutoff ("整体硬截止（自第一次尝试起计时，不重置）",
+            // documented overall cutoff ("整体硬截止（自请求体到手起计时，含排队等待与前置跳，不重置）",
             // docs/configuration-reference.md) also covers the time a request
             // spends *queued* for a lane. Arming the cutoff after those hops, as
             // before, let one wedged lane park LLM traffic with no deadline
