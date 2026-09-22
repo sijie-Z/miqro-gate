@@ -2,6 +2,17 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 会话交接点 2026-09-22（PH87 多实例部署一致性：两个控制面副本共用一个 PG，本机实测）
+
+- **形态**：猎线（审计+修复），不是 Goal。真起**两个控制面实例**（不同端口、同一个 PostgreSQL 15524）逐条核 §1 五类多副本风险：定时任务重复执行 / 分布式锁 / 投递重复 / 本地缓存视图不一致 / 启动竞态。确认 2 个缺陷（#1383、#1394），其余逐条否证（否证清单见 `_orchestrate/reports/ph87_report.md` §5）。
+- **#1383 告警重试跨副本重复外发**：`AlertEvaluator.evaluateAll()` 是 `@Scheduled`，**每个 JVM 副本各有一条调度线程**，仓库内无 ShedLock/选主；`AlertEventDispatcher.retryDue()` 的 SELECT 是普通读（无 `FOR UPDATE`/`SKIP LOCKED`），两副本同时扫到同一到期行 → **各发一次 POST**。原始红证据：接收端 16ms 内收到 2 条 POST（body 逐字节相同，sha256 `87efc2af…`），两个 JVM 各自打印 `delivery attempt 2`；而投递表**只有 2 行**——`recordAttempt` 的 upsert 按 `(event_id, endpoint_id, attempt)` 覆盖，重复外发在账本上不可见。影响：接收端按次计费/按次动作的场景重复执行；文档承诺的「最多 3 次」在 n 副本下实际是 3n 次。
+- **修复坐标**：`AlertEventDispatcher.claimRetry()`（新增）+ `retryDue()` 发送前调用。发送前一句条件 UPDATE 抢占：`next_retry_at` 推后到 `now() + (endpoint.timeoutMs() + CLAIM_SLACK_MS)/1000`，`WHERE … AND attempt = 待发次数 AND next_retry_at IS NOT NULL AND next_retry_at <= now()`，`UPDATE` 只可能影响一行，`claimed == 1` 才发。**抢占必须在发送前一刻**（不能提前到 SELECT 时）：提前抢占的行若发送从未发生会一直卡到租约到期。租约 = 端点超时 + 60s 松弛，必须**长出它所守护的那次 POST**，否则先发者还在发、后发者已抢到 → 修复失效。
+- **崩溃语义（真杀实例验证）**：租约到期后下一个扫描按**同一个 attempt 号**重发——崩溃代价是一个退避周期的延迟，**不消耗 `MAX_ATTEMPTS` 的次数**。`pg_advisory_xact_lock` 全库仅 4 处非调度用途；事务级咨询锁随后端终止自动释放（真杀实例后 `pg_locks` advisory 计数为 0），故调度类任务**不能**用事务级咨询锁覆盖一次出站 POST。
+- **真库证据**：`AlertDeliveryConcurrentSweepIntegrationTest`（2 例，真 PostgreSQL，`@Tag("integration")`）——两副本并发扫同一到期行，接收端计数 `received.get() == 2`（首投 + 一次重试），投递表 2 行。**注意跑法**：`control-plane-app/pom.xml:161` 有 `<excludedGroups>integration</excludedGroups>`，普通 `verify` 会报 `Tests run: 0` 且 `BUILD SUCCESS`（假绿）；必须 `-Pintegration`。绿色原始输出 `Tests run: 2, Failures: 0, Errors: 0, Skipped: 0` + `BUILD SUCCESS`。双实例真进程侧的绿证据：修复版只有实例 A 打印 `delivery attempt 2`，实例 B 该事件日志为空，接收端 1 条；且 attempt=1 的 `next_retry_at` 被推后到 arm 时刻 +360s（= 端点 300s 超时 + 60s 松弛的租约指纹）。
+- **文档**：`database-schema.md` 投递表补「重试外发前必须在数据库上抢占」+ 租约语义 + 「upsert 覆盖致重复外发在账本上不可见」；`configuration-reference.md` 的 `MIQROKEY_WEBHOOK_MAX_ATTEMPTS=3` 口径不变（多副本下的 3n 由抢占修复，不改上限）。
+- **遗留（未立案，报告 §6 逐条声明）**：**#1394** `ReconciliationService.recoverInterruptedRuns()` 在第二个副本启动时会把第一个副本**正在跑**的对账标记成 `INTERRUPTED`（启动即恢复没有「实例已死」的判据）；其余候选（本地缓存视图不一致、启动迁移竞态、告警评估的重复计算）逐条否证。
+- 分支 `fix/ph87-multi-instance-consistency`；issue #1383 / #1394。
+
 ## 会话交接点 2026-09-22（PH67 数据保留/清理正确性：配额判定不得被用量删除解封，#1316）
 
 - **缺陷**：`quota_enforcement` 是网关 429 的唯一来源，控制面 `QuotaEnforcementService` 每 60s 用**实时**水位（`QuotaWatermarks` → `usage_event` 聚合）重算它。于是保留策略的 `UsageDeletionService.confirm()` 物理删掉当前窗口的 `usage_event` 行之后，下一轮水位归零 → 规则不再 EXCEEDED → 判定行消失 → **流量重新放行**。ADR-0020 D2 承诺的恢复路径只有「窗口滚过去」与「管理员提高限额」，删除用量不在其中。
