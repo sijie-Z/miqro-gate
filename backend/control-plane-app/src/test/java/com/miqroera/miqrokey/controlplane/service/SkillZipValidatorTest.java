@@ -375,7 +375,7 @@ class SkillZipValidatorTest {
     @Test
     @DisplayName("fail-closed: bytes appended after the EOCD make the trailer unverifiable and are refused (#1242)")
     void trailingBytesAfterEocdRejected() {
-        assertCode(bytes(rawHonestDeflate(), new byte[] { (byte) 0xDE, (byte) 0xAD, (byte) 0xBE, (byte) 0xEF }),
+        assertCode(bytes(rawHonestDeflate(), new byte[]{(byte) 0xDE, (byte) 0xAD, (byte) 0xBE, (byte) 0xEF}),
                 "SKILL_ZIP_INVALID");
     }
 
@@ -388,10 +388,8 @@ class SkillZipValidatorTest {
         // directory-based reader saw a different entry description.
         byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
         byte[] mdDef = deflate(md);
-        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length),
-                mdDef);
-        byte[] second = bytes(rawLocal("web-scraper/note.txt", 8, 0, crc32(md), mdDef.length, md.length),
-                mdDef);
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
+        byte[] second = bytes(rawLocal("web-scraper/note.txt", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
         byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
                 rawCd("web-scraper/note.txt", 8, 0, crc32(md), mdDef.length, 1, first.length));
         assertCode(bytes(first, second, cd, rawEocd(2, cd.length, first.length + second.length)),
@@ -422,8 +420,8 @@ class SkillZipValidatorTest {
 
     private static void assertCode(byte[] pkg, String expectedCode, String what) {
         assertThatThrownBy(() -> SkillZipValidator.validate(pkg)).as("%s must be rejected", what)
-                .isInstanceOf(SkillValidationException.class).satisfies(thrown -> assertThat(
-                        ((SkillValidationException) thrown).code()).isEqualTo(expectedCode));
+                .isInstanceOf(SkillValidationException.class)
+                .satisfies(thrown -> assertThat(((SkillValidationException) thrown).code()).isEqualTo(expectedCode));
     }
 
     @Test
@@ -491,45 +489,37 @@ class SkillZipValidatorTest {
     private static byte[] formA() {
         byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
         byte[] mdDef = deflate(md);
-        byte[] skillEntry = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length),
-                mdDef);
+        byte[] skillEntry = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
         byte[] payloadData = Payload.DEFLATE;
         // Local view: STORED, self-consistent, CRC over the raw (compressed) bytes.
         byte[] payloadEntry = bytes(
-                rawLocal("web-scraper/payload.bin", 0, 0, crc32(payloadData), payloadData.length,
-                        payloadData.length),
+                rawLocal("web-scraper/payload.bin", 0, 0, crc32(payloadData), payloadData.length, payloadData.length),
                 payloadData);
         // CD view: DEFLATED, inflating to 640 MiB.
-        byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
-                rawCd("web-scraper/payload.bin", 8, 0, Payload.CRC, payloadData.length, Payload.SIZE,
-                        skillEntry.length));
+        byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0), rawCd(
+                "web-scraper/payload.bin", 8, 0, Payload.CRC, payloadData.length, Payload.SIZE, skillEntry.length));
         return bytes(skillEntry, payloadEntry, cd, rawEocd(2, cd.length, skillEntry.length + payloadEntry.length));
     }
 
     private static byte[] formB() {
         byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
         byte[] mdDef = deflate(md);
-        byte[] skillEntry = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length),
-                mdDef);
+        byte[] skillEntry = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
         String carrierName = "web-scraper/asset.bin";
-        byte[] fakeLocal = rawLocal("web-scraper/payload.bin", 8, 0, Payload.CRC, Payload.DEFLATE.length,
-                Payload.SIZE);
+        byte[] fakeLocal = rawLocal("web-scraper/payload.bin", 8, 0, Payload.CRC, Payload.DEFLATE.length, Payload.SIZE);
         byte[] carrierData = bytes(fakeLocal, Payload.DEFLATE);
         byte[] carrierEntry = bytes(
-                rawLocal(carrierName, 0, 0, crc32(carrierData), carrierData.length, carrierData.length),
-                carrierData);
+                rawLocal(carrierName, 0, 0, crc32(carrierData), carrierData.length, carrierData.length), carrierData);
         long fakeOffset = skillEntry.length + rawLocal(carrierName, 0, 0, 0, 0, 0).length;
         byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
-                rawCd("web-scraper/payload.bin", 8, 0, Payload.CRC, Payload.DEFLATE.length, Payload.SIZE,
-                        fakeOffset));
+                rawCd("web-scraper/payload.bin", 8, 0, Payload.CRC, Payload.DEFLATE.length, Payload.SIZE, fakeOffset));
         return bytes(skillEntry, carrierEntry, cd, rawEocd(2, cd.length, skillEntry.length + carrierEntry.length));
     }
 
     private static byte[] formC() {
         byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
         byte[] mdDef = deflate(md);
-        byte[] skillEntry = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length),
-                mdDef);
+        byte[] skillEntry = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
         String name = "web-scraper/data.bin";
         byte[] fakeLocal = rawLocal(name, 8, 0, Payload.CRC, Payload.DEFLATE.length, Payload.SIZE);
         byte[] carrierData = bytes(fakeLocal, Payload.DEFLATE);
@@ -556,11 +546,10 @@ class SkillZipValidatorTest {
         byte[] asset = "hello asset\n".repeat(100).getBytes(StandardCharsets.UTF_8);
         byte[] assetDef = deflate(asset);
         byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
-        byte[] second = bytes(rawLocal("web-scraper/assets/note.txt", 8, 0, crc32(asset), assetDef.length,
-                asset.length), assetDef);
+        byte[] second = bytes(
+                rawLocal("web-scraper/assets/note.txt", 8, 0, crc32(asset), assetDef.length, asset.length), assetDef);
         byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
-                rawCd("web-scraper/assets/note.txt", 8, 0, crc32(asset), assetDef.length, asset.length,
-                        first.length));
+                rawCd("web-scraper/assets/note.txt", 8, 0, crc32(asset), assetDef.length, asset.length, first.length));
         return bytes(first, second, cd, rawEocd(2, cd.length, first.length + second.length));
     }
 
@@ -568,11 +557,10 @@ class SkillZipValidatorTest {
         byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
         byte[] asset = "hello asset\n".repeat(100).getBytes(StandardCharsets.UTF_8);
         byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 0, 0, crc32(md), md.length, md.length), md);
-        byte[] second = bytes(rawLocal("web-scraper/assets/note.txt", 0, 0, crc32(asset), asset.length,
-                asset.length), asset);
+        byte[] second = bytes(rawLocal("web-scraper/assets/note.txt", 0, 0, crc32(asset), asset.length, asset.length),
+                asset);
         byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 0, 0, crc32(md), md.length, md.length, 0),
-                rawCd("web-scraper/assets/note.txt", 0, 0, crc32(asset), asset.length, asset.length,
-                        first.length));
+                rawCd("web-scraper/assets/note.txt", 0, 0, crc32(asset), asset.length, asset.length, first.length));
         return bytes(first, second, cd, rawEocd(2, cd.length, first.length + second.length));
     }
 
@@ -583,26 +571,24 @@ class SkillZipValidatorTest {
         byte[] dir = rawLocal("web-scraper/assets/", 0, 0, 0, 0, 0);
         byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
                 rawCd("web-scraper/assets/", 0, 0, 0, 0, 0, first.length));
-        return bytes(first, dir, cd, rawEocd(2, cd.length, first.length + dir.length, "skill package".getBytes(
-                StandardCharsets.UTF_8)));
+        return bytes(first, dir, cd,
+                rawEocd(2, cd.length, first.length + dir.length, "skill package".getBytes(StandardCharsets.UTF_8)));
     }
 
     private static byte[] rawLocal(String name, int method, int flags, long crc, long csize, long usize) {
         byte[] n = name.getBytes(StandardCharsets.UTF_8);
-        return bytes(le32(0x04034B50L), le16(20), le16(flags), le16(method), le16(0), le16(0), le32(crc),
-                le32(csize), le32(usize), le16(n.length), le16(0), n);
+        return bytes(le32(0x04034B50L), le16(20), le16(flags), le16(method), le16(0), le16(0), le32(crc), le32(csize),
+                le32(usize), le16(n.length), le16(0), n);
     }
 
     private static byte[] rawDescriptor(long crc, long csize, long usize) {
         return bytes(le32(0x08074B50L), le32(crc), le32(csize), le32(usize));
     }
 
-    private static byte[] rawCd(String name, int method, int flags, long crc, long csize, long usize,
-            long offset) {
+    private static byte[] rawCd(String name, int method, int flags, long crc, long csize, long usize, long offset) {
         byte[] n = name.getBytes(StandardCharsets.UTF_8);
-        return bytes(le32(0x02014B50L), le16(20), le16(20), le16(flags), le16(method), le16(0), le16(0),
-                le32(crc), le32(csize), le32(usize), le16(n.length), le16(0), le16(0), le16(0), le16(0),
-                le32(0), le32(offset), n);
+        return bytes(le32(0x02014B50L), le16(20), le16(20), le16(flags), le16(method), le16(0), le16(0), le32(crc),
+                le32(csize), le32(usize), le16(n.length), le16(0), le16(0), le16(0), le16(0), le32(0), le32(offset), n);
     }
 
     private static byte[] rawEocd(int count, long cdSize, long cdOffset) {
@@ -610,16 +596,16 @@ class SkillZipValidatorTest {
     }
 
     private static byte[] rawEocd(int count, long cdSize, long cdOffset, byte[] comment) {
-        return bytes(le32(0x06054B50L), le16(0), le16(0), le16(count), le16(count), le32(cdSize),
-                le32(cdOffset), le16(comment.length), comment);
+        return bytes(le32(0x06054B50L), le16(0), le16(0), le16(count), le16(count), le32(cdSize), le32(cdOffset),
+                le16(comment.length), comment);
     }
 
     private static byte[] le16(int value) {
-        return new byte[] { (byte) value, (byte) (value >> 8) };
+        return new byte[]{(byte) value, (byte) (value >> 8)};
     }
 
     private static byte[] le32(long value) {
-        return new byte[] { (byte) value, (byte) (value >> 8), (byte) (value >> 16), (byte) (value >> 24) };
+        return new byte[]{(byte) value, (byte) (value >> 8), (byte) (value >> 16), (byte) (value >> 24)};
     }
 
     private static byte[] bytes(byte[]... parts) {

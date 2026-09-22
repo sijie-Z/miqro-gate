@@ -322,8 +322,8 @@ public final class SkillZipValidator {
                 next = dataStart + declaredCsize;
             } else if (method == 8) {
                 boolean viaDescriptor = (flags & 8) != 0;
-                Inflated inflated = inflateEntry(zip, dataStart,
-                        viaDescriptor ? cdOffset - dataStart : declaredCsize, decompressed);
+                Inflated inflated = inflateEntry(zip, dataStart, viaDescriptor ? cdOffset - dataStart : declaredCsize,
+                        decompressed);
                 if (viaDescriptor) {
                     // #1242 direction 2: the descriptor is what a streaming
                     // reader uses for sizes; it must match the bytes actually
@@ -361,8 +361,7 @@ public final class SkillZipValidator {
         }
     }
 
-    private static CdEntry[] parseCentralDirectory(byte[] zip, int eocd, int totalEntries, long cdOffset,
-            long cdSize) {
+    private static CdEntry[] parseCentralDirectory(byte[] zip, int eocd, int totalEntries, long cdOffset, long cdSize) {
         CdEntry[] entries = new CdEntry[totalEntries];
         int at = (int) cdOffset;
         for (int i = 0; i < totalEntries; i++) {
@@ -442,8 +441,8 @@ public final class SkillZipValidator {
     }
 
     /**
-     * Reads the data descriptor after a bit-3 entry's deflated data and requires
-     * it to describe the bytes that were actually inflated (the conventional
+     * Reads the data descriptor after a bit-3 entry's deflated data and requires it
+     * to describe the bytes that were actually inflated (the conventional
      * 0x08074b50 signature is optional per APPNOTE; both spellings are read).
      */
     private static long readDescriptor(byte[] zip, long at, Inflated inflated, long limit) {
@@ -471,8 +470,8 @@ public final class SkillZipValidator {
 
     /**
      * Locates the end-of-central-directory record the way the directory-based
-     * readers do: the last occurrence of the signature whose comment length
-     * reaches exactly to the end of the file.
+     * readers do: the last occurrence of the signature whose comment length reaches
+     * exactly to the end of the file.
      */
     private static int findEocd(byte[] zip) {
         if (zip.length < 22) {
@@ -487,10 +486,10 @@ public final class SkillZipValidator {
     }
 
     /**
-     * Scans an extra-field block and refuses zip64 markers: they carry
-     * alternative sizes that some readers honour, which is precisely the kind of
-     * second description this validator must not accept unverified. A malformed
-     * block is refused as well.
+     * Scans an extra-field block and refuses zip64 markers: they carry alternative
+     * sizes that some readers honour, which is precisely the kind of second
+     * description this validator must not accept unverified. A malformed block is
+     * refused as well.
      */
     private static void requireNoZip64Extra(byte[] zip, int at, int length) {
         int end = at + length;
