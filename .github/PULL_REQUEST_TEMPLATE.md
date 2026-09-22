@@ -36,7 +36,8 @@ Goal: Gx.y
 ## Agent checklist
 
 - [ ] Only the declared Goal is included
-- [ ] `docs/progress.md` records exact results
+- [ ] 本 PR 是否属于 progress 回流批次：**Yes / No**
+      （只有 `Yes` 才要求这一批把结果写入 `docs/progress.md`，见 `docs/git-workflow.md` §10）
 - [ ] No force push, history rewrite, hidden failing test or unapproved dependency
 - [ ] No real credential, customer content, dump or generated export is committed
 
