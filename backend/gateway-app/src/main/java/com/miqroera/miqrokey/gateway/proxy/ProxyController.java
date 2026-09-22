@@ -65,6 +65,7 @@ import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.LongConsumer;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -345,7 +346,18 @@ public class ProxyController {
                             e -> writeError(exchange,
                                     new AuthFailureException(HttpStatus.BAD_GATEWAY, "upstream_unavailable",
                                             "Upstream provider is unreachable")))
-                    .onErrorResume(PrematureCloseException.class, e -> upstreamClosedBeforeFirstByte(exchange, e));
+                    .onErrorResume(PrematureCloseException.class, e -> upstreamClosedBeforeFirstByte(exchange, e))
+                    // #1375: the same leak, one operator further out. The two
+                    // gateway-owned deadlines (responseTimeout at the overall
+                    // level, streamIdleTimeout on the observed body) are plain
+                    // Flux/Mono timeouts: they emit
+                    // java.util.concurrent.TimeoutException, which is neither a
+                    // WebClientRequestException nor a PrematureCloseException, so
+                    // it matched none of the clauses above and a gateway-side
+                    // deadline rendered as the container's 500 document. The
+                    // upstream first-byte timeout is reactor-netty's own
+                    // ReadTimeoutException and keeps its existing mapping.
+                    .onErrorResume(TimeoutException.class, e -> upstreamDeadlineExceeded(exchange, e));
         }).onErrorResume(DataBufferLimitException.class,
                 e -> writeError(exchange, new AuthFailureException(HttpStatus.PAYLOAD_TOO_LARGE, "payload_too_large",
                         "Request body exceeds the gateway buffer limit")));
@@ -944,6 +956,30 @@ public class ProxyController {
         }
         return writeError(exchange, new AuthFailureException(HttpStatus.BAD_GATEWAY, "upstream_unavailable",
                 "Upstream provider closed the connection before sending a response body"));
+    }
+
+    /**
+     * A gateway-owned deadline expired: the overall hard deadline
+     * ({@code miqrokey.gateway.upstream.response-timeout}) or the stream-idle
+     * deadline ({@code miqrokey.gateway.upstream.stream-idle-timeout}) — the latter
+     * when the upstream announced a status but never sent a body byte.
+     *
+     * <p>
+     * Nothing has been relayed downstream in either case, so the response is still
+     * uncommitted and the protocol envelope can be written; the deadline then maps
+     * exactly like its transport siblings — the upstream did not produce a usable
+     * response in time. Once a body byte has been relayed the response is committed
+     * and any UTF-8 envelope would corrupt the stream already on the wire, so the
+     * deadline is propagated unchanged, for the same reason as
+     * {@link #upstreamClosedBeforeFirstByte}.
+     * </p>
+     */
+    private Mono<Void> upstreamDeadlineExceeded(ServerWebExchange exchange, TimeoutException error) {
+        if (exchange.getResponse().isCommitted()) {
+            return Mono.error(error);
+        }
+        return writeError(exchange, new AuthFailureException(HttpStatus.BAD_GATEWAY, "upstream_unavailable",
+                "Upstream provider did not respond before the gateway deadline"));
     }
 
     private Mono<Void> writeError(ServerWebExchange exchange, AuthFailureException e) {
