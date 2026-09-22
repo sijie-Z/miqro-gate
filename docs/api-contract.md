@@ -624,7 +624,7 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `GET /api/v1/admin/subscriptions/{subscriptionId}/cost-allocation?from&to` | 已持久化的分摊行（不重算） |
 | `POST /api/v1/admin/subscriptions/{subscriptionId}/cost-allocation/allocate?from&to` | 计算并持久化分摊，返回行 |
 
-行字段：`targetType`（当前 `PROJECT`）、`targetId`、`fixedCost`（订阅价按窗口/周期天数比例折算）、`usageCost`（本地 usage × 最新价格快照，每百万 token 单价）、`weightTokens`、`allocatedAmount`、`currency`、`algorithmVersion`（当前 `1`）、`generatedAt`。
+行字段：`targetType`（当前 `PROJECT`）、`targetId`、`fixedCost`（订阅价按窗口时长占订阅周期的份额折算，毫秒精度、不截断到整天；订阅无账期或 PAYG 时为 0）、`usageCost`（本地 usage × 最新价格快照，每百万 token 单价）、`weightTokens`、`allocatedAmount`、`currency`、`algorithmVersion`（当前 `1`）、`generatedAt`。
 
 语义：
 

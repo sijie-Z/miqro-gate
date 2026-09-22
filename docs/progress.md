@@ -1808,7 +1808,7 @@
 
 - `V10__cost_allocations.sql`：按订阅周期/项目对象的成本分摊表；唯一键 `(subscription_id, period_start, period_end, target_type, target_id, algorithm_version)` 使重跑幂等、算法升级另起版本。
 - `domain`：`CostAllocation` + `CostAllocationTargetType` + `CostAllocationRepository`（幂等 upsert、按周期查询）。
-- `control-plane`：`CostAllocationService` —— 管理端触发分摊：本地 usage（按订阅凭证归属，输入+输出 token，按产品/模型计价）→ 每百万 token × 最新价格快照 = usageCost；非 PAYG 订阅价按窗口/周期天数比例折算 fixedCost，按项目 Token 权重分摊；`allocatedAmount = usageCost + fixedShare`；无用量不产出行。
+- `control-plane`：`CostAllocationService` —— 管理端触发分摊：本地 usage（按订阅凭证归属，输入+输出 token，按产品/模型计价）→ 每百万 token × 最新价格快照 = usageCost；非 PAYG 订阅价按窗口/周期时长份额（毫秒）折算 fixedCost，按项目 Token 权重分摊；`allocatedAmount = usageCost + fixedShare`；无用量不产出行。
 - `AdminCostAllocationController`：`GET/POST /api/v1/admin/subscriptions/{id}/cost-allocation[/allocate]?from&to`（SYSTEM_ADMIN only）。
 
 ### 测试（本 Goal 新增 8 个）
@@ -1819,7 +1819,7 @@
 ### 风险与边界
 
 - 价格取分配时刻最新快照；逐事件价格快照为 usage_event 延后列（database-schema §6），价格变更后重跑同版本会覆盖历史——文档已注明。
-- 分摊只覆盖经 Gateway 且归属该订阅凭证的流量；固定成本按窗口天数折算（非精确到小时）。
+- 分摊只覆盖经 Gateway 且归属该订阅凭证的流量；固定成本按窗口时长占订阅周期的**份额**折算（毫秒级，非整天截断——原实现用 `Duration.toDays()` 向下取整到整天，<24h 窗口算 0，已由 #1311 / PR #1317 修正为 `toMillis()`）。
 - 用户维度（target_type=USER）预留，当前只产出 PROJECT 行。
 
 ### 验证

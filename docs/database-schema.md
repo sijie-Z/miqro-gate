@@ -357,7 +357,7 @@ URL（创建时经控制面 SSRF 门控：默认仅公网 https，`MIQROKEY_CONT
 
 ### `cost_allocations` (V10，G4.3 实现)
 
-按 Subscription 周期、项目对象记录：`fixed_cost`（Plan 订阅价按窗口/订阅周期天数比例折算）、`usage_cost`（本地 usage × 最新价格快照，每百万 token 单价）、`weight_tokens`（权重 Token = 输入+输出）、`allocated_amount`（= usage + fixed 份额）、`currency`、`algorithm_version`（当前 `1`；唯一键含版本，重跑同版本幂等覆盖、新算法另起历史行）、`generated_at`。唯一 `(subscription_id, period_start, period_end, target_type, target_id, algorithm_version)`。写入路径：`CostAllocationService.allocate`（管理端触发）——固定成本按 Token 权重在项目间分摊（无用量不产出行）；PAYG 订阅无固定成本。价格取**分配时刻**的最新快照。注意这与按量成本的口径不同——后者自 #710 F21-A 起读行内冻结价格（见 §6）。分摊改读冻结基座会牵动"同版本重跑覆盖历史"的语义，属独立决策，尚未切换。
+按 Subscription 周期、项目对象记录：`fixed_cost`（Plan 订阅价按窗口时长占订阅周期的份额折算，毫秒精度、不截断到整天；订阅无账期或 PAYG 时为 0）、`usage_cost`（本地 usage × 最新价格快照，每百万 token 单价）、`weight_tokens`（权重 Token = 输入+输出）、`allocated_amount`（= usage + fixed 份额）、`currency`、`algorithm_version`（当前 `1`；唯一键含版本，重跑同版本幂等覆盖、新算法另起历史行）、`generated_at`。唯一 `(subscription_id, period_start, period_end, target_type, target_id, algorithm_version)`。写入路径：`CostAllocationService.allocate`（管理端触发）——固定成本按 Token 权重在项目间分摊（无用量不产出行）；PAYG 订阅无固定成本。价格取**分配时刻**的最新快照。注意这与按量成本的口径不同——后者自 #710 F21-A 起读行内冻结价格（见 §6）。分摊改读冻结基座会牵动"同版本重跑覆盖历史"的语义，属独立决策，尚未切换。
 
 ### `cache_entry` (V5，当前实现)
 
