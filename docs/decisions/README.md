@@ -28,8 +28,10 @@
 - [ADR-0017：平台 OIDC 登录（P0a）（Accepted）](0017-platform-oidc-login.md)
 - [ADR-0018：单密钥多项目——key×project 多绑定与标签选择（Accepted，方向，2026-09-15）](0018-single-key-multi-project.md)
 - [ADR-0020：配额软着陆——REJECT 规则超限拒绝请求（429）（Accepted，2026-09-16）](0020-quota-soft-landing.md)
+- [ADR-0021：同产品凭证回退——多凭证切换与「每笔唯一归属」的兼容设计（Accepted（有条件）：2026-09-22 采纳方向，首期限定「同供应商 + 同 product/model 兼容池」，条件见文件 §0）](0021-same-product-credential-failover.md)
 - [ADR-0022：语义缓存启用评估——正文向量化出网关的合规边界（Accepted：维持不启用 + 批准 P0/P1 测量，P2 若做则 B2 优先）](0022-semantic-cache-evaluation.md)
-- [ADR-0024：请求侧可选改造②——错误驱动的整流重试（Accepted（部分）：选项 B 观察档已作为一期交付（#770 / PR #1018）；C/D/E 仍为提案，见文件 §7）](0024-request-side-rectification-retry.md)
+- [ADR-0023：请求侧可选改造①——prompt 缓存断点自动注入（Accepted（有条件）：2026-09-22 采纳方向，默认关 / Key 级 opt-in / 只加标记，条件见文件 §0）](0023-request-side-cache-breakpoint-injection.md)
+- [ADR-0024：请求侧可选改造②——错误驱动的整流重试（Accepted（部分）：选项 B 观察档已作为一期交付（#770 / PR #1018）；2026-09-22 进一步限定实现首期只做 thinking/signature 整流、`budget_tokens` 留二期，条件见文件 §0；C/D/E 其余待二期拍板）](0024-request-side-rectification-retry.md)
 - [ADR-0025：Agent 生命周期补齐——删除 / 重新启用 / 改名（Accepted：选项 D，实现见 #1012）](0025-agent-lifecycle.md)
 - [ADR-0027：内容过滤 Phase 2——本地规则 + shadow + 异步 + 不阻断（Accepted，2026-09-20；#740 保持 OPEN 跟踪实现）](0027-content-filtering-phase2.md)
 
@@ -39,8 +41,6 @@
 
 ## 待拍板（等一句话）
 
-- [ADR-0021：同产品凭证回退——多凭证切换与「每笔唯一归属」的兼容设计（Proposed，待所有者拍板）](0021-same-product-credential-failover.md)
-- [ADR-0023：请求侧可选改造①——prompt 缓存断点自动注入（Proposed，待所有者拍板；opt-in 按 Key，见 issue #769）](0023-request-side-cache-breakpoint-injection.md)
 - [ADR-0026：速率限流（TPM/RPM）评估与决策留档（Proposed，待所有者拍板；选项 D「只告警」已作为观测一期交付：issue #706 / PR #1016，A/B/C 未动）](0026-rate-limiting-evaluation.md)
 
 - （非独立提案）ADR-0024 的二期选项 C/D/E：正文已「部分 Accepted」，二期未拍板——按文件 §3 的触发条件、等一期观察数据支持。
