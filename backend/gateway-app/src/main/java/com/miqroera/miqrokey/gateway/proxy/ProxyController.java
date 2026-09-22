@@ -380,6 +380,17 @@ public class ProxyController {
         }
         // Waiter: replay the leader's response byte-identically, or fall back.
         return flight.shared().flatMap(cached -> {
+            if (!cached.isComplete()) {
+                // The leader completed with a no-cache marker: a non-2xx reply, an
+                // oversized body, or one that references tool calls — none of which
+                // the gateway stores. The marker carries an empty body, so replaying
+                // it would answer this client with an empty 200/4xx/5xx that the
+                // leader never received, and its own call would never reach the
+                // upstream. Do our own call instead, as the SPI contract promises.
+                log.debug("Coalescer leader had nothing replayable (requestId={}); falling back to own upstream call",
+                        requestId);
+                return doForward(exchange, ctx, body, modelName, cacheKey, requestId, startMillis, streaming).then();
+            }
             publishCoalescedUsage(ctx, modelName, cached, cacheKey, requestId,
                     clientAddressResolver.resolve(exchange.getRequest()));
             return sseReplayEngine.replay(cached, exchange.getResponse(), requestId, "coalesced");

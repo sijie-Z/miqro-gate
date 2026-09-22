@@ -591,6 +591,56 @@ class VirtualKeyAuthContractTest {
 
             assertThat(mockProvider.getCapturedRequests()).hasSize(2);
         }
+
+        @Test
+        @DisplayName("output-shaping knobs split the key: no replay across budgets, stop strings, logprobs (#1302)")
+        void outputShapingParametersSplitTheKey() throws InterruptedException {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
+
+            // A chat body keeps only system + last user message as its key scope,
+            // so every other output-shaping field must be an explicit key
+            // dimension. Each pair below is identical except for one knob and
+            // carries a message text unique to that pair; before #1302 both
+            // members of a pair produced one key and the second request replayed
+            // the first answer byte-for-byte instead of going upstream.
+            int before = mockProvider.getCapturedRequests().size();
+            assertSplits("""
+                    {"model":"gpt-4o-mini","messages":[{"role":"user","content":"cache probe 1302 budget"}],
+                     "max_completion_tokens":16}""", """
+                    {"model":"gpt-4o-mini","messages":[{"role":"user","content":"cache probe 1302 budget"}],
+                     "max_completion_tokens":4096}""");
+            assertSplits("""
+                    {"model":"gpt-4o-mini","messages":[{"role":"user","content":"cache probe 1302 stop"}],
+                     "stop_sequences":["</answer>"]}""", """
+                    {"model":"gpt-4o-mini","messages":[{"role":"user","content":"cache probe 1302 stop"}]}""");
+            assertSplits("""
+                    {"model":"gpt-4o-mini","messages":[{"role":"user","content":"cache probe 1302 logprobs"}],
+                     "logprobs":true,"top_logprobs":5}""", """
+                    {"model":"gpt-4o-mini","messages":[{"role":"user","content":"cache probe 1302 logprobs"}]}""");
+            assertThat(mockProvider.getCapturedRequests()).hasSize(before + 6);
+        }
+
+        /**
+         * Posts both bodies with the cache opt-in header and asserts the second one is
+         * a MISS with its own upstream exchange — i.e. the two bodies are different
+         * cache keys.
+         */
+        private void assertSplits(String first, String second) throws InterruptedException {
+            webTestClient.post().uri("/v1/chat/completions").header(CacheEligibility.CACHEABLE_HEADER, "1")
+                    .bodyValue(first).exchange().expectStatus().isOk().expectHeader()
+                    .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss");
+            awaitCacheFill();
+            int before = mockProvider.getCapturedRequests().size();
+
+            byte[] replayed = webTestClient.post().uri("/v1/chat/completions")
+                    .header(CacheEligibility.CACHEABLE_HEADER, "1").bodyValue(second).exchange().expectStatus().isOk()
+                    .expectHeader().valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss").expectBody().returnResult()
+                    .getResponseBody();
+
+            assertThat(new String(replayed, StandardCharsets.UTF_8)).isEqualTo(ChatFixtures.RESPONSE_BASIC);
+            assertThat(mockProvider.getCapturedRequests()).hasSize(before + 1);
+        }
     }
 
     // -------------------------------------------------------------------
