@@ -1243,7 +1243,7 @@ detail_currency, detail_occurred_at, detail_status, detail_bucket_key, detail_pr
 - 客户端必须且只能提供**一个**凭证 Header：`Authorization: Bearer <key>`（或裸值）、`x-api-key`、`api-key`。零个或多个凭证 Header → `401`（错误体不区分具体原因，防枚举）。
 - **凭据值错误的统一语义**：未知 / 畸形（含缺失后缀、后缀含点）的 Virtual Key → `404 virtual_key_invalid`——各场景响应逐字一致、与"未知 Key"不可区分（防枚举；见 `VirtualKeyAuthContractTest`）。注意与 MCP 数据面（消费者 Key/JWT）同场景的 `401 invalid_api_key` 口径不同：`/v1` 用 404、MCP 用 401，均为各通道既定设计。
 - Key 格式 `mqk_live_<publicKeyId>_<secret>.<projectTag>`（后缀在解析级必填）：点号后缀是**路由选择器**（明文，用于在 Key 的多个项目绑定间选择），鉴权权威是数据库中的 `key_project_binding`，标签本身不承载权限。HMAC 摘要不包含标签。
-- `GET /v1/context-registry`（CAA，#639）：本地 Agent 的 repo → 项目映射来源。虚拟 Key 认证（**identity-only**，#641：只做凭证抽取/解析/HMAC，不走归属阶梯——多绑定 Key 带任意（含不匹配）后缀都可读取；统一 404/401 失败语义）；**只返回该 Key ACTIVE 绑定项目**下的 `project_repositories` 行——`{ entries: [{ repoKey, projectId, projectTag }] }`；无持久化时返回空表。注册表读取发生在 Agent 同步（非热路径），直接查库、不占快照。
+- `GET /v1/context-registry`（CAA，#639）：本地 Agent 的 repo → 项目映射来源。虚拟 Key 认证（**identity-only**，#641：只做凭证抽取/解析/HMAC，不走归属阶梯——多绑定 Key 带任意（含不匹配）后缀都可读取；统一 404/401 失败语义）；**只返回该 Key ACTIVE 绑定项目**下的 `project_repositories` 行——`{ entries: [{ repoKey, projectId, projectTag }] }`；无持久化时返回空表。注册表读取发生在 Agent 同步（非热路径），直接查库、不占快照。读与热路径共用 `credential-decrypt` 有界调度器并带语句级上限（8 s，`REGISTRY_TIMEOUT` 减 2 s；#1400），失败分两种 503 信封：`context_registry_unavailable`（放弃等待：语句级中止或 10 s 到点）与 `context_registry_error`（数据库故障非超时）——**两者不可互相顶替**，"超时"是对本网关自身截止的断言。
 - **请求上下文解析阶梯（CAA，#633）**：身份（Key/HMAC）与归属（本请求计入哪个项目）分离，归属按固定阶梯裁决，首个命中生效：
   1. `X-Miqro-Project-Id` 声明（**不可信输入**，仅当目标项目确为该 Key 的绑定时生效）→ `RESOLVED_HEADER`；
   2. 点号后缀标签命中该 Key 的某个绑定 → `RESOLVED_SUFFIX`；

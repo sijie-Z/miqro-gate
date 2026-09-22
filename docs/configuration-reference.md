@@ -132,7 +132,7 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_UPSTREAM_CONNECT_TIMEOUT` | `PT10S` | 建立上游连接超时 |
 | `MIQROKEY_UPSTREAM_FIRST_BYTE_TIMEOUT` | `PT120S` | 等待首个响应字节（含头）超时；超时永不重试 |
 | `MIQROKEY_UPSTREAM_STREAM_IDLE_TIMEOUT` | `PT5M` | SSE 无数据超时（每个 chunk 重置）；已出首字节后超时 → `STREAM_INTERRUPTED` |
-| `MIQROKEY_UPSTREAM_RESPONSE_TIMEOUT` | `PT10M` | 整体硬截止（自第一次尝试起计时，不重置）；流式空闲另算 |
+| `MIQROKEY_UPSTREAM_RESPONSE_TIMEOUT` | `PT10M` | 整体硬截止（自请求体收齐起计时，不重置）：同一份预算连续覆盖**等调度器车道、L2 读、凭证解密与全部上游尝试**，拆成两个互不重叠的窗口（#1388 前该截止装在调度器 hop 之后，排队等待落在它之外）；流式空闲另算 |
 | `MIQROKEY_MAX_INBOUND_HEADER_BYTES` | `32KB` | 入站 Header 上限（G2.6）；Netty 在路由前拒绝超限请求 → `431` |
 | `MIQROKEY_MAX_CONTROL_BODY_BYTES` | `1MB` | 管理 API body 上限 |
 | `MIQROKEY_MAX_PROXY_BUFFER_BYTES` | `256KB` | 只限制必要解析缓冲，不聚合完整响应 |
@@ -215,6 +215,8 @@ Gateway 使用版本化只读路由快照 + 有界用量写入队列（G2.2/G2.4
 | `MIQROKEY_CACHE_L2_TTL` | `300s` | L2 TTL |
 
 队列达到高水位必须告警；队列满不能静默丢弃——写失败保留在队列并重试，幂等键防止双计。
+
+**`GET /v1/context-registry` 的两个内建界限（无对应配置项，故列在此处）：** 该端点与热路径共用 `credential-decrypt` 有界调度器（4 车道，`GatewayFeatureConfig` 硬编码），其阻塞读自带语句级上限（`ContextRegistryController.STATEMENT_TIMEOUT_SECONDS`，固定 8 s，即 `REGISTRY_TIMEOUT` 10 s 减 2 s），因此车道与连接在数据库不返回时也**由网关主动中止**收回，而不是靠 Reactor 计时器停止等待（#1400：`.timeout()` 只停止等待、不会中断已开始的阻塞读）。两种失败给出**不同**的 503 信封，便于不查网关日志即区分：`context_registry_unavailable`（我们放弃等待——语句级中止或 10 s 计时到点）、`context_registry_error`（数据库故障而非超时，如连接中断/表不存在）。
 
 ## 6. Usage、成本与后台任务
 
