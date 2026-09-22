@@ -105,13 +105,13 @@ public class AdminProviderService {
     @Transactional
     public UpstreamSubscription createSubscription(UUID tenantId, UUID adminId, UUID providerProductId, String name,
             BillingMode billingMode, PlanScope planScope, BigDecimal subscriptionPrice, String currency,
-            Long quotaTotal, String quotaUnit) {
+            Long quotaTotal, String quotaUnit, Instant periodStart, Instant periodEnd, Instant renewalAt) {
         productRepository.findById(providerProductId).orElseThrow(
                 () -> new ApiException(HttpStatus.NOT_FOUND, "PRODUCT_NOT_FOUND", "Provider product not found"));
         UpstreamSubscription subscription = new UpstreamSubscription(UUID.randomUUID(), tenantId, providerProductId,
                 name, null, billingMode != null ? billingMode : BillingMode.FIXED_SUBSCRIPTION,
-                planScope != null ? planScope : PlanScope.NONE, subscriptionPrice, currency, null, null, null,
-                quotaTotal, quotaUnit, SubscriptionStatus.ACTIVE, null,
+                planScope != null ? planScope : PlanScope.NONE, subscriptionPrice, currency, periodStart, periodEnd,
+                renewalAt, quotaTotal, quotaUnit, SubscriptionStatus.ACTIVE, null,
                 com.miqroera.miqrokey.domain.model.StatusSource.MANUAL_UNKNOWN, 0, Instant.now(), Instant.now());
         subscriptionRepository.insert(subscription);
         auditService.record(tenantId, adminId, "SUBSCRIPTION_CREATE", "SUBSCRIPTION", subscription.id(),
@@ -121,14 +121,16 @@ public class AdminProviderService {
 
     public UpstreamSubscription updateSubscription(UUID tenantId, UUID adminId, UUID subscriptionId, String name,
             BigDecimal subscriptionPrice, String currency, Long quotaTotal, String quotaUnit,
-            SubscriptionStatus status) {
+            SubscriptionStatus status, Instant periodStart, Instant periodEnd, Instant renewalAt) {
         UpstreamSubscription subscription = requireSubscription(tenantId, subscriptionId);
         UpstreamSubscription updated = new UpstreamSubscription(subscription.id(), subscription.tenantId(),
                 subscription.providerProductId(), name != null ? name : subscription.name(),
                 subscription.externalAccountRef(), subscription.billingMode(), subscription.planScope(),
                 subscriptionPrice != null ? subscriptionPrice : subscription.subscriptionPrice(),
-                currency != null ? currency : subscription.currency(), subscription.periodStart(),
-                subscription.periodEnd(), subscription.renewalAt(),
+                currency != null ? currency : subscription.currency(),
+                periodStart != null ? periodStart : subscription.periodStart(),
+                periodEnd != null ? periodEnd : subscription.periodEnd(),
+                renewalAt != null ? renewalAt : subscription.renewalAt(),
                 quotaTotal != null ? quotaTotal : subscription.quotaTotal(),
                 quotaUnit != null ? quotaUnit : subscription.quotaUnit(),
                 status != null ? status : subscription.status(), subscription.lastStatusSyncAt(),

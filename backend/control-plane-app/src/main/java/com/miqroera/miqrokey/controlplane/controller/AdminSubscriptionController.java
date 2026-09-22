@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -55,14 +56,15 @@ public class AdminSubscriptionController {
         var admin = userContext.getUser();
         return providerService.createSubscription(admin.tenantId(), admin.id(), body.providerProductId(), body.name(),
                 body.billingMode(), body.planScope(), body.subscriptionPrice(), body.currency(), body.quotaTotal(),
-                body.quotaUnit());
+                body.quotaUnit(), body.periodStart(), body.periodEnd(), body.renewalAt());
     }
 
     @PatchMapping("/{subscriptionId}")
     public UpstreamSubscription update(@PathVariable UUID subscriptionId, @RequestBody SubscriptionUpdateRequest body) {
         var admin = userContext.getUser();
         return providerService.updateSubscription(admin.tenantId(), admin.id(), subscriptionId, body.name(),
-                body.subscriptionPrice(), body.currency(), body.quotaTotal(), body.quotaUnit(), body.status());
+                body.subscriptionPrice(), body.currency(), body.quotaTotal(), body.quotaUnit(), body.status(),
+                body.periodStart(), body.periodEnd(), body.renewalAt());
     }
 
     @GetMapping("/{subscriptionId}/seats")
@@ -86,11 +88,12 @@ public class AdminSubscriptionController {
     }
 
     public record SubscriptionCreateRequest(UUID providerProductId, String name, BillingMode billingMode,
-            PlanScope planScope, BigDecimal subscriptionPrice, String currency, Long quotaTotal, String quotaUnit) {
+            PlanScope planScope, BigDecimal subscriptionPrice, String currency, Long quotaTotal, String quotaUnit,
+            Instant periodStart, Instant periodEnd, Instant renewalAt) {
     }
 
     public record SubscriptionUpdateRequest(String name, BigDecimal subscriptionPrice, String currency, Long quotaTotal,
-            String quotaUnit, SubscriptionStatus status) {
+            String quotaUnit, SubscriptionStatus status, Instant periodStart, Instant periodEnd, Instant renewalAt) {
     }
 
     public record SeatRequest(String externalSeatRef, String displayName, UUID assignedUserId) {
