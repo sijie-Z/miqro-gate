@@ -160,7 +160,7 @@ public class QuotaEnforcementService {
      * recovered nothing whenever the evaluator has not run in between (#1316).
      *
      * <p>
-     * A row written before V73 carries no reading, and a rule whose metric or
+     * A row written before V76 carries no reading, and a rule whose metric or
      * period changed holds a reading in a unit that no longer compares; those fall
      * back to the untouched-since comparison. A derivation that failed outright
      * keeps the verdict whatever the columns say (ADR-0020 §4: 宁可维持现状也不静默放行) — the

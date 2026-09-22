@@ -10,14 +10,14 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
   从 `usage_event` 现算的。于是一次保留策略的 `USAGE_DELETE` 把当前窗口的用量行物理删掉之后，下一轮评估算出的水位归零、
   规则不再 EXCEEDED、判定行消失、**流量重新放行**；而 ADR-0020 D2 给用户的承诺是「直到配额重置或提高限额才恢复」。
   现在判定**粘在窗口里**：跨轮结转 `window_end` 与 `blocked_at`，实时水位掉下去也不解除；只有 ①窗口滚过去
-  ②管理员把限额提到记录在案的读数 `observed_used` 之上（V73 增列 `quota_enforcement.observed_used`）
+  ②管理员把限额提到记录在案的读数 `observed_used` 之上（V76 增列 `quota_enforcement.observed_used`）
   ③规则被停用/删除，这三条能解掉 block。**恢复路径的比较基准是表里那条读数，不是 `quota_rules.updated_at`**：
   任何一次保存都会把 `updated_at` 顶到当下，而评估器 60s 才跑一轮，于是「保存 → 删用量 → 下一轮评估」这个顺序
   先给恢复路径上膛、再扣扳机——限额仍然低于当时的读数，block 却被解掉。记录读数每轮跟着实时水位上移，不会退化成
   过期下界、让后来的提额错判成「已恢复」；采样边界与触发判定的那句「达到限额即 EXCEEDED」一致（`used >= limit`，
   不是严格大于）。真库集成用例把这条时间线造了出来（`QuotaBlockSurvivesUsageDeletionIntegrationTest`，7 例：
   删除不解除、跨窗口、提额解除、限额恰好提到读数、编辑后删除……），另有 12 例单元用例覆盖计算异常隔离、
-  记录读数上移与 V73 之前的旧行回退。
+  记录读数上移与 V76 之前的旧行回退。
 
 ### 2026-09-21
 

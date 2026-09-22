@@ -41,7 +41,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>
  * 集成测试（{@code QuotaBlockSurvivesUsageDeletionIntegrationTest}）在真库上覆盖"删数据"与 "跨窗口
- * / 提额"两条端到端路径；这里补它造不出来的几格：水位计算抛异常、记录读数在两次推导之间 上移（不能落成过期下界）、以及 V73
+ * / 提额"两条端到端路径；这里补它造不出来的几格：水位计算抛异常、记录读数在两次推导之间 上移（不能落成过期下界）、以及 V76
  * 之前的旧行（没有读数）退回按改动时刻比较。断言方式是"没有 发生重写"——(规则, 窗口, 判定时刻) 三元组不变时服务不
  * DELETE、不广播，网关快照因此保持原样。
  * </p>
@@ -238,7 +238,7 @@ class QuotaEnforcementServiceStickyVerdictTest {
     }
 
     @Test
-    @DisplayName("V73 之前写下的行没有读数：退回按改动时刻比较，未改动的规则判定必须保留")
+    @DisplayName("V76 之前写下的行没有读数：退回按改动时刻比较，未改动的规则判定必须保留")
     void legacyRowWithoutAReadingFallsBackToTheEditComparison() throws Exception {
         givenRecorded(new RecordedRow(RULE, WINDOW_END, BLOCKED_AT, "TOKENS", "DAILY", null));
         Mockito.when(watermarks.evaluate(Mockito.any(), Mockito.any())).thenReturn(reading());
@@ -353,7 +353,7 @@ class QuotaEnforcementServiceStickyVerdictTest {
 
     /**
      * A row as {@code quota_enforcement} would hold it; a null reading predates
-     * V73.
+     * V76.
      */
     private record RecordedRow(UUID ruleId, Instant windowEnd, Instant blockedAt, String metric, String period,
             BigDecimal observedUsed) {
