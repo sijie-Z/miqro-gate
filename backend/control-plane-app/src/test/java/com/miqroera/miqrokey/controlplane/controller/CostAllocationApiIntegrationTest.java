@@ -120,6 +120,34 @@ class CostAllocationApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("#1330: a subscription created through the API allocates its plan fixed cost")
+    void fixedCostIsAllocatedForSubscriptionCreatedThroughTheApi() throws Exception {
+        // The catalog and the subscription come from different sides of the write
+        // path: the subscription is created through the API with its period, so the
+        // fixed cost below is only non-zero if the create actually persisted the
+        // period columns (#1330). The sibling tests seed the row with SQL, which is
+        // why they could never catch the missing write path.
+        fx.insertCatalogOnly();
+        String subscriptionId = createSubscriptionViaApi(Map.of("providerProductId", fx.productId.toString(), "name",
+                "Sub", "billingMode", "FIXED_SUBSCRIPTION", "planScope", "PERSONAL", "subscriptionPrice", 100.00,
+                "currency", "USD", "periodStart", "2026-08-01T00:00:00Z", "periodEnd", "2026-08-31T00:00:00Z"));
+        fx.insertCredentialForSubscription(UUID.fromString(subscriptionId));
+        fx.insertPrices();
+        fx.insertUsage(fx.projectA, "req-a-1", 1_000L, 500L);
+        fx.insertUsage(fx.projectB, "req-b-1", 500L, 0L);
+
+        // Fixed 100 prorated over the full 30-day period (the window covers all of
+        // it), split 3:1 — the same arithmetic as the SQL-seeded test, and zero
+        // when the period columns are NULL.
+        mockMvc.perform(post("/api/v1/admin/subscriptions/" + subscriptionId + "/cost-allocation/allocate")
+                .param("from", "2026-08-01T00:00:00Z").param("to", "2026-08-31T00:00:00Z")
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[?(@.targetId=='" + fx.projectA + "')].fixedCost").value(75.0))
+                .andExpect(jsonPath("$[?(@.targetId=='" + fx.projectB + "')].fixedCost").value(25.0));
+    }
+
+    @Test
     @DisplayName("allocation without usage writes nothing")
     void allocateWithoutUsageWritesNothing() throws Exception {
         fx.insertCatalogAndSubscription();
@@ -212,6 +240,16 @@ class CostAllocationApiIntegrationTest {
     // helpers
     // ------------------------------------------------------------------
 
+    /** Creates a subscription through the admin API and returns its id. */
+    private String createSubscriptionViaApi(Map<String, Object> body) throws Exception {
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin/subscriptions").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isOk()).andReturn();
+        return objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id").toString();
+    }
+
     private static Cookie cookie(MvcResult r, String name) {
         if (r.getResponse().getCookies() == null)
             return null;
@@ -280,6 +318,43 @@ class CostAllocationApiIntegrationTest {
                     VALUES (:id, :tenantId, :subscriptionId, 'Cred', 'ACTIVE', 0)
                     """, new MapSqlParameterSource("id", credentialId).addValue("tenantId", tenantId)
                     .addValue("subscriptionId", subscriptionId));
+        }
+
+        /**
+         * Catalog and projects only — the subscription itself is created through the
+         * API so the test exercises the write path (#1330).
+         */
+        void insertCatalogOnly() {
+            jdbc.update("""
+                    INSERT INTO providers (id, slug, display_name, status, version)
+                    VALUES (:id, 'test-provider', 'Test Provider', 'ACTIVE', 0)
+                    """, new MapSqlParameterSource("id", providerId));
+            jdbc.update("""
+                    INSERT INTO provider_products
+                        (id, provider_id, product_code, display_name, billing_mode, credential_topology,
+                         supported_wire_protocols, base_url_templates, auth_scheme, implementation_status, version)
+                    VALUES (:productId, :providerId, 'test-product', 'Test Product', 'FIXED_SUBSCRIPTION',
+                            'SINGLE_SHARED', '["messages"]', '[{"url":"https://api.test.example"}]',
+                            '{"type":"bearer"}', 'VERIFIED', 0)
+                    """, new MapSqlParameterSource("productId", productId).addValue("providerId", providerId));
+            jdbc.update("""
+                    INSERT INTO projects (id, tenant_id, code, name, status, project_tag, version)
+                    VALUES (:a, :tenantId, 'A', 'Project A', 'ACTIVE', 'tag-a', 0),
+                           (:b, :tenantId, 'B', 'Project B', 'ACTIVE', 'tag-b', 0)
+                    """,
+                    new MapSqlParameterSource("a", projectA).addValue("b", projectB).addValue("tenantId", tenantId));
+        }
+
+        /**
+         * The ACTIVE credential row usage rows are attributed through, pointing at a
+         * subscription that was created through the API.
+         */
+        void insertCredentialForSubscription(UUID forSubscriptionId) {
+            jdbc.update("""
+                    INSERT INTO upstream_credentials (id, tenant_id, subscription_id, credential_name, status, version)
+                    VALUES (:id, :tenantId, :subscriptionId, 'Cred', 'ACTIVE', 0)
+                    """, new MapSqlParameterSource("id", credentialId).addValue("tenantId", tenantId)
+                    .addValue("subscriptionId", forSubscriptionId));
         }
 
         /**

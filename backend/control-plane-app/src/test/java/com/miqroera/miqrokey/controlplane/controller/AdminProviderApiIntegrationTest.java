@@ -23,6 +23,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -200,6 +201,132 @@ class AdminProviderApiIntegrationTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.name").value("Team Plan v2"))
                 .andExpect(jsonPath("$.subscriptionPrice").value(299.50)).andExpect(jsonPath("$.currency").value("CNY"))
                 .andExpect(jsonPath("$.quotaTotal").value(12345)).andExpect(jsonPath("$.quotaUnit").value("tokens"));
+    }
+
+    // ------------------------------------------------------------------
+    // subscription period write path (#1330)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("#1330: a create writes the subscription period it was given into the row")
+    void subscriptionCreatePersistsPeriodColumns() throws Exception {
+        fx.insertProviderAndProduct();
+
+        Map<String, Object> body = new java.util.HashMap<>();
+        body.put("providerProductId", fx.productId.toString());
+        body.put("name", "Period Plan");
+        body.put("billingMode", "FIXED_SUBSCRIPTION");
+        body.put("planScope", "PERSONAL");
+        body.put("subscriptionPrice", 100);
+        body.put("currency", "USD");
+        body.put("quotaTotal", 1000);
+        body.put("quotaUnit", "TOKENS");
+        body.put("periodStart", "2026-08-01T00:00:00Z");
+        body.put("periodEnd", "2026-09-01T00:00:00Z");
+        body.put("renewalAt", "2026-09-01T00:00:00Z");
+
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin/subscriptions").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isOk()).andReturn();
+        Map<?, ?> createdBody = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class);
+        UUID subscriptionId = UUID.fromString(createdBody.get("id").toString());
+        assertThat(createdBody.get("periodStart")).as("response periodStart").isNotNull();
+        assertThat(createdBody.get("periodEnd")).as("response periodEnd").isNotNull();
+        assertThat(createdBody.get("renewalAt")).as("response renewalAt").isNotNull();
+        assertThat(Instant.parse((String) createdBody.get("periodStart")))
+                .isEqualTo(Instant.parse("2026-08-01T00:00:00Z"));
+
+        // The row is the truth, not the response body (#1134): the create used to
+        // hardwrite NULL into these three columns whatever the request carried.
+        Map<String, Object> row = jdbc.queryForMap(
+                "SELECT period_start, period_end, renewal_at FROM upstream_subscriptions WHERE id = :id",
+                new MapSqlParameterSource("id", subscriptionId));
+        assertThat(((java.sql.Timestamp) row.get("period_start")).toInstant())
+                .isEqualTo(Instant.parse("2026-08-01T00:00:00Z"));
+        assertThat(((java.sql.Timestamp) row.get("period_end")).toInstant())
+                .isEqualTo(Instant.parse("2026-09-01T00:00:00Z"));
+        assertThat(((java.sql.Timestamp) row.get("renewal_at")).toInstant())
+                .isEqualTo(Instant.parse("2026-09-01T00:00:00Z"));
+    }
+
+    @Test
+    @DisplayName("#1330: a create without a period keeps the three columns NULL — no window is invented")
+    void subscriptionCreateWithoutPeriodKeepsColumnsNull() throws Exception {
+        fx.insertProviderAndProduct();
+
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin/subscriptions").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("providerProductId", fx.productId.toString(),
+                                "name", "No Period", "billingMode", "PAYG", "planScope", "NONE"))))
+                .andExpect(status().isOk()).andReturn();
+        UUID subscriptionId = UUID.fromString(objectMapper
+                .readValue(created.getResponse().getContentAsString(), Map.class).get("id").toString());
+
+        Map<String, Object> row = jdbc.queryForMap(
+                "SELECT period_start, period_end, renewal_at FROM upstream_subscriptions WHERE id = :id",
+                new MapSqlParameterSource("id", subscriptionId));
+        assertThat(row.get("period_start")).isNull();
+        assertThat(row.get("period_end")).isNull();
+        assertThat(row.get("renewal_at")).isNull();
+    }
+
+    @Test
+    @DisplayName("#1330: a PATCH writes the period it carries, and one that omits the period keeps the stored one")
+    void subscriptionPatchPersistsPeriodColumns() throws Exception {
+        fx.insertProviderAndProduct();
+
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin/subscriptions").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("providerProductId", fx.productId.toString(),
+                                "name", "Team Plan", "billingMode", "FIXED_SUBSCRIPTION", "planScope", "TEAM",
+                                "subscriptionPrice", 199, "currency", "USD"))))
+                .andExpect(status().isOk()).andReturn();
+        UUID subscriptionId = UUID.fromString(objectMapper
+                .readValue(created.getResponse().getContentAsString(), Map.class).get("id").toString());
+
+        Map<String, Object> patchBody = new java.util.HashMap<>();
+        patchBody.put("periodStart", "2026-08-01T00:00:00Z");
+        patchBody.put("periodEnd", "2026-09-01T00:00:00Z");
+        patchBody.put("renewalAt", "2026-08-25T00:00:00Z");
+        MvcResult patched = mockMvc
+                .perform(patch("/api/v1/admin/subscriptions/" + subscriptionId)
+                        .contentType(MediaType.APPLICATION_JSON).cookie(sessionCookie, csrfCookie)
+                        .header("X-CSRF-Token", csrfToken).content(objectMapper.writeValueAsString(patchBody)))
+                .andExpect(status().isOk()).andReturn();
+        Map<?, ?> patchedBody = objectMapper.readValue(patched.getResponse().getContentAsString(), Map.class);
+        assertThat(patchedBody.get("periodStart")).as("response periodStart").isNotNull();
+        assertThat(Instant.parse((String) patchedBody.get("periodStart")))
+                .isEqualTo(Instant.parse("2026-08-01T00:00:00Z"));
+        assertThat(Instant.parse((String) patchedBody.get("renewalAt")))
+                .isEqualTo(Instant.parse("2026-08-25T00:00:00Z"));
+
+        Map<String, Object> row = jdbc.queryForMap(
+                "SELECT period_start, period_end, renewal_at FROM upstream_subscriptions WHERE id = :id",
+                new MapSqlParameterSource("id", subscriptionId));
+        assertThat(((java.sql.Timestamp) row.get("period_start")).toInstant())
+                .isEqualTo(Instant.parse("2026-08-01T00:00:00Z"));
+        assertThat(((java.sql.Timestamp) row.get("period_end")).toInstant())
+                .isEqualTo(Instant.parse("2026-09-01T00:00:00Z"));
+        assertThat(((java.sql.Timestamp) row.get("renewal_at")).toInstant())
+                .isEqualTo(Instant.parse("2026-08-25T00:00:00Z"));
+
+        // A later PATCH that says nothing about the period keeps it — the same
+        // null-means-keep merge every other optional field of this PATCH uses.
+        mockMvc.perform(patch("/api/v1/admin/subscriptions/" + subscriptionId)
+                .contentType(MediaType.APPLICATION_JSON).cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("name", "Team Plan v2"))))
+                .andExpect(status().isOk());
+        row = jdbc.queryForMap("SELECT period_start, renewal_at FROM upstream_subscriptions WHERE id = :id",
+                new MapSqlParameterSource("id", subscriptionId));
+        assertThat(((java.sql.Timestamp) row.get("period_start")).toInstant())
+                .isEqualTo(Instant.parse("2026-08-01T00:00:00Z"));
+        assertThat(((java.sql.Timestamp) row.get("renewal_at")).toInstant())
+                .isEqualTo(Instant.parse("2026-08-25T00:00:00Z"));
     }
 
     // ------------------------------------------------------------------
