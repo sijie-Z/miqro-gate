@@ -4,6 +4,7 @@ import { defineComponent } from 'vue';
 import { createPinia } from 'pinia';
 import NextSettingsView from '@/views/next/NextSettingsView.vue';
 import * as api from '@/api';
+import { ApiError } from '@/api/http';
 
 /** UiSelect stub: renders clickable option buttons (mirrors the keys spec). */
 const SelectStub = defineComponent({
@@ -101,6 +102,40 @@ describe('NextSettingsView', () => {
       models: ['deepseek-flash'],
     });
     expect(wrapper.find('[data-testid="unattributed-policy-state"]').text()).toContain('已启用');
+  });
+
+  it('#1306: surfaces a policy load failure instead of rendering nothing', async () => {
+    mockApi.getUnattributedPolicy.mockRejectedValue(
+      new ApiError({
+        type: 'about:blank',
+        title: 'internal error',
+        status: 500,
+        code: 'INTERNAL_ERROR',
+        detail: '服务内部错误，请稍后重试。',
+        requestId: 'rq-1306',
+      }),
+    );
+
+    const wrapper = mount(NextSettingsView, {
+      global: { plugins: [createPinia()], stubs: { UiSelect: SelectStub } },
+    });
+    await flushPromises();
+
+    // The failure must be visible — and must not masquerade as "未配置（失败关闭）".
+    expect(wrapper.find('[data-testid="unattributed-policy-error"]').text()).toContain(
+      '服务内部错误，请稍后重试。',
+    );
+    expect(wrapper.find('[data-testid="unattributed-policy-state"]').exists()).toBe(false);
+
+    // …and the operator must be able to recover without F5.
+    mockApi.getUnattributedPolicy.mockResolvedValue({ configured: false });
+    await wrapper.find('[data-testid="unattributed-policy-retry"]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="unattributed-policy-error"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="unattributed-policy-state"]').text()).toContain(
+      '未配置（失败关闭）',
+    );
   });
 
   it('#647: clear turns the policy off', async () => {
