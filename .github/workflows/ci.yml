@@ -170,6 +170,24 @@ jobs:
       - name: Regression scenarios
         run: python3 deploy/tests/deploy_script_regression.py
 
+  # Whether the one line an operator has to go on says the truth. The backup
+  # entrypoint wraps the documented 4-value exit contract (runbook §441) into a
+  # container log, and #1390 had it reporting `FAILED rc=0` for every failure —
+  # the `$(date)` printed next to `$?` is a command substitution and overwrote
+  # it. ShellCheck cannot ask that question: reading the wrong number is
+  # perfectly valid syntax. So this runs the real entrypoint (mounted from the
+  # repo) against a stub backup script that exits N, and reads the log.
+  backup-entrypoint:
+    name: Backup entrypoint (behavioural)
+    needs: [changes]
+    if: ${{ needs.changes.outputs.compose == 'true' }}
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Exit-code contract
+        run: bash deploy/docker/test-backup-entrypoint.sh
+
   # Whether the F09 breaking-change guard still SAYS NO to a break. The guard is
   # the only automated reader of the api-contract §8 rule, and it had no test:
   # it only ever ran against a baseline regenerated in the same commit, so it was
