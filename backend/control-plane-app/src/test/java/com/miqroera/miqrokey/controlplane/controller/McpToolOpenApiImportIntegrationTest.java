@@ -174,6 +174,51 @@ class McpToolOpenApiImportIntegrationTest {
     }
 
     @Test
+    @DisplayName("a path longer than varchar(512) is skipped per item instead of failing the import")
+    void overlongPathSkipsOnlyThatOperation() throws Exception {
+        ObjectNode spec = objectMapper.createObjectNode();
+        spec.put("openapi", "3.1.0");
+        ObjectNode paths = spec.putObject("paths");
+        paths.putObject("/orders").set("get", op("listOrders", "列出订单"));
+        // 600 chars: over the 512 the single-create endpoint accepts and both
+        // mcp_tools.path / mcp_tool_revisions.path hold. Before issue #1323 this
+        // reached the INSERT, the whole batch rolled back and the caller got a 409
+        // about a duplicate name that did not exist.
+        paths.putObject("/" + "x".repeat(600)).set("get", op("hugePath", "超长路径"));
+
+        mockMvc.perform(post("/api/v1/admin/mcp-services/" + serviceId + "/tools/import")
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .contentType(MediaType.APPLICATION_JSON).content(objectMapper.writeValueAsString(spec)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.created.length()").value(1))
+                .andExpect(jsonPath("$.created[0].toolName").value("list_orders"))
+                .andExpect(jsonPath("$.skipped.length()").value(0))
+                .andExpect(jsonPath("$.parseSkips.length()").value(1))
+                .andExpect(jsonPath("$.parseSkips[0].toolName").value("huge_path"))
+                .andExpect(jsonPath("$.parseSkips[0].reason").value("路径超过 512 字符"));
+
+        mockMvc.perform(get("/api/v1/admin/mcp-services/" + serviceId + "/tools").cookie(sessionCookie))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1));
+    }
+
+    @Test
+    @DisplayName("the path bound is exactly the 512 the column holds: 512 imports, 513 is skipped")
+    void pathBoundaryIsExact() throws Exception {
+        ObjectNode spec = objectMapper.createObjectNode();
+        spec.put("openapi", "3.1.0");
+        ObjectNode paths = spec.putObject("paths");
+        paths.putObject("/" + "y".repeat(511)).set("get", op("atLimit", "恰好 512 字符"));
+        paths.putObject("/" + "z".repeat(512)).set("get", op("overLimit", "513 字符"));
+
+        mockMvc.perform(post("/api/v1/admin/mcp-services/" + serviceId + "/tools/import")
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .contentType(MediaType.APPLICATION_JSON).content(objectMapper.writeValueAsString(spec)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.created.length()").value(1))
+                .andExpect(jsonPath("$.created[0].toolName").value("at_limit"))
+                .andExpect(jsonPath("$.parseSkips.length()").value(1))
+                .andExpect(jsonPath("$.parseSkips[0].toolName").value("over_limit"));
+    }
+
+    @Test
     @DisplayName("invalid specs are rejected before any insert")
     void invalidSpecRejected() throws Exception {
         mockMvc.perform(post("/api/v1/admin/mcp-services/" + serviceId + "/tools/import")
