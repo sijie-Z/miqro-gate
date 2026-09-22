@@ -10,6 +10,8 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
@@ -30,10 +32,13 @@ import java.util.UUID;
  * F60 batch 3 scope enforcement: a key with a capability scope may only reach
  * paths mapped to its capabilities; {@code null} scope keeps full access.
  * Denied attempts are audited (when the key has an issuing admin) and answered
- * with {@code 403 ADMIN_API_SCOPE_DENIED}.
+ * with {@code 403 ADMIN_API_SCOPE_DENIED} — the answer does not depend on the
+ * audit write succeeding (#1408).
  * </p>
  */
 public class AdminApiKeyAuthFilter extends OncePerRequestFilter {
+
+    private static final Logger LOG = LoggerFactory.getLogger(AdminApiKeyAuthFilter.class);
 
     /** Request attribute holding the authenticated admin key id. */
     public static final String KEY_ATTR = "adminApiKeyId";
@@ -146,6 +151,20 @@ public class AdminApiKeyAuthFilter extends OncePerRequestFilter {
         return null;
     }
 
+    /**
+     * Records the scope denial, but never at the cost of answering it.
+     *
+     * <p>
+     * #1408: the audit write is best-effort. Any failure inside
+     * {@link AuditService#record} used to propagate out of this filter — which runs
+     * outside any transaction and before {@code forbiddenScope} — so the caller
+     * received a 500 for a request the gateway had already decided to deny. The
+     * denial is the security decision and must not be coupled to the availability
+     * of the audit table; the loss of the row is traded for a loud log line
+     * instead. Answering 500 also hid the denial from alerting that keys on the
+     * documented {@code ADMIN_API_SCOPE_DENIED} contract.
+     * </p>
+     */
     private void auditDenied(HttpServletRequest request) {
         Object issuer = request.getAttribute(ISSUER_ATTR);
         Object tenantId = request.getAttribute(TENANT_ATTR);
@@ -159,8 +178,26 @@ public class AdminApiKeyAuthFilter extends OncePerRequestFilter {
         // the ::jsonb round-trip in AuditServiceImpl rejected — no audit row, and
         // the throw escaped this filter before forbiddenScope() could answer.
         // AuditSummaries serializes the value instead of splicing it.
-        auditService.record((UUID) tenantId, (UUID) issuer, "ADMIN_API_KEY_SCOPE_DENIED", "ADMIN_API_KEY", (UUID) keyId,
-                AuditSummaries.summary("path", RequestPaths.lookupPath(request)), null);
+        try {
+            auditService.record((UUID) tenantId, (UUID) issuer, "ADMIN_API_KEY_SCOPE_DENIED", "ADMIN_API_KEY",
+                    (UUID) keyId, AuditSummaries.summary("path", RequestPaths.lookupPath(request)), null);
+        } catch (RuntimeException e) {
+            // The row is gone, so this line is the only surviving trace of the
+            // denial — it must stay truthful and unforgeable, hence forLog.
+            LOG.error("Scope denial could not be audited (keyId={}, tenantId={}, path={}); answering 403 anyway", keyId,
+                    tenantId, forLog(RequestPaths.lookupPath(request)), e);
+        }
+    }
+
+    /**
+     * Flattens control, line-separator and paragraph-separator characters so a
+     * crafted path cannot forge extra log lines (it is decoded before it reaches
+     * this sink, so it is caller-controlled text). Mirrors
+     * {@code ApiKeyAuthFilter.forLog}; this line is the only remaining trace of a
+     * denial whose audit row was lost, so it must not be forgeable.
+     */
+    private static String forLog(String value) {
+        return value == null ? "?" : value.replaceAll("[\\p{C}\\p{Zl}\\p{Zp}]", "?");
     }
 
     private static byte[] sha256(String value) {
