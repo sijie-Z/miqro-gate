@@ -38,6 +38,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import java.util.zip.GZIPInputStream;
 
@@ -62,6 +63,33 @@ public class ReconciliationService {
     static final int ROWS_PAGE_MAX = 500;
     /** Single-download row cap, same 5 万行 bound as the other CSV exports. */
     static final int EXPORT_MAX_ROWS = 50_000;
+
+    /**
+     * Local {@code usage_event} rows one run may read (#1422). The upload side has
+     * had {@link #MAX_LINES} all along while the read side had nothing, so a
+     * 170-byte one-line bill over a busy window materialised the entire window and
+     * OOM-killed the control plane (whose heap carries
+     * {@code -XX:+ExitOnOutOfMemoryError} in production).
+     *
+     * <p>
+     * Deliberately the same number as {@link #MAX_LINES}: a window holding more
+     * local rows than a bill may carry lines cannot be reconciled line by line
+     * anyway, and one ceiling is one thing to learn.
+     */
+    static final int MAX_LOCAL_ROWS = 100_000;
+
+    /**
+     * Rows per write page (#1422). A single {@code batchUpdate} over the whole
+     * report buffers every parameter set in pgjdbc before executing, so the write
+     * side used to hold a second full copy of the report.
+     */
+    static final int ROWS_WRITE_PAGE = 500;
+
+    private static final String INSERT_ROW = """
+            INSERT INTO reconciliation_rows (id, report_id, tenant_id, row_no, verdict, matched_by,
+                provider_row_ref, local_ref, detail)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
+            """;
 
     /**
      * Declared export column order — header and every data row are built from this
@@ -493,15 +521,16 @@ public class ReconciliationService {
                 return;
             }
             List<LocalUsageRow> locals = readLocals(tenantId, from, to);
+            if (locals.size() > MAX_LOCAL_ROWS) {
+                // Refuse rather than reconcile a silently truncated window: a short
+                // financial report reads as "nothing else happened" (#1422).
+                fail(tenantId, reportId, "窗口内本地用量行数超过 " + MAX_LOCAL_ROWS + " 上限，请缩小窗口后重试");
+                return;
+            }
             Report report = BillReconciliationEngine.reconcile(parsed.lines(), locals, from, to);
 
-            List<Object[]> rowBatch = assemblyRows(tenantId, reportId, report, parsed.lines(), locals);
             try {
-                jdbc.getJdbcTemplate().batchUpdate("""
-                        INSERT INTO reconciliation_rows (id, report_id, tenant_id, row_no, verdict, matched_by,
-                            provider_row_ref, local_ref, detail)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
-                        """, rowBatch);
+                writeRows(tenantId, reportId, report, parsed.lines(), locals);
             } catch (Exception e) {
                 jdbc.update("DELETE FROM reconciliation_rows WHERE report_id = :id",
                         new MapSqlParameterSource("id", reportId));
@@ -539,6 +568,16 @@ public class ReconciliationService {
                 AuditSummaries.summary("error", message == null ? "unknown" : message), null);
     }
 
+    /**
+     * The window's local usage rows, capped at {@link #MAX_LOCAL_ROWS} (#1422). One
+     * row past the cap is fetched so the caller can distinguish "exactly at the
+     * cap" from "over it" in the same query — a separate {@code COUNT} would both
+     * double the work and race the read.
+     *
+     * <p>
+     * Below the cap the {@code LIMIT} is inert and the ordering stays irrelevant:
+     * the engine matches against the whole set, not a prefix.
+     */
     private List<LocalUsageRow> readLocals(UUID tenantId, Instant from, Instant to) {
         return jdbc.query("""
                 SELECT e.id, e.provider_request_id, e.occurred_at, e.model_id, p.product_code,
@@ -548,9 +587,10 @@ public class ReconciliationService {
                        (e.upstream_status_code BETWEEN 200 AND 299) AS success
                 FROM usage_event e JOIN provider_products p ON p.id = e.provider_product_id
                 WHERE e.tenant_id = :tenantId AND e.occurred_at >= :from AND e.occurred_at < :to
+                LIMIT :max
                 """,
                 new MapSqlParameterSource("tenantId", tenantId).addValue("from", java.sql.Timestamp.from(from))
-                        .addValue("to", java.sql.Timestamp.from(to)),
+                        .addValue("to", java.sql.Timestamp.from(to)).addValue("max", MAX_LOCAL_ROWS + 1),
                 (rs, n) -> new LocalUsageRow(rs.getObject("id").toString(), rs.getString("provider_request_id"),
                         rs.getTimestamp("occurred_at").toInstant(), rs.getString("model_id"),
                         rs.getString("product_code"), rs.getObject("input_tokens", Long.class),
@@ -558,10 +598,48 @@ public class ReconciliationService {
                         rs.getBoolean("success")));
     }
 
-    /** Row rows: bill lines (aligned by index) → buckets → unmatched locals. */
-    private List<Object[]> assemblyRows(UUID tenantId, UUID reportId, Report report, List<BillLine> bills,
+    /**
+     * Assembles the report rows and writes them out {@link #ROWS_WRITE_PAGE} at a
+     * time (#1422). The rows themselves are unchanged; only their lifetime is —
+     * previously the whole report was materialised as one {@code List<Object[]>}
+     * and handed to a single {@code batchUpdate}, which pgjdbc buffers in full
+     * before executing, so the write side held a second copy of the report sized by
+     * the window rather than by the upload.
+     *
+     * <p>
+     * A failure part-way through leaves earlier pages committed; the caller's
+     * compensating {@code DELETE} is what preserves the no-partial-report rule.
+     */
+    private void writeRows(UUID tenantId, UUID reportId, Report report, List<BillLine> bills,
             List<LocalUsageRow> locals) {
-        List<Object[]> batch = new ArrayList<>();
+        RowPageWriter writer = new RowPageWriter();
+        assemblyRows(tenantId, reportId, report, bills, locals, writer);
+        writer.flush();
+    }
+
+    private final class RowPageWriter implements Consumer<Object[]> {
+
+        private final List<Object[]> page = new ArrayList<>(ROWS_WRITE_PAGE);
+
+        @Override
+        public void accept(Object[] row) {
+            page.add(row);
+            if (page.size() >= ROWS_WRITE_PAGE) {
+                flush();
+            }
+        }
+
+        private void flush() {
+            if (!page.isEmpty()) {
+                jdbc.getJdbcTemplate().batchUpdate(INSERT_ROW, page);
+                page.clear();
+            }
+        }
+    }
+
+    /** Row rows: bill lines (aligned by index) → buckets → unmatched locals. */
+    private void assemblyRows(UUID tenantId, UUID reportId, Report report, List<BillLine> bills,
+            List<LocalUsageRow> locals, Consumer<Object[]> sink) {
         int rowNo = 1;
         for (int i = 0; i < report.rows().size(); i++) {
             RowResult result = report.rows().get(i);
@@ -572,7 +650,7 @@ public class ReconciliationService {
             detail.put("currency", bill.currency());
             detail.put("occurredAt", bill.occurredAt() == null ? null : bill.occurredAt().toString());
             detail.put("status", bill.status());
-            batch.add(new Object[]{UUID.randomUUID(), reportId, tenantId, rowNo++, result.verdict().name(),
+            sink.accept(new Object[]{UUID.randomUUID(), reportId, tenantId, rowNo++, result.verdict().name(),
                     result.level() == null || result.level().name().equals("NONE") ? null : result.level().name(),
                     result.providerRowRef(), result.localRef(), json(detail)});
         }
@@ -581,7 +659,7 @@ public class ReconciliationService {
             detail.put("bucketKey", bucket.productCode());
             detail.put("providerCount", bucket.providerCount());
             detail.put("localCount", bucket.localCount());
-            batch.add(new Object[]{UUID.randomUUID(), reportId, tenantId, rowNo++, "PARTIAL", null, null, null,
+            sink.accept(new Object[]{UUID.randomUUID(), reportId, tenantId, rowNo++, "PARTIAL", null, null, null,
                     json(detail)});
         }
         Map<String, LocalUsageRow> localsByRef = new LinkedHashMap<>();
@@ -592,10 +670,9 @@ public class ReconciliationService {
             detail.put("occurredAt",
                     local == null || local.occurredAt() == null ? null : local.occurredAt().toString());
             detail.put("modelId", local == null ? null : local.modelId());
-            batch.add(new Object[]{UUID.randomUUID(), reportId, tenantId, rowNo++, "UNMATCHED_LOCAL", null, null,
+            sink.accept(new Object[]{UUID.randomUUID(), reportId, tenantId, rowNo++, "UNMATCHED_LOCAL", null, null,
                     result.localRef(), json(detail)});
         }
-        return batch;
     }
 
     private String json(Map<String, Object> detail) {

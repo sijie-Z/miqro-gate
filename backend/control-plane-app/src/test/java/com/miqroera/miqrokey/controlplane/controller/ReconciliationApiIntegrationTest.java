@@ -707,6 +707,84 @@ class ReconciliationApiIntegrationTest {
         assertThat(lastLine.split(",")[2]).isEqualTo("149999");
     }
 
+    /** One bill line and {@code rows} local usage rows inside the window. */
+    private void seedBulkUsage(int rows) {
+        jdbc.update("""
+                INSERT INTO usage_event (id, tenant_id, virtual_key_id, project_id, provider_product_id, model_id,
+                    provider_request_id, gateway_request_id, input_tokens, output_tokens, upstream_status_code,
+                    is_complete, usage_missing, occurred_at)
+                SELECT gen_random_uuid(), :tenantId, gen_random_uuid(), gen_random_uuid(), :productId, 'm-bulk',
+                    'bulk-' || g, 'gw-bulk-' || g, 1, 1, 200, TRUE, FALSE, :occurredAt
+                FROM generate_series(1, CAST(:rows AS integer)) AS g
+                """, new MapSqlParameterSource("tenantId", TENANT_ID).addValue("productId", productId)
+                .addValue("rows", rows).addValue("occurredAt", java.sql.Timestamp.from(occurred)));
+    }
+
+    private String oneBillLine() {
+        return "{\"provider_request_id\":\"req-1\",\"occurred_at\":\"" + occurred
+                + "\",\"model_id\":\"m-1\",\"amount\":\"1.00\",\"currency\":\"USD\",\"provider_row_ref\":\"bill-1\"}\n";
+    }
+
+    private long reportRowCount(String reportId) {
+        return jdbc.queryForObject("SELECT count(*) FROM reconciliation_rows WHERE report_id = :id",
+                new MapSqlParameterSource("id", UUID.fromString(reportId)), Long.class);
+    }
+
+    @Test
+    @DisplayName("local window over the cap fails the report instead of reconciling a truncated read (#1422)")
+    void localRowCap() throws Exception {
+        // One row past ReconciliationService.MAX_LOCAL_ROWS (10 万). The read used
+        // to carry no bound, so a wide window materialised the whole tenant window
+        // on the control-plane heap before the engine saw a single line.
+        seedBulkUsage(100_001);
+        MvcResult created = postReport(oneBillLine().getBytes(StandardCharsets.UTF_8));
+        assertThat(created.getResponse().getStatus()).isEqualTo(202);
+        String reportId = objectMapper.readTree(created.getResponse().getContentAsString()).get("id").asText();
+
+        JsonNode report = objectMapper.readTree(awaitSucceeded(reportId));
+        // A short report would read as "nothing else happened" — the operator sees
+        // the cap instead of a silently truncated reconciliation.
+        assertThat(report.get("status").asText()).isEqualTo("FAILED");
+        assertThat(report.get("errorMessage").asText()).contains("100000").contains("上限");
+        assertThat(report.get("totalRows").isNull()).isTrue();
+        assertThat(reportRowCount(reportId)).isZero();
+        assertThat(eventCount("RECONCILIATION_FAILED")).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("report rows are written in pages: every row survives the 500-row page boundary (#1422)")
+    void rowWritePaging() throws Exception {
+        // 1 200 unmatched local rows + 1 unmatched bill row = 1 201 detail rows,
+        // i.e. three write pages instead of the single buffered batch.
+        seedBulkUsage(1_200);
+        MvcResult created = postReport(oneBillLine().getBytes(StandardCharsets.UTF_8));
+        String reportId = objectMapper.readTree(created.getResponse().getContentAsString()).get("id").asText();
+
+        JsonNode report = objectMapper.readTree(awaitSucceeded(reportId));
+        assertThat(report.get("status").asText()).isEqualTo("SUCCEEDED");
+        // totalRows counts uploaded bill rows; the 1 200 unmatched locals are
+        // report rows on top of it (the write side's size is set by the window,
+        // not by the upload — which is why it needs paging).
+        assertThat(report.get("totalRows").asInt()).isEqualTo(1);
+        assertThat(report.get("unmatchedProvider").asInt()).isEqualTo(1);
+        assertThat(report.get("unmatchedLocal").asInt()).isEqualTo(1_200);
+
+        // row_no is 1..1 201 with no gap and no repeat: a dropped or replayed page
+        // shows up as a missing or duplicated number, not just a smaller count.
+        Map<String, Object> numbers = jdbc.queryForMap("""
+                SELECT count(*) AS written, count(DISTINCT row_no) AS distinct_nos,
+                       min(row_no) AS first_no, max(row_no) AS last_no
+                FROM reconciliation_rows WHERE report_id = :id
+                """, new MapSqlParameterSource("id", UUID.fromString(reportId)));
+        assertThat((Long) numbers.get("written")).isEqualTo(1_201L);
+        assertThat((Long) numbers.get("distinct_nos")).isEqualTo(1_201L);
+        assertThat((Integer) numbers.get("first_no")).isEqualTo(1);
+        assertThat((Integer) numbers.get("last_no")).isEqualTo(1_201);
+
+        // Same rows through the CSV export: a second, independent read path.
+        assertThat(performExport(reportId, null).getResponse().getHeader("X-MiQroKey-Rows")).isEqualTo("1201");
+    }
+
     private MvcResult performExport(String reportId, String state) throws Exception {
         var request = get("/api/v1/admin/reconciliations/" + reportId + "/export").cookie(sessionCookie, csrfCookie);
         if (state != null) {
