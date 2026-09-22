@@ -73,6 +73,15 @@ public class AuthenticationService {
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     /**
+     * Cap on the exponential lockout backoff: {@code 2^10 == 1024} multiples of
+     * {@code loginLockBase}, i.e. ~17 hours at the default 1-minute base
+     * (documented in {@code api-contract.md}). Bounding the shift keeps
+     * {@code 1L << shift} inside the positive long range for every reachable
+     * failure count (#1327).
+     */
+    private static final int MAX_LOCK_MULTIPLIER_SHIFT = 10;
+
+    /**
      * User-facing auth messages are Simplified Chinese — the console language
      * (frontend-design.md). Keep 401 login failures to ONE generic message so the
      * response never reveals which credential was wrong.
@@ -284,8 +293,21 @@ public class AuthenticationService {
         UserStatus newStatus = fresh.status();
 
         if (newFailCount >= authProperties.getLoginMaxFailures()) {
-            long multiplier = 1L << Math.max(0, newFailCount - authProperties.getLoginMaxFailures());
-            Duration lockDuration = authProperties.getLoginLockBase().multipliedBy(Math.min(multiplier, 1024));
+            // #1327: clamp the SHIFT, not just the product. Clamping only the multiplier
+            // left
+            // the shift free to reach 63 (1L << 63 == Long.MIN_VALUE) at the 68th failure
+            // with
+            // the default loginMaxFailures=5; the negative value survived Math.min and made
+            // Duration.multipliedBy throw, rolling back this REQUIRES_NEW transaction so
+            // the
+            // counter never advanced past 67 — every later attempt re-overflowed, and the
+            // LOGIN_FAILED/ACCOUNT_LOCKED audit rows below were discarded with it. 2^10 is
+            // the
+            // documented ~17h cap, so behaviour below the cap is unchanged.
+            long shift = Math.min(Math.max(0, newFailCount - authProperties.getLoginMaxFailures()),
+                    MAX_LOCK_MULTIPLIER_SHIFT);
+            long multiplier = 1L << shift;
+            Duration lockDuration = authProperties.getLoginLockBase().multipliedBy(multiplier);
             lockedUntil = now.plus(lockDuration);
             newStatus = UserStatus.LOCKED;
             LOG.warn("User {} locked until {} after {} failures", fresh.username(), lockedUntil, newFailCount);
