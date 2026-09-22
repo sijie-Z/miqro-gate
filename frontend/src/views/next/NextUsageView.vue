@@ -10,7 +10,7 @@ import * as api from '@/api';
 import { ChartBarIcon, LayersIcon, MoneyIcon } from 'tdesign-icons-vue-next';
 import { ApiError } from '@/api/http';
 import { csvCell } from '@/utils/csv';
-import { localDayKey, localTzOffsetMinutes } from '@/utils/datetime';
+import { localDateTimeWithOffset, localDayKey, localTzOffsetMinutes } from '@/utils/datetime';
 import {
   UiButton,
   UiDonut,
@@ -512,7 +512,7 @@ async function exportRecords() {
     '供应商请求 ID',
   ];
   const rows = all.map((r) => [
-    r.occurredAt,
+    localDateTimeWithOffset(r.occurredAt),
     r.modelId ?? '',
     keyName.value(r.virtualKeyId),
     cacheLevelLabel[r.cacheLevel ?? ''] ?? r.cacheLevel,
