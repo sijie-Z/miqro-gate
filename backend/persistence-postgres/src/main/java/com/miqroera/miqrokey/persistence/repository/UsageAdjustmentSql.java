@@ -20,7 +20,7 @@ package com.miqroera.miqrokey.persistence.repository;
  *
  * <p>
  * Assumes the query aliases {@code usage_event} as {@code ue} and has joined
- * {@link #ADJUSTMENT_LATERAL}, which introduces the alias {@code adj}.
+ * {@link #ADJUSTMENT_TOTALS}, which introduces the alias {@code adj}.
  * </p>
  */
 public final class UsageAdjustmentSql {
@@ -29,33 +29,70 @@ public final class UsageAdjustmentSql {
     }
 
     /**
-     * Per-event adjustment totals, as a correlated LATERAL.
+     * Per-event adjustment totals, pre-aggregated into a derived table.
      *
      * <p>
      * Deliberately <b>not</b> a direct {@code JOIN usage_adjustments}: one event
      * can carry many adjustments, so a plain join multiplies the
      * {@code usage_event} row and inflates every {@code SUM} in whichever query
-     * carries it. The correlation also rides
-     * {@code idx_usage_adjustments_usage_event (tenant_id, usage_event_id)}.
+     * carries it. Grouping by {@code usage_event_id} keeps one row per event.
      * </p>
      *
      * <p>
-     * An aggregate without GROUP BY returns exactly one row, so an event with no
-     * adjustments yields zeros instead of dropping out of the join. Note the
-     * leading newline: callers concatenate this onto a join string that does not
-     * end with one.
+     * Deliberately <b>not</b> a correlated {@code LATERAL} either, which is what
+     * this used to be. Correlating on {@code ue} forces the planner into a Nested
+     * Loop with one inner subplan per outer row, and the per-row estimate
+     * multiplied out lands the plan cost at 1.55M–1.85M — past
+     * {@code jit_inline_above_cost} and {@code jit_optimize_above_cost} (both
+     * default 500000). PostgreSQL then runs the full LLVM optimization and inlining
+     * passes on <b>every</b> execution, costing 1.4–5.8 s of compile time per
+     * query. Uncorrelated, the same SQL plans at 132k–189k and only the cheap
+     * codegen runs (#1322).
+     * </p>
+     *
+     * <p>
+     * The uncorrelated shape is a trade, not a free win: it cannot see the outer
+     * query's filter or {@code LIMIT}, so it folds the whole ledger even when the
+     * caller asked for one page, where the lazy correlated form evaluated only the
+     * handful of surviving rows. Measured on 380,000 usage events and 4,018
+     * adjustments, the report aggregates and the deep-page list gain 2.2x-3.7x (for
+     * example 3.3 s to 1.2 s), while the already-fast shallow paths pay the whole
+     * aggregate: {@code find_records} 2 ms to 38 ms, {@code agg_usage_PROJECT_FULL}
+     * 1 ms to 14 ms, {@code find_records_FULL} 1 ms to 13 ms. Every result is
+     * unchanged, and the correlated alternative costs 1.5 s more than it saves, so
+     * the trade is kept — but the shallow-page cost is real, not hidden.
+     * </p>
+     *
+     * <p>
+     * Grouping and joining on <b>both</b> columns is what keeps this equivalent to
+     * the correlated form: {@code usage_adjustments.usage_event_id} is a
+     * single-column FK to a globally unique {@code usage_event.id}, so a
+     * mismatched-tenant adjustment is still excluded, exactly as the correlation
+     * excluded it. {@code idx_usage_adjustments_usage_event (tenant_id,
+     * usage_event_id)} still serves the GROUP BY and the join; no new index.
+     * </p>
+     *
+     * <p>
+     * A grouped derived table emits <b>no</b> row for an event with no adjustments,
+     * where the old ungrouped aggregate emitted one row of zeros. That difference
+     * is invisible to all three call sites: each already {@code COALESCE}s every
+     * {@code adj.*} it reads ({@link #ADJUSTED_FLAG}, {@link #netExpr},
+     * {@code UsageStatsRepositoryImpl}'s adjusted-token sum). Note the leading
+     * newline: callers concatenate this onto a join string that does not end with
+     * one.
      * </p>
      */
-    public static final String ADJUSTMENT_LATERAL = "\n" + """
-            LEFT JOIN LATERAL (
-                SELECT COALESCE(SUM(a.input_tokens_delta), 0) AS input_delta,
+    public static final String ADJUSTMENT_TOTALS = "\n" + """
+            LEFT JOIN (
+                SELECT a.usage_event_id, a.tenant_id,
+                       COALESCE(SUM(a.input_tokens_delta), 0) AS input_delta,
                        COALESCE(SUM(a.output_tokens_delta), 0) AS output_delta,
                        COALESCE(SUM(a.cache_read_tokens_delta), 0) AS cache_read_delta,
                        COALESCE(SUM(a.cache_creation_tokens_delta), 0) AS cache_creation_delta,
                        COUNT(a.id) AS adjustment_count
                   FROM usage_adjustments a
-                 WHERE a.tenant_id = ue.tenant_id AND a.usage_event_id = ue.id
-            ) adj ON TRUE
+                 GROUP BY a.usage_event_id, a.tenant_id
+            ) adj ON adj.usage_event_id = ue.id AND adj.tenant_id = ue.tenant_id
             """;
 
     /**
