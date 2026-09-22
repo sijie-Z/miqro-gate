@@ -242,11 +242,9 @@ class CostAllocationApiIntegrationTest {
 
     /** Creates a subscription through the admin API and returns its id. */
     private String createSubscriptionViaApi(Map<String, Object> body) throws Exception {
-        MvcResult created = mockMvc
-                .perform(post("/api/v1/admin/subscriptions").contentType(MediaType.APPLICATION_JSON)
-                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                        .content(objectMapper.writeValueAsString(body)))
-                .andExpect(status().isOk()).andReturn();
+        MvcResult created = mockMvc.perform(post("/api/v1/admin/subscriptions").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(body))).andExpect(status().isOk()).andReturn();
         return objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id").toString();
     }
 

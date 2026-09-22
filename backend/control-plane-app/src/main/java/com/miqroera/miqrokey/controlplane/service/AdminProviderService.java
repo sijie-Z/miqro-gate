@@ -120,8 +120,8 @@ public class AdminProviderService {
     }
 
     public UpstreamSubscription updateSubscription(UUID tenantId, UUID adminId, UUID subscriptionId, String name,
-            BigDecimal subscriptionPrice, String currency, Long quotaTotal, String quotaUnit,
-            SubscriptionStatus status, Instant periodStart, Instant periodEnd, Instant renewalAt) {
+            BigDecimal subscriptionPrice, String currency, Long quotaTotal, String quotaUnit, SubscriptionStatus status,
+            Instant periodStart, Instant periodEnd, Instant renewalAt) {
         UpstreamSubscription subscription = requireSubscription(tenantId, subscriptionId);
         UpstreamSubscription updated = new UpstreamSubscription(subscription.id(), subscription.tenantId(),
                 subscription.providerProductId(), name != null ? name : subscription.name(),

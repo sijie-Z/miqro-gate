@@ -163,8 +163,8 @@ class QuotaSnapshotApiIntegrationTest {
         // why it could never catch the missing write path.
         fx.insertCatalogOnly(mockBaseUrl);
         String subscriptionId = createSubscriptionViaApi(Map.of("providerProductId", fx.productId.toString(), "name",
-                "Estimate Plan", "billingMode", "PAYG", "planScope", "NONE", "quotaTotal", 1000, "quotaUnit",
-                "TOKENS", "periodStart", "2026-08-01T00:00:00Z", "periodEnd", "2026-09-01T00:00:00Z"));
+                "Estimate Plan", "billingMode", "PAYG", "planScope", "NONE", "quotaTotal", 1000, "quotaUnit", "TOKENS",
+                "periodStart", "2026-08-01T00:00:00Z", "periodEnd", "2026-09-01T00:00:00Z"));
 
         // Phase 1 — no ACTIVE credential yet. The estimate row is written, but the
         // refresh response is the latest-per-scope view keyed on
@@ -188,8 +188,7 @@ class QuotaSnapshotApiIntegrationTest {
 
         // …and the GET view the operator looks at shows it too.
         mockMvc.perform(get("/api/v1/admin/subscriptions/" + subscriptionId + "/quota").cookie(sessionCookie))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[?(@.source=='LOCAL_ESTIMATE')].total").value(1000.0));
+                .andExpect(status().isOk()).andExpect(jsonPath("$[?(@.source=='LOCAL_ESTIMATE')].total").value(1000.0));
     }
 
     @Test
@@ -214,11 +213,9 @@ class QuotaSnapshotApiIntegrationTest {
 
     /** Creates a subscription through the admin API and returns its id. */
     private String createSubscriptionViaApi(Map<String, Object> body) throws Exception {
-        MvcResult created = mockMvc
-                .perform(post("/api/v1/admin/subscriptions").contentType(MediaType.APPLICATION_JSON)
-                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                        .content(objectMapper.writeValueAsString(body)))
-                .andExpect(status().isOk()).andReturn();
+        MvcResult created = mockMvc.perform(post("/api/v1/admin/subscriptions").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(body))).andExpect(status().isOk()).andReturn();
         return objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id").toString();
     }
 

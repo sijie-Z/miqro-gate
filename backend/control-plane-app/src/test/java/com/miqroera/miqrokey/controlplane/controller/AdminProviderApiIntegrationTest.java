@@ -225,11 +225,9 @@ class AdminProviderApiIntegrationTest {
         body.put("periodEnd", "2026-09-01T00:00:00Z");
         body.put("renewalAt", "2026-09-01T00:00:00Z");
 
-        MvcResult created = mockMvc
-                .perform(post("/api/v1/admin/subscriptions").contentType(MediaType.APPLICATION_JSON)
-                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                        .content(objectMapper.writeValueAsString(body)))
-                .andExpect(status().isOk()).andReturn();
+        MvcResult created = mockMvc.perform(post("/api/v1/admin/subscriptions").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(body))).andExpect(status().isOk()).andReturn();
         Map<?, ?> createdBody = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class);
         UUID subscriptionId = UUID.fromString(createdBody.get("id").toString());
         assertThat(createdBody.get("periodStart")).as("response periodStart").isNotNull();
@@ -262,8 +260,8 @@ class AdminProviderApiIntegrationTest {
                         .content(objectMapper.writeValueAsString(Map.of("providerProductId", fx.productId.toString(),
                                 "name", "No Period", "billingMode", "PAYG", "planScope", "NONE"))))
                 .andExpect(status().isOk()).andReturn();
-        UUID subscriptionId = UUID.fromString(objectMapper
-                .readValue(created.getResponse().getContentAsString(), Map.class).get("id").toString());
+        UUID subscriptionId = UUID.fromString(
+                objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id").toString());
 
         Map<String, Object> row = jdbc.queryForMap(
                 "SELECT period_start, period_end, renewal_at FROM upstream_subscriptions WHERE id = :id",
@@ -278,24 +276,22 @@ class AdminProviderApiIntegrationTest {
     void subscriptionPatchPersistsPeriodColumns() throws Exception {
         fx.insertProviderAndProduct();
 
-        MvcResult created = mockMvc
-                .perform(post("/api/v1/admin/subscriptions").contentType(MediaType.APPLICATION_JSON)
-                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                        .content(objectMapper.writeValueAsString(Map.of("providerProductId", fx.productId.toString(),
-                                "name", "Team Plan", "billingMode", "FIXED_SUBSCRIPTION", "planScope", "TEAM",
-                                "subscriptionPrice", 199, "currency", "USD"))))
+        MvcResult created = mockMvc.perform(post("/api/v1/admin/subscriptions").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("providerProductId", fx.productId.toString(), "name",
+                        "Team Plan", "billingMode", "FIXED_SUBSCRIPTION", "planScope", "TEAM", "subscriptionPrice", 199,
+                        "currency", "USD"))))
                 .andExpect(status().isOk()).andReturn();
-        UUID subscriptionId = UUID.fromString(objectMapper
-                .readValue(created.getResponse().getContentAsString(), Map.class).get("id").toString());
+        UUID subscriptionId = UUID.fromString(
+                objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id").toString());
 
         Map<String, Object> patchBody = new java.util.HashMap<>();
         patchBody.put("periodStart", "2026-08-01T00:00:00Z");
         patchBody.put("periodEnd", "2026-09-01T00:00:00Z");
         patchBody.put("renewalAt", "2026-08-25T00:00:00Z");
-        MvcResult patched = mockMvc
-                .perform(patch("/api/v1/admin/subscriptions/" + subscriptionId)
-                        .contentType(MediaType.APPLICATION_JSON).cookie(sessionCookie, csrfCookie)
-                        .header("X-CSRF-Token", csrfToken).content(objectMapper.writeValueAsString(patchBody)))
+        MvcResult patched = mockMvc.perform(patch("/api/v1/admin/subscriptions/" + subscriptionId)
+                .contentType(MediaType.APPLICATION_JSON).cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).content(objectMapper.writeValueAsString(patchBody)))
                 .andExpect(status().isOk()).andReturn();
         Map<?, ?> patchedBody = objectMapper.readValue(patched.getResponse().getContentAsString(), Map.class);
         assertThat(patchedBody.get("periodStart")).as("response periodStart").isNotNull();
@@ -316,11 +312,9 @@ class AdminProviderApiIntegrationTest {
 
         // A later PATCH that says nothing about the period keeps it — the same
         // null-means-keep merge every other optional field of this PATCH uses.
-        mockMvc.perform(patch("/api/v1/admin/subscriptions/" + subscriptionId)
-                .contentType(MediaType.APPLICATION_JSON).cookie(sessionCookie, csrfCookie)
-                .header("X-CSRF-Token", csrfToken)
-                .content(objectMapper.writeValueAsString(Map.of("name", "Team Plan v2"))))
-                .andExpect(status().isOk());
+        mockMvc.perform(patch("/api/v1/admin/subscriptions/" + subscriptionId).contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("name", "Team Plan v2")))).andExpect(status().isOk());
         row = jdbc.queryForMap("SELECT period_start, renewal_at FROM upstream_subscriptions WHERE id = :id",
                 new MapSqlParameterSource("id", subscriptionId));
         assertThat(((java.sql.Timestamp) row.get("period_start")).toInstant())
