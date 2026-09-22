@@ -169,6 +169,29 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Regression scenarios
         run: python3 deploy/tests/deploy_script_regression.py
+
+  # Whether the F09 breaking-change guard still SAYS NO to a break. The guard is
+  # the only automated reader of the api-contract §8 rule, and it had no test:
+  # it only ever ran against a baseline regenerated in the same commit, so it was
+  # never observed failing on a spec whose baseline had NOT been refreshed —
+  # which is exactly the case it exists for. #1315: `QuotaRuleView.used` went
+  # int64 -> number inside major v1 with this job green.
+  #
+  # Cheap (python only, synthetic specs, no docker, no network, no git history —
+  # the real baseline's past revisions are unreachable in a shallow checkout),
+  # and gated on both areas it depends on: `deploy/**` holds the guard, and a
+  # `backend/**` change is what can make it go red in the job above.
+  openapi-guard:
+    name: OpenAPI breaking-change guard (behavioural)
+    needs: [changes]
+    if: ${{ needs.changes.outputs.compose == 'true' || needs.changes.outputs.backend == 'true' }}
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Guard regression scenarios
+        run: python3 deploy/tests/openapi_breaking_regression.py
+
   # Formatting, as its own fast job (#1198). It used to surface only through
   # `verify`, i.e. after a full unit+integration round, and the reactor then
   # stopped at the first violating module — so the second one waited for the next
