@@ -126,6 +126,9 @@ async function loadMemberCounts(list: Project[]) {
  * #PH78: 行上的成员数与抽屉里的成员名单是同一实体的两份副本。增删成员后抽屉会重读
  * 名单，同一份读数必须同时喂给行上的计数 —— 否则关掉抽屉看到的还是旧数字，用户会
  * 以为刚才那一下没生效而重复操作。计数与名单同源，不再各读一次。
+ *
+ * 计数以项目 id 归档，所以写在 `membersRequestSeq` 守卫**之外**：那个守卫保护的是
+ * 「当前打开的那个抽屉」的名单，而一次已经落地的读数对它所读的项目而言始终是真的。
  */
 function setMemberCount(projectId: string, count: number) {
   memberCounts.value = { ...memberCounts.value, [projectId]: count };
