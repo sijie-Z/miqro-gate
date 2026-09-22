@@ -119,7 +119,12 @@ public final class SkillZipValidator {
                     throw decompressedTooLarge();
                 }
             }
-        } catch (java.io.IOException e) {
+        } catch (java.io.IOException | IllegalArgumentException e) {
+            // IllegalArgumentException: entry names are decoded strictly, so a name
+            // in a non-UTF-8 encoding (GBK, as bsdtar on a zh-CN box writes them)
+            // throws here — a malformed package, not a server fault. Pre-existing
+            // since develop; refused with the same verdict as the other zip-shape
+            // errors (#1242 review round).
             throw invalid("SKILL_ZIP_INVALID", "技能包不是有效的 zip 文件。");
         }
         if (rootDir == null) {
