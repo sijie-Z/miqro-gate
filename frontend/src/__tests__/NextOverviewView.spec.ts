@@ -183,7 +183,15 @@ describe('NextOverviewView', () => {
     // MAX_WINDOW=93 天解析（UsageStatsService.java:127），「本月成本」画的是近三个月。
     const [, from, to] = mockApi.usageSummary.mock.calls[0]!;
     expect(from).toBe(utcMonthStartIso());
-    expect(to).toBeDefined();
+    // to = 此刻；必须严格晚于 from，且不能落到未来。只断言「已定义」是空断言：
+    // 退化成 from == to 的空窗口也能过，而后端会按 TIME_RANGE_INVALID 拒掉它
+    // （边界见 quota-window-usage.spec.ts 的 empty-window guard）。
+    // 上界留 1s 容差——只有当月头一秒 secondWindow 会把 to 撑到 from+1s。
+    // 缺参数走 NaN，两条断言都会红——「没传」照样 fail。
+    const fromMs = from === undefined ? Number.NaN : Date.parse(from);
+    const toMs = to === undefined ? Number.NaN : Date.parse(to);
+    expect(toMs).toBeGreaterThan(fromMs);
+    expect(toMs).toBeLessThanOrEqual(Date.now() + 1_000);
     const stats = wrapper.find('[data-testid="overview-stats"]');
     expect(stats.text()).toContain('虚拟密钥');
     expect(stats.text()).toContain('2');

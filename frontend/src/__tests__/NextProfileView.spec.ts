@@ -144,11 +144,14 @@ describe('NextProfileView', () => {
     expect(from).toBe(utcMonthStartIso());
     // to = 此刻；必须严格晚于 from。只断言「已定义」是空断言：退化成 from == to 的窗口
     // 也能过，而后端会按 TIME_RANGE_INVALID 拒掉它（边界见 quota-window-usage.spec.ts）。
-    // 缺参数走 NaN，两条断言都会红——「没传」照样fail。
+    // 缺参数走 NaN，两条断言都会红——「没传」照样 fail。
     const fromMs = from === undefined ? Number.NaN : Date.parse(from);
     const toMs = to === undefined ? Number.NaN : Date.parse(to);
     expect(toMs).toBeGreaterThan(fromMs);
-    expect(toMs).toBeLessThanOrEqual(Date.now());
+    // 上界留 1s 容差：只有当月头一秒 secondWindow 会把 to 撑到 from+1s，那一下 to 比
+    // 「现在」最多晚 <1s。写死 <= Date.now() 的话，每月 1 日 00:00:00.0–.999Z 这 1 秒
+    // 里跑 CI 会误报。
+    expect(toMs).toBeLessThanOrEqual(Date.now() + 1_000);
     wrapper.unmount();
   });
   it('renders account facts and password form', async () => {
