@@ -172,6 +172,62 @@ describe('NextProvidersView', () => {
     expect(mockApi.adminListModels).toHaveBeenCalledTimes(2);
   });
 
+  it('#PH69R2B: 目录加载中点「探测模型」，模型列表不会永远停在「加载中…」', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    mockApi.adminListModels.mockClear();
+    // The dialog's own catalogue load never comes back.
+    let releaseCatalog!: (rows: Awaited<ReturnType<typeof api.adminListModels>>) => void;
+    mockApi.adminListModels
+      .mockImplementationOnce(
+        () =>
+          new Promise<Awaited<ReturnType<typeof api.adminListModels>>>((resolve) => {
+            releaseCatalog = resolve;
+          }),
+      )
+      .mockResolvedValue([
+        { id: 'm1', providerProductId: '0190-0000-0000-0020', modelId: 'deepseek-chat' },
+      ]);
+    mockApi.adminModelProbeStatus.mockResolvedValue({
+      status: 'SUCCEEDED',
+      error: null,
+      modelCount: 1,
+      probedAt: '2026-09-10T10:00:00Z',
+    });
+    mockApi.adminProbeModels.mockResolvedValue({
+      providerProductId: '0190-0000-0000-0020',
+      productCode: 'deepseek-payg-api',
+      modelCount: 1,
+      probedAt: '2026-09-10T12:00:00Z',
+      models: [{ modelId: 'deepseek-chat', displayName: 'DeepSeek Chat' }],
+    });
+
+    await wrapper.find('[data-testid="product-models-open"]').trigger('click');
+    await flushPromises();
+    // The spinner is up — and 探测模型 sits right above it, still clickable.
+    expect(mockApi.adminListModels).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('[data-testid="product-models-list"]')).toBeNull();
+    expect(document.querySelector('[data-testid="product-models-dialog"]')?.textContent).toContain(
+      '加载中…',
+    );
+    const probe = document.querySelector('[data-testid="product-probe"]');
+    expect(probe, '探测模型 should be offered while the catalogue loads').toBeTruthy();
+
+    // The admin probes instead of waiting; the probe refreshes the list itself.
+    (probe as HTMLButtonElement).click();
+    await flushPromises();
+    await flushPromises();
+    releaseCatalog([]);
+    await flushPromises();
+
+    // The abandoned load can never clear its own flag (#440 guard) — but the
+    // list it abandoned is full of fresh rows and must not stay hidden.
+    const dialog = document.querySelector('[data-testid="product-models-dialog"]');
+    expect(document.querySelector('[data-testid="product-models-list"]')).toBeTruthy();
+    expect(dialog?.textContent).toContain('deepseek-chat');
+    expect(dialog?.textContent).not.toContain('加载中…');
+  });
+
   it('I4: a failed probe surfaces the sanitized error inline', async () => {
     mockApi.adminListModels.mockResolvedValue([]);
     mockApi.adminModelProbeStatus.mockResolvedValue({
