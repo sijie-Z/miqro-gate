@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.controlplane.service;
 
+import com.miqroera.miqrokey.controlplane.client.TimeBoundedCall;
 import com.miqroera.miqrokey.domain.model.InternalService;
 import com.miqroera.miqrokey.domain.repository.InternalServiceRepository;
 import org.slf4j.Logger;
@@ -86,9 +87,15 @@ public class ServiceHealthChecker {
     /** GET {@code baseUrl + checkPath}; 2xx counts as healthy. */
     boolean isHealthy(InternalService service) {
         try {
+            // PH57: the configured timeout has to bound the whole call. As a plain
+            // send() it stopped at the response headers, so a peer stalling
+            // mid-body held this scheduler thread (and, with it, every other
+            // @Scheduled job) until the peer closed the connection.
+            Duration budget = Duration.ofSeconds(service.checkTimeoutSeconds());
             HttpRequest request = HttpRequest.newBuilder().uri(URI.create(service.baseUrl() + service.checkPath()))
-                    .timeout(Duration.ofSeconds(service.checkTimeoutSeconds())).GET().build();
-            HttpResponse<Void> response = http.send(request, HttpResponse.BodyHandlers.discarding());
+                    .timeout(budget).GET().build();
+            HttpResponse<Void> response = TimeBoundedCall.send(http, request, budget,
+                    HttpResponse.BodyHandlers.discarding());
             return response.statusCode() >= 200 && response.statusCode() < 300;
         } catch (Exception e) {
             return false;
