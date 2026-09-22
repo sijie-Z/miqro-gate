@@ -887,7 +887,7 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `GET /api/v1/admin/skills/{id}/revisions?limit=` | **I14 版本历史**（新→旧，默认 20/上限 50）：`{revision, version, description, author, license, tags, examples, contentSha256, contentBytes, createdBy, createdAt, activatedAt}`——**只回元数据，不回包体**；`activatedAt` 非空即当前版本 |
 | `POST /api/v1/admin/skills/{id}/revisions/{revision}/activate` | **I14 回滚/切换**：激活指定修订（幂等，不产生新版本号），并把该修订的元数据+包体镜像回 `skills`（目录/下载即时生效）；审计 `SKILL_REVISION_ACTIVATE`（发布审计 `SKILL_REVISION_PUBLISH`） |
 
-**格式校验（上传时）**：zip 必须只含一个技能目录（`skill-name/`），含 `SKILL.md`（YAML frontmatter：`name` 必填且为小写 kebab-case、与目录名一致、不含 claude/anthropic 保留词；`description` 必填 ≤ 1024 字符；可选 `author`/`license`/`tags`/`examples`；`tags` ≤5 个 × ≤20 字符（重复去重）；`examples` ≤10 条 × ≤512 字符）。包上限 5MB、条目上限 200、SKILL.md 上限 512KB、解压后总体积上限 64MB（防 zip 炸弹——逐条目流式走过计数、不落盘解压；条目流与中央目录两视图必须相互核对，不一致即拒绝；EOCD 之后允许尾随填充字节，但其中不得再出现第二条 EOCD 记录）。`version` 必填语义化（`\d+\.\d+\.\d+`）。
+**格式校验（上传时）**：zip 必须只含一个技能目录（`skill-name/`），含 `SKILL.md`（YAML frontmatter：`name` 必填且为小写 kebab-case、与目录名一致、不含 claude/anthropic 保留词；`description` 必填 ≤ 1024 字符；可选 `author`/`license`/`tags`/`examples`；`tags` ≤5 个 × ≤20 字符（重复去重）；`examples` ≤10 条 × ≤512 字符）。包上限 5MB、条目上限 200、SKILL.md 上限 512KB、解压后总体积上限 64MB（防 zip 炸弹——逐条目流式走过计数、不落盘解压；条目流与中央目录两视图必须相互核对，不一致即拒绝；EOCD 之后允许 ≤64KiB 的尾随填充字节，但其中不得再出现第二条 EOCD 记录）。`version` 必填语义化（`\d+\.\d+\.\d+`）。
 
 **下载授权语义**：无 `skill_access` 行 = 公开；有行 = 仅授权 TEAM/PROJECT 成员（及管理员）可下载；非成员 `403 SKILL_DOWNLOAD_FORBIDDEN`；归档技能对目录/详情/下载一律 `404 SKILL_NOT_FOUND`。
 
