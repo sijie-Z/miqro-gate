@@ -163,10 +163,14 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
      * rejection into a log-amplification vector. This applies to the log only — the
      * envelope echoes the caller's token verbatim (contract §2), via
      * {@link #requestId}.
+     *
+     * <p>
+     * The rule itself lives in {@link LogValues} so the auth and audit log lines
+     * share it; this channel keeps its own tighter bound.
+     * </p>
      */
     private static String forLog(String value) {
-        String flat = value.replaceAll("[\\p{C}\\p{Zl}\\p{Zp}]", "?").replaceAll("[\\[\\],=]", "?");
-        return flat.length() <= LOG_VALUE_MAX ? flat : flat.substring(0, LOG_VALUE_MAX) + "…";
+        return LogValues.forLog(value, LOG_VALUE_MAX);
     }
 
     /** Where the presented credential came from. */
