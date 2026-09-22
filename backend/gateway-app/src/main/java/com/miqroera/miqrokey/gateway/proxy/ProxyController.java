@@ -262,6 +262,16 @@ public class ProxyController {
     private Mono<Void> handleAuthenticated(ServerWebExchange exchange, AuthContext ctx, String requestId,
             long startMillis) {
         return bufferBody(exchange).flatMap(body -> {
+            // #1388: one absolute upstream deadline per request, opened as soon as
+            // the body is in hand and never reset. Every step below that can wait
+            // on a bounded scheduler lane — the L2 cache read, the credential
+            // decrypt, the SSRF DNS check — shares this single budget, so the
+            // documented overall cutoff ("整体硬截止（自第一次尝试起计时，不重置）",
+            // docs/configuration-reference.md) also covers the time a request
+            // spends *queued* for a lane. Arming the cutoff after those hops, as
+            // before, let one wedged lane park LLM traffic with no deadline
+            // running at all.
+            long upstreamStartNanos = System.nanoTime();
             // Compliance retention side-channel (ADR-0014, default off):
             // best-effort, never affects the forwarded outcome.
             retentionSidecar.capture(exchange.getRequest().getPath().value(), body, ctx, requestId);
@@ -322,18 +332,24 @@ public class ProxyController {
             // #444: the cache lookup is blocking I/O (L2 hits PostgreSQL) — it
             // must never run on the event loop. Reads go through the bounded
             // scheduler; the cached-replay path continues on its thread.
+            // #1388: the lane wait counts against the upstream deadline, so a
+            // wedged L2 read cannot hold a cacheable request open forever. The
+            // timer covers the lookup alone and dies with it — the replay or the
+            // forward below subscribes its own attempt budget.
             Mono<Void> pipeline = cacheKey != null
                     ? Mono.fromCallable(() -> responseCache.get(ctx.tenantId(), cacheKey))
-                            .subscribeOn(credentialDecryptScheduler).flatMap(lookup -> {
+                            .subscribeOn(credentialDecryptScheduler).timeout(remainingOf(upstreamStartNanos))
+                            .flatMap(lookup -> {
                                 if (lookup.response().isPresent()) {
                                     publishCacheHit(lookup.level(), ctx, cacheKey, requestId);
                                     return sseReplayEngine.replay(lookup.response().get(), exchange.getResponse(),
                                             requestId, hitLevelName(lookup.level()));
                                 }
                                 return forward(exchange, ctx, body, modelName, cacheKey, requestId, startMillis,
-                                        streaming);
+                                        streaming, upstreamStartNanos);
                             })
-                    : forward(exchange, ctx, body, modelName, cacheKey, requestId, startMillis, streaming);
+                    : forward(exchange, ctx, body, modelName, cacheKey, requestId, startMillis, streaming,
+                            upstreamStartNanos);
 
             // #1000: every upstream failure has to end in an envelope here instead
             // of escaping to the container's default 500 document. The clauses stay
@@ -366,10 +382,10 @@ public class ProxyController {
      * leader failed falls back to its own upstream call.
      */
     private Mono<Void> forward(ServerWebExchange exchange, AuthContext ctx, byte[] body, String modelName,
-            CacheKey cacheKey, String requestId, long startMillis, boolean streaming) {
+            CacheKey cacheKey, String requestId, long startMillis, boolean streaming, long upstreamStartNanos) {
         RequestCoalescer coalescer = cacheKey != null ? coalescerProvider.getIfAvailable() : null;
         Mono<CachedResponse> work = doForward(exchange, ctx, body, modelName, cacheKey, requestId, startMillis,
-                streaming);
+                streaming, upstreamStartNanos);
         if (coalescer == null) {
             return work.then();
         }
@@ -389,7 +405,8 @@ public class ProxyController {
                 // upstream. Do our own call instead, as the SPI contract promises.
                 log.debug("Coalescer leader had nothing replayable (requestId={}); falling back to own upstream call",
                         requestId);
-                return doForward(exchange, ctx, body, modelName, cacheKey, requestId, startMillis, streaming).then();
+                return doForward(exchange, ctx, body, modelName, cacheKey, requestId, startMillis, streaming,
+                        upstreamStartNanos).then();
             }
             publishCoalescedUsage(ctx, modelName, cached, cacheKey, requestId,
                     clientAddressResolver.resolve(exchange.getRequest()));
@@ -397,7 +414,8 @@ public class ProxyController {
         }).onErrorResume(e -> {
             log.debug("Coalescer wait failed (requestId={}); falling back to own upstream call: {}", requestId,
                     e.getMessage());
-            return doForward(exchange, ctx, body, modelName, cacheKey, requestId, startMillis, streaming).then();
+            return doForward(exchange, ctx, body, modelName, cacheKey, requestId, startMillis, streaming,
+                    upstreamStartNanos).then();
         });
     }
 
@@ -415,15 +433,36 @@ public class ProxyController {
      * G2.5 network bounds: connection deadline (10s) and first-byte deadline (120s)
      * live on the {@link HttpClient}; the stream-idle timeout (5min, reset per
      * chunk) is applied per attempt on the observed body; the overall deadline
-     * ({@link ProxyTargetProperties#responseTimeout()}) wraps all attempts from the
-     * first subscription. A connection-phase failure is retried at most once, only
-     * before the first byte, never on timeouts, and always with the same
-     * credential.
+     * ({@link ProxyTargetProperties#responseTimeout()}) is enforced as two
+     * non-overlapping windows measured from a single origin taken in
+     * {@link #handleAuthenticated} before the first blocking hop — one over the
+     * credential resolution below (its queue wait included, #1388), one over the
+     * attempts themselves. A Reactor {@code timeout} disarms its timer as soon as
+     * its own source emits, so the windows cannot both fire for one request and the
+     * total stays inside the configured budget. A connection-phase failure is
+     * retried at most once, only before the first byte, never on timeouts, and
+     * always with the same credential.
      * </p>
      */
     private Mono<CachedResponse> doForward(ServerWebExchange exchange, AuthContext ctx, byte[] body, String modelName,
-            CacheKey cacheKey, String requestId, long startMillis, boolean streaming) {
-        ServerHttpResponse clientResponse = exchange.getResponse();
+            CacheKey cacheKey, String requestId, long startMillis, boolean streaming, long upstreamStartNanos) {
+        // #1388: the budget is read when this Mono is subscribed, not when it is
+        // assembled — the coalescer keeps the returned Mono for waiters, and each
+        // subscription is a separate upstream call.
+        return Mono.defer(() -> resolveCredential(ctx, requestId).timeout(remainingOf(upstreamStartNanos))
+                .flatMap(cred -> forwardWithResolvedCredential(exchange, ctx, body, cred, modelName, cacheKey,
+                        requestId, startMillis, streaming, remainingOf(upstreamStartNanos))));
+    }
+
+    /**
+     * Resolves the credential for this request and runs the G2.6 SSRF guard over
+     * its target. Both halves are blocking (AES decrypt, DNS) and hop to the
+     * credential-decrypt scheduler, so the caller must bound the returned Mono:
+     * with a saturated scheduler the lane wait, not just the work, is what has to
+     * be capped (#1388). Fails only before any upstream attempt, so the caller may
+     * map these errors without touching lifecycle or breaker accounting.
+     */
+    private Mono<CredentialInjector.InjectedCredential> resolveCredential(AuthContext ctx, String requestId) {
         return credentialInjector.resolve(ctx).flatMap(cred -> {
             if (cred.baseUrl() == null || cred.baseUrl().isBlank()) {
                 return Mono.error(new AuthFailureException(HttpStatus.BAD_GATEWAY, "route_unavailable",
@@ -441,15 +480,24 @@ public class ProxyController {
                             "Upstream target is not allowed");
                 }
                 return c;
-            }).flatMap(c -> forwardWithResolvedCredential(exchange, ctx, body, c, modelName, cacheKey, requestId,
-                    startMillis, streaming));
+            });
         });
+    }
+
+    /**
+     * The slice of the request's overall upstream deadline that is still unspent,
+     * measured from {@code upstreamStartNanos}. Never zero or negative: a request
+     * that reaches a stage after the budget is gone fails on its next signal
+     * instead of arming an invalid timer.
+     */
+    private Duration remainingOf(long upstreamStartNanos) {
+        Duration left = properties.responseTimeout().minusNanos(System.nanoTime() - upstreamStartNanos);
+        return left.isZero() || left.isNegative() ? Duration.ofNanos(1L) : left;
     }
 
     private Mono<CachedResponse> forwardWithResolvedCredential(ServerWebExchange exchange, AuthContext ctx, byte[] body,
             CredentialInjector.InjectedCredential cred, String modelName, CacheKey cacheKey, String requestId,
-            long startMillis, boolean streaming) {
-        ServerHttpResponse clientResponse = exchange.getResponse();
+            long startMillis, boolean streaming, Duration attemptBudget) {
         // G3.x relay wiring: resolve the target through the product adapter so a
         // per-protocol base URL applies (/v1/messages may target the provider's
         // Anthropic entry while chat targets its OpenAI one); products without
@@ -501,8 +549,14 @@ public class ProxyController {
             return callUpstreamOnce(exchange, ctx, cred, body, upstreamUri, filteredHeaders, cacheKey, modelName,
                     requestId, startMillis, streaming, attempt);
         }).retryWhen(Retry.max(1).filter(error -> retryableConnectionFailure(error, attemptRef.get()))
-                .onRetryExhaustedThrow((spec, signal) -> signal.failure())).timeout(properties.responseTimeout())
-                .doOnError(error -> {
+                .onRetryExhaustedThrow((spec, signal) -> signal.failure()))
+                // #1388: only the slice of the request deadline that is left —
+                // the time already spent waiting for a scheduler lane was charged
+                // upstream of this method, so the two windows do not sum past the
+                // configured budget. Terminal classification is unchanged: a timer
+                // here still cancels the in-flight attempt, which is what the
+                // doFinally below reads to skip breaker accounting.
+                .timeout(attemptBudget).doOnError(error -> {
                     UpstreamAttempt attempt = attemptRef.get();
                     if (attempt != null) {
                         attempt.upstreamError.set(error);
