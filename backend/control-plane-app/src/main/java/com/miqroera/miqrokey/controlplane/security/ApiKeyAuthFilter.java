@@ -166,7 +166,9 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
      *
      * <p>
      * The rule itself lives in {@link LogValues} so the auth and audit log lines
-     * share it; this channel keeps its own tighter bound.
+     * share it; this channel keeps its own tighter bound. That class is the shared
+     * definition, not yet the only one — see its javadoc for the copies that still
+     * drift.
      * </p>
      */
     private static String forLog(String value) {

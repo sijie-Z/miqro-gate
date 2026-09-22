@@ -17,14 +17,31 @@ package com.miqroera.miqrokey.controlplane.security;
  * </p>
  *
  * <p>
- * Single implementation for the whole control plane: the same rule already
- * guarded the billing channel only (formerly a private
- * {@code ApiKeyAuthFilter#forLog}), which is how the audit and auth log lines
- * stayed exposed. Control characters and the {@code [ ] , =} delimiters of a
- * {@code key=value} structure become {@code ?}, and the result is bounded so an
- * oversized value cannot turn every request into a log-amplification vector.
- * This applies to the log line only — what is persisted (and what the API
- * echoes back) keeps the original value.
+ * The control plane's shared implementation of this rule: before #1313 it
+ * guarded the billing channel only (a private {@code ApiKeyAuthFilter#forLog}),
+ * which is how the audit and auth log lines stayed exposed. Control characters
+ * and the {@code [ ] , =} delimiters of a {@code key=value} structure become
+ * {@code ?}, and the result is bounded so an oversized value cannot turn every
+ * request into a log-amplification vector. This applies to the log line only —
+ * what is persisted (and what the API echoes back) keeps the original value.
+ * </p>
+ *
+ * <p>
+ * Shared, but not yet the only copy: {@code OriginInterceptor} still carries
+ * its own private flattener that strips control characters only — no delimiter
+ * flattening, no bound — and the gateway has a separate twin with its own
+ * bound. Folding the remaining copies onto this class is a follow-up, not part
+ * of #1313.
+ * </p>
+ *
+ * <p>
+ * The rule is lossy by design, which matters when reading a log line: values
+ * that differ only in a delimiter or in an invisible format character
+ * ({@code a=b}, {@code a,b}, {@code a]b}, a name carrying a zero-width joiner)
+ * all render as {@code a?b}, so a legitimate identifier containing one of them
+ * is visibly altered and two accounts can become indistinguishable. The bound
+ * is applied after flattening, so it can also fall between the halves of a
+ * surrogate pair.
  * </p>
  */
 public final class LogValues {
@@ -32,7 +49,10 @@ public final class LogValues {
     /**
      * Default bound on a single flattened value. Matches the {@code username}
      * column ({@code varchar(128)}), so a legitimate identifier is never truncated
-     * while an attacker-supplied value still cannot amplify the log.
+     * while an attacker-supplied value still cannot amplify the log. A truncated
+     * value keeps {@code maxLength} characters plus the {@code …} marker, so the
+     * returned string is at most {@code maxLength + 1} characters long — the
+     * constant bounds the input kept, not the output length.
      */
     public static final int DEFAULT_MAX_LENGTH = 128;
 
