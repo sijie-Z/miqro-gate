@@ -76,7 +76,14 @@ fi
 
 # Checksum manifest (recorded before retention runs so the kept file set
 # always has its own manifest).
-sha256sum "$FILE" > "$MANIFEST"
+#
+# Record the bare file name, never the absolute path the backup happened to be
+# written to: the archive is synced off-host by design (operations-runbook §10
+# 「存放于独立介质」/ §G6.2 「备份产物需另行同步异地（COS）」) and restored from
+# wherever it lands. A manifest that pinned the producing host's path would
+# make restore/verify check a file that no longer exists — or, worse, the old
+# copy that does — instead of the archive being restored (#1381).
+( cd "$(dirname "$FILE")" && sha256sum "$(basename "$FILE")" ) > "$MANIFEST"
 
 # Retention: daily set + newest per ISO week among the remainder (#438).
 PRUNE_COUNT=$(apply_retention "$MIQROKEY_BACKUP_PATH" "$MIQROKEY_BACKUP_DAILY_KEEP" "$MIQROKEY_BACKUP_WEEKLY_KEEP") \
