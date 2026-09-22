@@ -173,6 +173,66 @@ describe('NextAdminWebhooksView', () => {
     expect(deps!.textContent).toContain('已启用');
   });
 
+  it('#1307: does not present the aggregate rate as complete when one history is unknown', async () => {
+    mockApi.listWebhooks.mockResolvedValue([
+      endpoint({ id: 'w1' }),
+      endpoint({ id: 'w2', name: 'sre-hook' }),
+    ]);
+    mockApi.webhookDeliveries.mockImplementation(async (id: string) => {
+      if (id === 'w2') {
+        throw new ApiError({
+          type: 'about:blank',
+          title: 'internal error',
+          status: 500,
+          code: 'INTERNAL_ERROR',
+          detail: '服务内部错误，请稍后重试。',
+          requestId: 'rq-1307',
+        });
+      }
+      return [delivery({ id: 'd1', httpStatus: 200 }), delivery({ id: 'd2', httpStatus: 200 })];
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    // The per-row cell is honest about the endpoint whose history did not load.
+    const unknownRow = wrapper.findAll('tr').find((r) => r.text().includes('sre-hook'));
+    expect(unknownRow, 'sre-hook row should render').toBeTruthy();
+    expect(unknownRow!.text()).toContain('—');
+
+    // The aggregate must not claim "全部端点" health from one endpoint's data.
+    const donut = wrapper.find('[data-testid="webhook-rate-donut"]');
+    expect(donut.exists()).toBe(true);
+    expect(donut.text()).not.toContain('100%');
+    expect(donut.text()).toContain('—');
+
+    const summary = wrapper.find('[data-testid="webhook-rate-dist"]');
+    expect(summary.text()).toContain('1 个端点的历史未取到，未计入');
+  });
+
+  it('#1307: an aggregate with no readable history still says so instead of vanishing', async () => {
+    mockApi.listWebhooks.mockResolvedValue([endpoint({ id: 'w1' })]);
+    mockApi.webhookDeliveries.mockRejectedValue(
+      new ApiError({
+        type: 'about:blank',
+        title: 'internal error',
+        status: 500,
+        code: 'INTERNAL_ERROR',
+        detail: '服务内部错误，请稍后重试。',
+        requestId: 'rq-1307b',
+      }),
+    );
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const summary = wrapper.find('[data-testid="webhook-rate-dist"]');
+    expect(summary.exists()).toBe(true);
+    expect(summary.text()).toContain('1 个端点的历史未取到，未计入');
+    expect(summary.text()).toContain('投递历史未能读取，无法统计成功率。');
+    expect(wrapper.find('[data-testid="webhook-rate-donut"]').text()).toContain('—');
+  });
+
   it('shows the recent-20 delivery success rate per endpoint', async () => {
     mockApi.listWebhooks.mockResolvedValue([endpoint()]);
     mockApi.webhookDeliveries.mockResolvedValue([
