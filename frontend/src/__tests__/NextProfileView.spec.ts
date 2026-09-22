@@ -142,7 +142,13 @@ describe('NextProfileView', () => {
 
     const [, from, to] = mockApi.usageSummary.mock.calls[0]!;
     expect(from).toBe(utcMonthStartIso());
-    expect(to).toBeDefined();
+    // to = 此刻；必须严格晚于 from。只断言「已定义」是空断言：退化成 from == to 的窗口
+    // 也能过，而后端会按 TIME_RANGE_INVALID 拒掉它（边界见 quota-window-usage.spec.ts）。
+    // 缺参数走 NaN，两条断言都会红——「没传」照样fail。
+    const fromMs = from === undefined ? Number.NaN : Date.parse(from);
+    const toMs = to === undefined ? Number.NaN : Date.parse(to);
+    expect(toMs).toBeGreaterThan(fromMs);
+    expect(toMs).toBeLessThanOrEqual(Date.now());
     wrapper.unmount();
   });
   it('renders account facts and password form', async () => {

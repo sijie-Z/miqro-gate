@@ -60,7 +60,7 @@ function formatInstant(iso?: string | null): string {
   return iso ? new Date(iso).toLocaleString() : '—';
 }
 
-// ---- monthly snapshot (caliber: the usage page's totals row) ----
+// ---- 本月速览：窗口 = 当月 1 日 00:00:00Z 起（monthlyRange）；计数器口径与用量页 totals 行一致 ----
 
 const keys = ref<VirtualKeyView[] | null>(null);
 const summary = ref<UsageSummary | null>(null);

@@ -8,6 +8,7 @@
  *
  * from/to 一律格式化为秒级 ISO 字符串（去掉毫秒）：两端点最多各截掉 <1s，
  * 对窗口统计无影响，而库内测试的手算期望值写的就是秒级形式。
+ * 例外见 `secondWindow`：截断把窗口截没时要撑开，否则后端拒收。
  */
 
 export type QuotaWindowKey = 'ROLLING_5H' | 'WEEKLY' | 'MONTHLY';
@@ -42,19 +43,32 @@ function monthStart(now: Date): Date {
 }
 
 /**
- * 单一「本月」窗口（当月 1 日 00:00:00Z 起），给所有自称「本月」的汇总用。
+ * 一对秒级 from/to：`to` 取 `now`（截到秒），但绝不早于 `from + 1s`。
+ *
+ * 截断会把窗口截没：当「现在」落在窗口起点那一秒内（当月 1 日或周一的
+ * 00:00:00.000–.999Z），from == to，后端 `UsageStatsService.validateTimeRange`
+ * 判「from must be before to」→ TIME_RANGE_INVALID 400 → 整页进错误态。
+ * 那一秒本来就含着「窗口到目前为止」的全部时间（起点即此刻），所以撑到 from+1s
+ * 是这次截断的正确取整，不是编造区间。#1429 让卡片与速览显式传窗口后才暴露；
+ * 「本周」早有同一处边界，一并按这条规则收口。
+ */
+function secondWindow(from: Date, now: Date): { from: string; to: string } {
+  const to = Math.max(now.getTime(), from.getTime() + 1_000);
+  return { from: isoSeconds(from), to: isoSeconds(new Date(to)) };
+}
+
+/**
+ * 单一「本月」窗口（当月 1 日 00:00:00Z 起），给额度账本的「本月」行与各处
+ * 「本月」卡片共用。`windowRanges` 的第三项就是这一份，一个定义、多处引用。
  *
  * 省略 from/to 不是「本月」：后端把缺省窗口解析成 MAX_WINDOW = 93 天
  * （`UsageStatsService.java:127`、`AdminUsageStatsService.java:296`），画出来的是近三个月。
- * `windowRanges` 的第三项就是这一份，一个定义两处引用。
+ *
+ * 口径注意：这是 **UTC** 日历月。`NextRoiView.vue` 的「本月」按**本地**日历月算，
+ * 是另一套口径（见该文件 windowRange），不在本函数的定义域内。
  */
 export function monthlyRange(now: Date): QuotaWindowRange {
-  return {
-    key: 'MONTHLY',
-    label: '本月',
-    from: isoSeconds(monthStart(now)),
-    to: isoSeconds(now),
-  };
+  return { key: 'MONTHLY', label: '本月', ...secondWindow(monthStart(now), now) };
 }
 
 /**
@@ -62,15 +76,14 @@ export function monthlyRange(now: Date): QuotaWindowRange {
  * Pure: the caller passes `now` so tests can freeze it.
  */
 export function windowRanges(now: Date): QuotaWindowRange[] {
-  const to = isoSeconds(now);
   return [
     {
       key: 'ROLLING_5H',
       label: '5 小时',
-      from: isoSeconds(new Date(now.getTime() - 5 * 60 * 60 * 1_000)),
-      to,
+      // 起点恒在 5 小时前，撑开分支取不到。
+      ...secondWindow(new Date(now.getTime() - 5 * 60 * 60 * 1_000), now),
     },
-    { key: 'WEEKLY', label: '本周', from: isoSeconds(mondayStart(now)), to },
+    { key: 'WEEKLY', label: '本周', ...secondWindow(mondayStart(now), now) },
     monthlyRange(now),
   ];
 }
