@@ -499,9 +499,15 @@ public class ModelApprovalService {
         return sb.append('}').toString();
     }
 
+    /**
+     * #1382: delegates to the one escaper instead of re-implementing it. The
+     * hand-rolled version here covered only the three short escapes, so any other
+     * control character in a model id reached the {@code ::jsonb} round-trip in
+     * {@code AuditServiceImpl} raw and aborted the whole {@code @Transactional}
+     * write with no audit row.
+     */
     private static String escapeJson(String s) {
-        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t",
-                "\\t");
+        return AuditSummaries.escapeJson(s);
     }
 
     /**

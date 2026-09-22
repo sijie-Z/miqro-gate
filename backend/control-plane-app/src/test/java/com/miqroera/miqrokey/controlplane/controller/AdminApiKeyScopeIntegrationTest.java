@@ -263,6 +263,66 @@ class AdminApiKeyScopeIntegrationTest {
     }
 
     /**
+     * #1382: a denied request whose path carries a percent-encoded control
+     * character used to answer 500 and leave NO audit row, because
+     * {@code auditDenied} spliced the decoded path into the change summary with an
+     * escaper that handled only {@code \} and {@code "}: the {@code ::jsonb}
+     * round-trip in {@code AuditServiceImpl.record} threw, and the throw escaped
+     * the non-transactional filter before {@code forbiddenScope} could run.
+     *
+     * <p>
+     * Driven over real HTTP through Tomcat ({@link #probeStatus}) because MockMvc
+     * bypasses container request normalization. Verified here:
+     * <ul>
+     * <li>the denial still answers {@code 403 ADMIN_API_SCOPE_DENIED};
+     * <li>exactly one audit row per attempt is written;
+     * <li>the stored {@code change_summary} is parseable and round-trips the
+     * control character as an escape rather than raw.
+     * </ul>
+     */
+    @Test
+    @DisplayName("a denial with a control character in the path is audited and still answered 403 (#1382)")
+    void controlCharacterInDeniedPathIsAudited() throws Exception {
+        String secret = issueKey("ctrl-char");
+        mockMvc.perform(patch("/api/v1/admin/api-keys/" + keyId(secret) + "/scope").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"capabilities\":[\"usage:read\"]}")).andExpect(status().isOk());
+
+        assertThat(probeStatus("/api/v1/admin-api/export-tasks", secret)).as("baseline: an out-of-scope path is denied")
+                .isEqualTo(403);
+        assertThat(countAudit("ADMIN_API_KEY_SCOPE_DENIED")).isEqualTo(1);
+
+        // Each denied path must leave its own row, carrying the DECODED path — the
+        // control character is part of the audited evidence, not something to lose.
+        Map<String, String> controls = Map.of("%01", String.valueOf((char) 0x01), "%0C", String.valueOf((char) 0x0C),
+                "%0B", String.valueOf((char) 0x0B), "%1F", String.valueOf((char) 0x1F));
+        for (Map.Entry<String, String> control : controls.entrySet()) {
+            assertThat(probeStatus("/api/v1/admin-api/export-tasks/" + control.getKey(), secret))
+                    .as("a control character in the path must not turn the denial into a 500 (%s)", control.getKey())
+                    .isEqualTo(403);
+            assertThat(auditedPaths()).as("row written for %s", control.getKey())
+                    .contains("/api/v1/admin-api/export-tasks/" + control.getValue());
+        }
+        assertThat(countAudit("ADMIN_API_KEY_SCOPE_DENIED")).as("every denial must leave exactly one audit row")
+                .isEqualTo(5);
+
+        // The summary is a JSON document, and the control character survives as an
+        // escape (jsonb normalizes it to ) rather than as a raw byte.
+    }
+
+    /**
+     * The {@code path} member of every recorded denial, read back through
+     * {@code ->>} so the value is the decoded string jsonb round-trips — the exact
+     * form {@code AuditServiceImpl} hashed into the chain.
+     */
+    private List<String> auditedPaths() {
+        return jdbc.queryForList(
+                "SELECT change_summary ->> 'path' FROM admin_audit_events"
+                        + " WHERE action = 'ADMIN_API_KEY_SCOPE_DENIED' ORDER BY chain_position",
+                new MapSqlParameterSource(), String.class);
+    }
+
+    /**
      * Real-HTTP status for one path with the machine key (no assertions inside).
      */
     private int probeStatus(String path, String secret) throws Exception {
