@@ -214,6 +214,8 @@
 
 `status` ∈ `ACTIVE | ROTATING | REVOKED | DISABLED`。`cachePolicy` 默认 `DISABLED`（显式开启才可参与响应缓存）。
 
+**归属与例外**：`/api/v1/me/virtual-keys/**` 默认只作用于调用者自己的 Key——非属主请求 `/{id}` 一律 `404 KEY_NOT_FOUND`（不区分「不存在」与「不是你的」，反枚举）。唯一例外是 `SYSTEM_ADMIN`：安全闸按前缀放行后，管理员可对该面上**任意** Key 执行 `GET`/`PATCH`/`disable`/`enable`/`rotate`/`revoke`（实现为 `VirtualKeyService.ownedKey()` 的 `SYSTEM_ADMIN` 豁免；对应 `virtual-key-lifecycle.md` §4/§5「管理员可以禁用或吊销任意 Key」）。**注意这是 `{id}` 级运维面**：要「按用户列出某人的 Key」，会话面没有对应端点（§5 序言那条 `/api/v1/admin/virtual-keys` 仍未实现，见 #1377）；`GET /api/v1/me/virtual-keys` 对管理员也严格自限。管理员代为 `rotate` 会一次性拿到新明文 Secret（§4.3），需按凭证处置。
+
 ### 4.3 轮换与吊销
 
 `POST /api/v1/me/virtual-keys/{id}/rotate` 原子轮换：旧 Key 立即停止接受新请求，在配置宽限期（`miqrokey.virtual-key-rotate-grace`，默认 `PT0S`）内仍可路由，宽限结束后失效。响应与创建响应相同（`CreateVirtualKeyResponse`，新 Secret 仅本次出现一次）。
