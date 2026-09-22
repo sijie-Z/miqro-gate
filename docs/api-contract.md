@@ -393,7 +393,8 @@
 - `/api/v1/admin/subscriptions/{id}/members`：席位、成员 Key 或共享池成员关系。
 - `/api/v1/admin/credentials`：创建、测试、轮换、禁用真实凭证。
 - `/api/v1/admin/grants`：向用户授予项目、产品、凭证和模型范围。
-- `/api/v1/admin/virtual-keys`：全局查询、吊销；仍不返回明文。
+- `/api/v1/admin/virtual-keys`：**未实现（#1377）**——该路由在代码中不存在，请求一律 `404 NOT_FOUND`（本机实例实测：四形状 `GET` / `GET ?userId=` / `GET /{id}` / `POST /{id}/revoke` 全部 404）。管理员的密钥运维实际落在 §4 的自助面上：`VirtualKeyService.ownedKey()` 对 `SYSTEM_ADMIN` 豁免归属校验，故管理员可对**任意** Key 调 `GET`/`PATCH /api/v1/me/virtual-keys/{id}` 与 `/{id}/disable|enable|rotate|revoke`（对应 `virtual-key-lifecycle.md` §4/§5「管理员也可以代为轮换」「管理员可以禁用或吊销任意 Key」的要求），代价是必须**已知目标 Key 的 UUID**；非管理员对他人 Key 仍是 `404 KEY_NOT_FOUND`（反枚举口径不变），且 `revoke` 更名后仍不返回明文。
+  - **跨用户列表在会话面不存在**：`GET /api/v1/me/virtual-keys` 严格只返回调用者自己的 Key（管理员亦然）。按用户查列表目前只有机器密钥面 `GET /api/v1/admin-api/virtual-keys?userId=`（§9；需机器密钥且先知道 `userId`）。`VirtualKeyRepository.findAllByTenantId()` 虽已存在但无生产调用方——即本条承诺的「全局查询」在**任何会话面都没有实现**，是否补一个会话面管理员端点属产品决定，见 #1377。
 - `/api/v1/admin/usage/**`：全局汇总、差异视图、解析失败队列。
 - `/api/v1/admin/exports`：创建和下载原始记录导出任务。
 - `/api/v1/admin/reconciliation/**`：导入官方账单并生成匹配结果。
