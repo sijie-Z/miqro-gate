@@ -139,6 +139,52 @@ describe('NextProvidersView', () => {
     expect(dialog!.textContent).toContain('人工');
   });
 
+  // #PH89: `probedAt` reaches the console as a UTC ISO string
+  // (ModelCatalogProbeService serialises `Instant.toString()`), so it has to be
+  // converted to the viewer's zone like every other timestamp in the console.
+  //
+  // The expectation is *derived* with local getters rather than hard-coded.
+  // Note the limit of that: at UTC+0 the old `slice(0, 16)` and the correct
+  // conversion print byte-identical text, so this test cannot tell them apart —
+  // and CI does not pin TZ (#1301). The zone-independent teeth live in
+  // `utc-timestamp-display.spec.ts`; this one is the end-to-end check that the
+  // view actually calls the shared helper. Run it under two zones to see the
+  // same instant print two different times:
+  //   TZ=Asia/Shanghai npx vitest run src/__tests__/NextProvidersView.spec.ts
+  //   TZ=EST5EDT       npx vitest run src/__tests__/NextProvidersView.spec.ts
+  it('#PH89: 上次探测时间按浏览器本地时区显示，不直接打印后端 UTC 串', async () => {
+    const probedAt = '2026-09-22T01:30:00Z';
+    const d = new Date(probedAt);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const local = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(
+      d.getHours(),
+    )}:${pad(d.getMinutes())}`;
+
+    mockApi.adminListModels.mockResolvedValue([]);
+    mockApi.adminModelProbeStatus.mockResolvedValue({
+      status: 'SUCCEEDED',
+      error: null,
+      modelCount: 2,
+      probedAt,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="product-models-open"]').trigger('click');
+    await flushPromises();
+
+    const text = document.querySelector('[data-testid="product-probe-status"]')?.textContent ?? '';
+    // Asserted in every zone: whatever the viewer's zone, this is its wall clock.
+    expect(text).toContain(local);
+
+    // Only meaningful where the UTC wall clock differs from the local one. At
+    // UTC+0 the two strings are equal, so asserting absence would fail against
+    // *correct* code — a false red on the very runners this has to stay green on.
+    const utcRendering = probedAt.slice(0, 16).replace('T', ' ');
+    if (utcRendering !== local) {
+      expect(text).not.toContain(utcRendering);
+    }
+  });
+
   it('I4: probes the provider model catalog and shows the last probe status', async () => {
     mockApi.adminListModels.mockResolvedValue([]);
     mockApi.adminModelProbeStatus.mockResolvedValue({
