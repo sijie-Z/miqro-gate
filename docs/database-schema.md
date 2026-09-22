@@ -393,9 +393,11 @@ alert_rules 类型 CHECK 同步扩展 `CONSUMER_KEY_EXPIRING`（V36 同款模式
 
 用量配额计划（roadmap「配额管理」）：`scope_type`（`USER|PROJECT`）、`scope_id`、`metric`（`TOKENS|REQUESTS|COST`，COST 为 V58/#683 增）、`period`（`DAILY|WEEKLY|MONTHLY|YEARLY`，YEARLY 为 V58/#683 增）、`action`（`ALERT|REJECT`，默认 `ALERT`，V59/#684：REJECT 规则超限后由网关拒绝该 scope 的请求，ADR-0020）、`limit_value bigint`（>0；COST 口径为整数 CNY）、`warn_percent`（1–99，默认 80）、`status`（`ACTIVE|DISABLED`）、`created_by`、`version`。唯一 `(tenant_id, scope_type, scope_id, metric, period)`（同 scope 同维同周期仅一条，重复 PUT 原地编辑）。表只存计划；**当前窗口水位在读取时由 usage 事件计算**（UTC 窗口；TOKENS=全部 token 口径，REQUESTS=上游请求数，COST=价格快照估算的上游实付；YEARLY 水位不受公开 API 93 天窗口上限约束），`(tenant_id, scope_type, scope_id, status)` 索引。ALERT 规则永不阻断；REJECT 的超限判定见 `quota_enforcement`。
 
-### `quota_enforcement` (V59，#684，配额软着陆判定集)
+### `quota_enforcement` (V59，#684，配额软着陆判定集；V76/#1316 增记录读数)
 
-配额软着陆的**判定集**（ADR-0020）：每个当前判定为「超限」的 ACTIVE REJECT 规则一行——`rule_id`（PK）、`tenant_id`（FK → tenants，CASCADE）、`scope_type`（`USER|PROJECT`）、`scope_id`、`metric`、`period`（存档用，便于运维看清"被什么卡的"）、`blocked_at`。控制面 `QuotaEnforcementService` 每轮（默认 60s）**整体替换**该表：遍历 ACTIVE REJECT 规则 → 经共享 `QuotaWatermarks` 计算当期水位 → EXCEEDED 者入围；判定集变化才 `pg_notify` 路由刷新。网关热路径只读快照里的 `quotaBlockedUserIds`/`quotaBlockedProjectIds`，**不查此表**。本表是**可重建的派生数据**：清空只会让下一轮评估按当前用量重新写入；提高限额/跨窗口/停用规则都会让对应行在下一轮消失。`(scope_type, scope_id)` 索引。
+配额软着陆的**判定集**（ADR-0020）：每个当前判定为「超限」的 ACTIVE REJECT 规则一行——`rule_id`（PK）、`tenant_id`（FK → tenants，CASCADE）、`scope_type`（`USER|PROJECT`）、`scope_id`、`metric`、`period`（存档用，便于运维看清"被什么卡的"）、`window_end`（该判定所在窗口的结束时刻，喂 429 的 `Retry-After`；同一 scope 被多条规则拦时取最早）、`blocked_at`（这一段连续 block 的起点）、`observed_used numeric(24, 10)`（V76/#1316：定下这条判定时看到的用量读数，可空＝V76 之前的旧行）。控制面 `QuotaEnforcementService` 每轮（默认 60s）重算：遍历 ACTIVE REJECT 规则 → 经共享 `QuotaWatermarks` 计算当期水位 → EXCEEDED 者入围；**判定集（rule_id + window_end + blocked_at 三元组）变化才整体替换并 `pg_notify` 路由刷新**，不变时只就地刷新 `observed_used`（不广播，网关快照不动）。网关热路径只读快照里的 `quotaBlockedUserIds`/`quotaBlockedProjectIds`，**不查此表**。`(scope_type, scope_id)` 索引。
+
+**判定粘在窗口里**（#1316）：水位是从 `usage_event` 现算的，而用量行会被保留策略物理删掉，所以「实时水位掉到限额以下」**不是**恢复路径——`window_end` 与 `blocked_at` 跨轮结转，只有 ①窗口滚过去（`window_end` 已过）②管理员把限额提到 `observed_used` 之上 ③规则被停用/删除，这三条能解掉 block（ADR-0020 §4）；例外是 V76 之前写下、之后一直没被观察到「仍超限」的旧行——它们没有读数，仍按升级前的 `updated_at` 比较，保存一次即解除，第一次「仍超限」的评估轮补上读数后并入上句口径（升级残留，窗口滚过去即归零）。因此本表**不是可以随便清空的派生数据**：清空会丢掉结转的判定，下一轮只能按当时的实时水位重建，而那时若用量已被删掉，block 就不会再出现。反过来，对**仍超限**的规则清空无害——下一轮会重新写入。
 
 ### `quota_default_template` (V26，默认配额模板；V58 扩维)
 

@@ -2,6 +2,15 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 会话交接点 2026-09-22（PH67 数据保留/清理正确性：配额判定不得被用量删除解封，#1316）
+
+- **缺陷**：`quota_enforcement` 是网关 429 的唯一来源，控制面 `QuotaEnforcementService` 每 60s 用**实时**水位（`QuotaWatermarks` → `usage_event` 聚合）重算它。于是保留策略的 `UsageDeletionService.confirm()` 物理删掉当前窗口的 `usage_event` 行之后，下一轮水位归零 → 规则不再 EXCEEDED → 判定行消失 → **流量重新放行**。ADR-0020 D2 承诺的恢复路径只有「窗口滚过去」与「管理员提高限额」，删除用量不在其中。
+- **机制坐标**：`QuotaEnforcementService.evaluate()`（判定集重算）、`QuotaWatermarks.evaluate()`（水位口径）、`UsageDeletionService.confirm()`（删 `usage_event`）、`JdbcRouteSnapshotLoader` → `QuotaGate`（429 出口）。
+- **修复（四轮收敛，每轮都先证红）**：① 判定粘在窗口里（结转 `window_end`/`blocked_at`，实时水位掉下去不解除）；② 规则仍超限时判定时刻不刷新（保存规则不算恢复）；③ **恢复路径的比较基准从 `quota_rules.updated_at` 换成表里那条读数 `observed_used`**（V76 增列）——`updated_at` 的比较会被「保存 → 删用量 → 下一轮评估」这个顺序利用：保存先上膛、删用量扣扳机，规则其实仍超限，block 却没了；读数比较没有这个时间窗（读数仍不低于改后限额就保持）；④ 规则仍超限时每轮就地刷新 `observed_used`（判定集不变 → 不广播、不触发快照重载），否则读数会退化成过期下界、让后来的提额错判成「已恢复」。
+- **边界口径**：采样边界与触发判定那句一致——`used >= limit` 即 EXCEEDED（百分比先四舍五入到 2 位再比 100），所以「限额恰好提到记录读数」**仍然是 block**，只有严格提到读数之上才解除。`QuotaWatermarks.reachesTheLimit` 是这条边界的唯一实现，两侧共用。
+- **可空列的理由**：V76 的 `observed_used` 可空——V76 之前的旧行没有读数，服务退回按 `blocked_at`/`updated_at` 比较；若默认 0，升级时每一行都会读成「低于任何限额」，现存的 block 会被静默丢弃。
+- **真库证据**：`QuotaBlockSurvivesUsageDeletionIntegrationTest`（7 例，真 PostgreSQL）——改前红：`adminEditThatKeepsTheRuleExceededStillSurvivesTheDeletion:253 expected: 1L but was: 0L`，stdout `block rows=0`；改后绿：同一行 `block rows=1`。单元侧 `QuotaEnforcementServiceStickyVerdictTest`（12 例）覆盖异常隔离、读数上移、旧行回退。
+- **文档**：ADR-0020 §2 D2 / §4 后果改写（比较基准换成读数）；`database-schema.md` 的 `quota_enforcement` 补 `window_end`/`observed_used`，并更正「可重建的派生数据」——清空会丢掉结转的判定；CHANGELOG 2026-09-22 条目。
 ## 会话交接点 2026-09-21（PH65 写操作幂等猎线：#1305 + #1333）
 
 - **形态**：猎线（审计+修复），不是 Goal。枚举全部写端点的重复提交防护，对代表性端点做真实 API + 真实 PG 的并发双发实测。确认 2 个缺陷、否证 8 条（否证清单见猎线报告 §5），未凑数立案。
