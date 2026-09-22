@@ -317,7 +317,9 @@ public class ProxyController {
             boolean cacheable = CacheEligibility.isCacheable(ctx,
                     exchange.getRequest().getHeaders().getFirst(CacheEligibility.CACHEABLE_HEADER), body,
                     hasToolFields);
-            CacheKey cacheKey = cacheable ? cacheKeyFactory.compute(ctx, modelName, body) : null;
+            CacheKey cacheKey = cacheable
+                    ? cacheKeyFactory.compute(ctx, modelName, body, wireProtocolOf(exchange))
+                    : null;
 
             // #444: the cache lookup is blocking I/O (L2 hits PostgreSQL) — it
             // must never run on the event loop. Reads go through the bounded
