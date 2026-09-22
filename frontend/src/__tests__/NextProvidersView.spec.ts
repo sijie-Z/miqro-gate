@@ -510,4 +510,78 @@ describe('NextProvidersView', () => {
     await flushPromises();
     expect(document.querySelector('[data-testid="field-error"]')).toBeNull();
   });
+
+  // rowsOf：抽屉读数（带 providerProductId）与页面读数（无参）是**同一张表**的两次
+  // 读，这里让两者给出不同的行数 —— 复现「服务器侧已经变了、页面那次读数还是旧的」。
+  function rowsOf(productId: string, n: number) {
+    return Array.from({ length: n }, (_, i) => ({
+      id: `${productId}-m${i}`,
+      providerProductId: productId,
+      modelId: `model-${i}`,
+    }));
+  }
+
+  it('#PH78: 行上的「N 个模型」跟着抽屉里的模型目录走', async () => {
+    mockApi.adminListModels.mockImplementation((productId?: string) =>
+      Promise.resolve(productId ? rowsOf(productId, 5) : rowsOf('0190-0000-0000-0020', 2)),
+    );
+    mockApi.adminModelProbeStatus.mockResolvedValue({
+      status: null,
+      error: null,
+      modelCount: null,
+      probedAt: null,
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    const rowCount = () => wrapper.findAll('[data-testid="product-catalog-count"]')[0]!.text();
+    expect(rowCount()).toContain('2 个模型');
+
+    await wrapper.find('[data-testid="product-models-open"]').trigger('click');
+    await flushPromises();
+    await flushPromises();
+
+    // 抽屉确实读到 5 条（服务器侧这份数据已经是 5）……
+    const dialog = document.querySelector('[data-testid="product-models-dialog"]');
+    expect(dialog?.textContent).toContain('model-4');
+    // …那行上那份副本就不许还说 2。
+    expect(rowCount()).toContain('5 个模型');
+  });
+
+  it('#PH78: 探测成功后行上的「N 个模型」跟着抽屉里的目录走', async () => {
+    // 开抽屉那次读到的仍是 2；探测后的重读才是 5 —— 只有探测这条写路径变了。
+    let drawerReads = 0;
+    mockApi.adminListModels.mockImplementation((productId?: string) => {
+      if (!productId) return Promise.resolve(rowsOf('0190-0000-0000-0020', 2));
+      drawerReads += 1;
+      return Promise.resolve(rowsOf(productId, drawerReads === 1 ? 2 : 5));
+    });
+    mockApi.adminModelProbeStatus.mockResolvedValue({
+      status: null,
+      error: null,
+      modelCount: null,
+      probedAt: null,
+    });
+    mockApi.adminProbeModels.mockResolvedValue({
+      providerProductId: '0190-0000-0000-0020',
+      productCode: 'deepseek-payg-api',
+      modelCount: 5,
+      probedAt: '2026-09-22T00:00:00Z',
+      models: [],
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    const rowCount = () => wrapper.findAll('[data-testid="product-catalog-count"]')[0]!.text();
+    await wrapper.find('[data-testid="product-models-open"]').trigger('click');
+    await flushPromises();
+    expect(rowCount()).toContain('2 个模型');
+
+    (document.querySelector('[data-testid="product-probe"]') as HTMLButtonElement).click();
+    await flushPromises();
+    await flushPromises();
+
+    expect(mockApi.adminProbeModels).toHaveBeenCalledWith('0190-0000-0000-0020');
+    expect(rowCount()).toContain('5 个模型');
+  });
 });
