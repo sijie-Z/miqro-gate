@@ -186,6 +186,29 @@ class SubscriptionPeriodValidationApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("#1330 P1: a PATCH carrying both bounds reversed or equal is refused as a pair")
+    void patchRejectsReversedOrEqualPairSentTogether() throws Exception {
+        fx.insertCatalogOnly();
+        UUID id = createSubscriptionWithValidPeriod();
+
+        // Both bounds arrive in the payload, so the merged pair equals it: the same
+        // strictly-before check the create path applies, exercised through the
+        // update path (an update path that only validated one-sided patches would
+        // let this through).
+        mockMvc.perform(patchSubscription(id,
+                Map.of("periodStart", "2026-10-01T00:00:00Z", "periodEnd", "2026-09-01T00:00:00Z")))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("TIME_RANGE_INVALID"));
+        mockMvc.perform(patchSubscription(id,
+                Map.of("periodStart", "2026-09-15T00:00:00Z", "periodEnd", "2026-09-15T00:00:00Z")))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("TIME_RANGE_INVALID"));
+
+        // The refused patches leave the stored pair untouched.
+        Map<String, Object> row = periodRow(id);
+        assertThat(((Timestamp) row.get("period_start")).toInstant()).isEqualTo(Instant.parse("2026-08-01T00:00:00Z"));
+        assertThat(((Timestamp) row.get("period_end")).toInstant()).isEqualTo(Instant.parse("2026-09-01T00:00:00Z"));
+    }
+
+    @Test
     @DisplayName("#1330 P1: a PATCH on a subscription born without a period cannot complete it one end at a time")
     void patchRejectsOneSidedWriteWhenStoredPeriodIsNull() throws Exception {
         fx.insertCatalogOnly();
