@@ -16,12 +16,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * {@code provider_row_ref} is declared a plain string by
- * docs/bill-reconciliation-contract.md:30 but stored in a
- * {@code varchar(256)} column (V42__reconciliation_reports.sql:47). An over-long
- * value used to reach the INSERT untouched (#1439): one line killed the whole
- * report, so this class pins both halves of the contract - the row survives with
- * a bounded ref AND the truncation is visible as a line error. Synthetic fixtures
- * only.
+ * docs/bill-reconciliation-contract.md:30 but stored in a {@code varchar(256)}
+ * column (V42__reconciliation_reports.sql:47). An over-long value used to reach
+ * the INSERT untouched (#1439): one line killed the whole report, so this class
+ * pins both halves of the contract - the row survives with a bounded ref AND
+ * the truncation is visible as a line error. Synthetic fixtures only.
  */
 @DisplayName("canonical bill: an over-long provider_row_ref is bounded to the column, not fatal to the file")
 class CanonicalBillRowRefWidthTest {
@@ -53,8 +52,7 @@ class CanonicalBillRowRefWidthTest {
         assertThat(parsed.errors()).extracting(LineError::code).containsExactly("FIELD_TOO_LONG");
         assertThat(parsed.errors()).extracting(LineError::lineNumber).containsExactly(1);
         assertThat(parsed.errors().get(0).detail())
-                .as("lengths only: the caller-supplied value itself must not be echoed")
-                .contains("300")
+                .as("lengths only: the caller-supplied value itself must not be echoed").contains("300")
                 .doesNotContain("RRR");
         assertThat(parsed.lines().get(0).providerRowRef()).hasSize(256).isEqualTo(ref(256, "R"));
 
@@ -117,9 +115,8 @@ class CanonicalBillRowRefWidthTest {
     @Test
     @DisplayName("an absent or null provider_row_ref is still allowed (it is an optional field)")
     void absentRefIsNotAnError() {
-        Parsed parsed = parser.parse(line(1, null) + "\n"
-                + "{\"provider_request_id\":\"r2\",\"occurred_at\":\"" + T + "\",\"amount\":\"1.00\","
-                + "\"currency\":\"USD\",\"provider_row_ref\":null}");
+        Parsed parsed = parser.parse(line(1, null) + "\n" + "{\"provider_request_id\":\"r2\",\"occurred_at\":\"" + T
+                + "\",\"amount\":\"1.00\"," + "\"currency\":\"USD\",\"provider_row_ref\":null}");
 
         assertThat(parsed.errors()).isEmpty();
         assertThat(parsed.lines()).extracting(BillLine::providerRowRef).containsExactly(null, null);

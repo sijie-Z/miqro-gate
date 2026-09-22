@@ -30,8 +30,7 @@ public final class CanonicalBillParser {
     /**
      * Width of {@code reconciliation_rows.provider_row_ref}
      * ({@code V42__reconciliation_reports.sql:47}). PostgreSQL counts characters —
-     * code points — so the bound below is applied in code points, not UTF-16
-     * units.
+     * code points — so the bound below is applied in code points, not UTF-16 units.
      */
     static final int ROW_REF_MAX_CODE_POINTS = 256;
 
@@ -107,8 +106,8 @@ public final class CanonicalBillParser {
      * Read {@code provider_row_ref}, bounded to the width of its column (#1439).
      *
      * <p>
-     * docs/bill-reconciliation-contract.md declares the field as a plain string
-     * and this parser checked no length, but the column is {@code varchar(256)}. A
+     * docs/bill-reconciliation-contract.md declares the field as a plain string and
+     * this parser checked no length, but the column is {@code varchar(256)}. A
      * single over-long value made the batch INSERT raise "value too long for type
      * character varying(256)", which the caller's catch-all turned into
      * {@code FAILED} for the whole report — every line in the file was lost,
@@ -136,8 +135,8 @@ public final class CanonicalBillParser {
         String bounded = value.substring(0, value.offsetByCodePoints(0, ROW_REF_MAX_CODE_POINTS));
         // Lengths only: the value is caller-supplied and must not reach the report
         // unescaped.
-        errors.add(new LineError(lineNumber, TOO_LONG, "provider_row_ref 超过 " + ROW_REF_MAX_CODE_POINTS
-                + " 字符，已截断到列宽（" + supplied + " 码点 -> " + ROW_REF_MAX_CODE_POINTS + "）"));
+        errors.add(new LineError(lineNumber, TOO_LONG, "provider_row_ref 超过 " + ROW_REF_MAX_CODE_POINTS + " 字符，已截断到列宽（"
+                + supplied + " 码点 -> " + ROW_REF_MAX_CODE_POINTS + "）"));
         return bounded;
     }
 

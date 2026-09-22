@@ -291,8 +291,8 @@ class ReconciliationApiIntegrationTest {
                 .contains("\"unmatchedProvider\":2").contains("\"lineErrorCount\":1");
 
         String rows = mockMvc
-                .perform(get("/api/v1/admin/reconciliations/" + reportId + "/rows")
-                        .param("state", "UNMATCHED_PROVIDER").cookie(sessionCookie, csrfCookie))
+                .perform(get("/api/v1/admin/reconciliations/" + reportId + "/rows").param("state", "UNMATCHED_PROVIDER")
+                        .cookie(sessionCookie, csrfCookie))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.rows.length()").value(2)).andReturn().getResponse()
                 .getContentAsString(StandardCharsets.UTF_8);
         // Both refs are readable: the neighbour untouched, the offender kept at the
