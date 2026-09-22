@@ -54,11 +54,15 @@ public class OriginInterceptor implements HandlerInterceptor {
         if (!path.startsWith("/api/")) {
             return true;
         }
+        // The lookup path is decoded, so "%0A" arrives here as a real newline and
+        // would forge an extra log line. Flatten before logging (same rule as
+        // ApiKeyAuthFilter.forLog).
+        String loggedPath = forLog(path);
 
         String origin = request.getHeader("Origin");
         if (origin == null || origin.isBlank()) {
             if (authProperties.isProduction()) {
-                LOG.warn("Missing Origin header on state-changing request {} {}", method, path);
+                LOG.warn("Missing Origin header on state-changing request {} {}", method, loggedPath);
                 sendRejection(response, "Origin header required", resolveRequestId(request));
                 return false;
             }
@@ -71,7 +75,7 @@ public class OriginInterceptor implements HandlerInterceptor {
         try {
             originUri = new URI(origin);
         } catch (URISyntaxException e) {
-            LOG.warn("Malformed Origin header: {} for {} {}", origin, method, path);
+            LOG.warn("Malformed Origin header: {} for {} {}", forLog(origin), method, loggedPath);
             sendRejection(response, "Invalid Origin header format", resolveRequestId(request));
             return false;
         }
@@ -81,7 +85,7 @@ public class OriginInterceptor implements HandlerInterceptor {
         int port = originUri.getPort();
 
         if (scheme == null || host == null) {
-            LOG.warn("Origin missing scheme or host: {}", origin);
+            LOG.warn("Origin missing scheme or host: {}", forLog(origin));
             sendRejection(response, "Origin must include scheme and host", resolveRequestId(request));
             return false;
         }
@@ -113,7 +117,8 @@ public class OriginInterceptor implements HandlerInterceptor {
             return true;
         }
 
-        LOG.warn("Origin not in allowlist: {} (normalized: {}) for {} {}", origin, normalized, method, path);
+        LOG.warn("Origin not in allowlist: {} (normalized: {}) for {} {}", forLog(origin), forLog(normalized), method,
+                loggedPath);
         sendRejection(response, "Origin not allowed", resolveRequestId(request));
         return false;
     }
@@ -126,6 +131,16 @@ public class OriginInterceptor implements HandlerInterceptor {
         } catch (Exception e) {
             LOG.warn("Failed to write Origin rejection response", e);
         }
+    }
+
+    /**
+     * Flattens control, line-separator and paragraph-separator characters so a
+     * crafted value cannot forge extra log lines. Mirrors
+     * {@code ApiKeyAuthFilter.forLog} — the request path is decoded before it
+     * reaches these sinks, so it is caller-controlled text like any header.
+     */
+    private static String forLog(String value) {
+        return value == null ? "?" : value.replaceAll("[\\p{C}\\p{Zl}\\p{Zp}]", "?");
     }
 
     private static String resolveRequestId(HttpServletRequest request) {

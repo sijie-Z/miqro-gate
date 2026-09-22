@@ -354,14 +354,21 @@ public class McpProxyController {
                 }
             }).subscribeOn(credentialDecryptScheduler).flatMap(bearer -> forward(exchange, target, service.endpoint(),
                     body, context, rpcMethod, toolName, toolHttpMethod, policy, bearer)).onErrorResume(decryptError -> {
-                        log.warn("aigw.mcp.backend_auth_failed service={}: {}", service.name(),
-                                decryptError.getMessage());
+                        // requestId keeps the failure correlatable with the caller's
+                        // receipt (#1341): the neighbouring log lines carry it too.
+                        log.warn("aigw.mcp.backend_auth_failed requestId={} service={}: {}", gatewayRequestId,
+                                service.name(), decryptError.getMessage());
                         record(context, rpcMethod, toolName, McpAccessStatus.UPSTREAM_FAILURE, 502);
                         return target.errorResponse(HttpStatus.BAD_GATEWAY, "backend_auth_unavailable",
                                 "MCP upstream credential could not be decrypted");
                     });
         } catch (Exception e) {
-            log.warn("aigw.mcp.invalid envelope service={}: {}", service.name(), e.getMessage());
+            // Body-free failure summary (#1341): the Jackson message quotes the
+            // offending token, which is caller-supplied request-body content —
+            // same rule as ContentFilterShadow: "Only the exception type is
+            // logged - a message could echo the body."
+            log.warn("aigw.mcp.invalid envelope requestId={} service={}: {}", gatewayRequestId, service.name(),
+                    e.getClass().getSimpleName());
             record(context, null, null, McpAccessStatus.INVALID_ENVELOPE, 400);
             return target.errorResponse(HttpStatus.BAD_REQUEST, "invalid_jsonrpc", "Invalid JSON-RPC body");
         }
