@@ -2,6 +2,22 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 会话交接点 2026-09-21（PH65 写操作幂等猎线：#1305 + #1333）
+
+- **形态**：猎线（审计+修复），不是 Goal。枚举全部写端点的重复提交防护，对代表性端点做真实 API + 真实 PG 的并发双发实测。确认 2 个缺陷、否证 8 条（否证清单见猎线报告 §5），未凑数立案。
+- **#1305 `model_approval` 无任何唯一约束**：`ModelApprovalService#submit` 是纯 check-then-act，6 个 barrier 同步请求全落库。修复 = **V73** 部分唯一索引 `uq_model_approval_pending ON model_approval (virtual_key_id, model_id) WHERE status = 'PENDING'` + 捕获 `DuplicateKeyException` → 与串行重复同一句 409 `DUPLICATE_PENDING`。
+  - 迁移**先**把历史重复 PENDING 行收敛到 `(created_at, id)` 最小的一条再建索引（避免重演 #1249 的「建索引失败 → Flyway 中止 → 控制面卡死」形状）。语义边界：只约束 PENDING，「申请 → 驳回 → 再次申请」历史不受影响。
+- **#1333 白名单直批路径绕过 V73**（本线对抗评审的「非阻塞观察」转正）：部分索引的谓词是 `WHERE status='PENDING'`，而直批分支在**同一事务内**把行翻成 `APPROVED` → **槽位被释放**，等锁的输家在赢家提交后重新求值、照插不误。实测白名单模型并发 6 发 `{"201": 6}` / 6 条 APPROVED，非白名单对照模型 `{"201": 1, "409": 5}` / 1 条 PENDING——唯一变量是模型名。
+  - **这不是 #1305 修复的疏漏，而是部分索引的语义边界**。加全量唯一索引会挡死「申请→驳回→再申请」，所以修复必须把 check-then-act 那一对读+写串行化。
+  - 修复 = `submit` 在**第一处读之前**取事务级 `pg_advisory_xact_lock`，键 = `SHA-256(virtualKeyId + "|" + modelId)` 前 8 字节；`submit` 本身 `@Transactional`，锁随提交/回滚释放。索引**保留**作纵深防御，两者互补不互替。
+  - `lockSubmit()` 入口加 `isActualTransactionActive()` 守卫（不在事务里直接抛，与既有先例 `AuditServiceImpl#acquireChainLock` 同构）——自动提交连接上该锁**取到即释放**，是本修复最危险的失效模式。
+- **影响如实收窄**：#1333 **不产生重复授权**（`project_provider_grant_models` 实测仍 1 行，写授权走 `ON CONFLICT DO NOTHING`）。重复的是**记录 / 审计 / 告警选通**，不是越权或重复计费。
+- **校准（红/绿都取原始日志，不引二手数字）**：红检必须在**两棵不同的树**上各跑一次——#1305 用 `3c134a9f`（develop，无 V73）服务层 **且** V73 从 `src/main/resources/db/migration/` 与 `target/classes/db/migration/` 两处移出（Maven `process-resources` 不清旧副本，不移会带着幽灵 V73 跑）；#1333 用 `acecdda0`（有索引、无锁）服务层。红日志分别是 `[pending rows for one logical submit] expected: 1 but was: 4` / `[auto-approved rows for one logical submit] expected: 1 but was: 5`，均为**行数断言**失败（断言顺序刻意改成计数优先，避免用响应码代理当证据）。绿：`Tests run: 16, Failures: 0, Errors: 0, Skipped: 0` + `BUILD SUCCESS`，且是**强制重编译**（`Compiling 244` + `Compiling 172`）而非 `Nothing to compile`，日志自证。
+- **修复后真实 API 复测（2026-09-22，修复版 exec jar 连真实 PG）**：白名单新模型 `ph65-probe-wl3` 冷启动并发 6 发 = `{"201": 1, "400": 5}`、DB 恒 1 条 APPROVED、审计 1 对（红：`{"201": 6}` / 6 条）；非白名单新模型 `ph65-probe-nw2` 并发 6 发 = `{"201": 1, "409": 5}`、DB 恒 1 条 PENDING、审计 1 条。原始输出 `postfix_whitelist_conc_out.txt` / `postfix_pending_out.txt`。**探针实例的 V73 校验和修复**（`DROP INDEX` + 删 `flyway_schema_history` version=73 行后由启动时重放）已在报告 §7 声明。
+- **遗留（报告 §6 逐条声明，均未立案）**：`approve`/`reject` 走原子 CAS 但**不取同一把锁**；`notifyApproval` 在**持锁期间**同步走出站告警投递（`AlertEventDispatcher`），即锁持有时长含一次出站 HTTP；红检均为单样本；`model_approval` 之外另有 5 个部分唯一索引的写路径未按「谓词被状态迁移绕开」这个形状重扫。
+- **已知无法就地修正**：提交 `6605ad64` 尾注写「2 个 `201`」，实际数组是 3 个（`red_no_fix.log:343`）。改它要改写历史，红线禁止，故如实记录在报告 §4.6.6 不修改。
+- 分支 `fix/ph65-write-idempotency`；issue #1305 / #1333；PR #1314。
+
 ## 会话交接点 2026-09-20（配额水位的定价口径：#943）
 
 - **问题形态**：COST 配额水位取 `upstreamPaid`（只含已定价部分），未定价用量计 0 → 一条 `action=REJECT` 的成本封顶对这类用量**完全不起作用**，而水位一直显示 `NORMAL / 0%`。这是「未知被当成零」的运维后果，不是显示层瑕疵。
@@ -5907,3 +5923,78 @@ booking 一笔 `outputTokensDelta=-300`：观测 1000 tokens（600 in / 400 out�
 - 前端：vitest **642/642**（新增 8 条）、typecheck、lint（改动文件）、build、e2e **66/66**（新增 4 条：
   广场渲染/空态/试调全链含「密钥不落 storage」断言/拒绝信封）。
 - OpenAPI 基线随测试重生成（`/me/plaza/models` 入 spec），`gen:types` 同步，前端类型切 `generated-api`。
+
+## 2026-09-22 PH65：模型审批提交的重复提交防护只是「一次 SELECT 的运气」（#1305）
+
+### 缺陷
+
+`POST /api/v1/me/model-approvals` 的「同 Key 同模型只能有一条待审」防护，是**先 SELECT 再无条件 INSERT**
+（`ModelApprovalService.submit`），`model_approval` 表从建库起只有主键。隔离级别是 PG 默认的 READ COMMITTED，
+读到的快照约束不了并发写入 —— 并发到达的 N 个相同申请全部通过检查、全部落库。
+
+服务自己那句 409 文案「…请等待管理员处理，**无需重复提交**」说明代码意图就是「至多一条」，所以这是实现没跟上
+意图，不是设计留白。
+
+### 红证据（本地隔离环境：真控制面 + 真 PG，非生产）
+
+- 顺序两次相同请求 → 第 1 次 `201`、第 2 次 `409 DUPLICATE_PENDING`（顺序路径本来就对，缺陷只在并发窗口）；
+- `threading.Barrier(6)` 同时发 6 个相同请求 → **6/6 HTTP 201**，6 个不同 id；库内 `model_approval` 6 条
+  `PENDING`、`MODEL_APPROVAL_SUBMITTED` 审计 6 条、`alert_events` 6 条（配了 webhook 即 6 次对外投递）；
+  管理端队列里 6 条一模一样的待办，需逐条拒绝。
+- 回归测试在**未修复**的 `origin/develop` 上同样红（独立 worktree 跑新测试，`--force` 后 `worktree remove` 回收）：
+  `Expecting actual: [409, 409, 201, 201, 201, 201, 409, 409] to contain only once: [201]`。
+
+影响是**多**不是**少**：`approve`/`reject` 的单行状态迁移有 `version` CAS 兜底（`OptimisticLockingFailureException`
+→ 409 `ALREADY_REVIEWED`），缺陷只在 submit 这条路径上。
+
+### 改动
+
+- **V73**（新增迁移）：先收敛存量重复 PENDING（保留 `(created_at, id)` 最小的一条），再建部分唯一索引
+  `uq_model_approval_pending (virtual_key_id, model_id) WHERE status = 'PENDING'`。先删后建是**刻意**的：
+  存量环境里重复行正是本缺陷造出来的，直接建索引会以 `could not create unique index ... is duplicated`
+  中止整轮迁移、卡死控制面启动且不留迁移记录——正是 #1249 的形状，不再重演。只约束 PENDING，终态行不参与，
+  「申请 → 驳回 → 再申请」不受影响。
+- `ModelApprovalService`：插入包 `try/catch (DuplicateKeyException)`，翻译成与顺序路径**同一个** 409
+  `DUPLICATE_PENDING`（文案提为常量，两条路径共用），并发输家与顺序重试对客户端完全同形。
+- `docs/database-schema.md` 的「无重复申请的数据库约束」一句改为索引描述。
+
+### 验证
+
+- `./mvnw -f backend/pom.xml -Pintegration -pl control-plane-app -am test -Dtest=ModelApprovalApiIntegrationTest`
+  **15/15 绿**（新增 `concurrentDuplicateSubmitsCollapse`：8 线程 barrier 同步同一请求，断言恰好一个 201、
+  其余 409，且库内 PENDING 行 = 1、审计 = 1）；同一条测试在 `origin/develop` 上必红（见上）。
+- spotless 已过（`spotless:apply` 后无残留 diff）。
+
+### 追加缺陷 #1333：白名单直批分支绕开同一个索引（V73 之后的第二个红证据）
+
+V73 的索引用 `WHERE status = 'PENDING'` 作部分谓词，而白名单分支在**同一个事务内**把刚落库的行翻成
+`APPROVED`——行随即离开谓词、**索引槽位被释放**。并发输家在等赢家 xid 之后重新求值，看到的是已提交的
+`APPROVED` 行，于是照插不误。换言之 V73 只对「留在 PENDING」的路径有效，对直批路径是结构性盲区。
+
+该缺口最早由本线自己的对抗评审以「非阻塞观察」提出（报告 `_orchestrate/reports/ph65_review.md` 观察 1，
+原文未改动），随后用真实 API + 真库 A/B 对照坐实并转正为独立 issue #1333。
+
+- **红证据（真实 API + 真 PG，A/B 只差「模型是否在白名单」）**：白名单模型并发 6 发 → `{"201": 6}`、
+  `APPROVED=6`、`MODEL_APPROVAL_APPROVED=6` + `MODEL_APPROVAL_SUBMITTED=6`、6 条告警事件；非白名单对照模型
+  同参数并发 6 发 → `{"201": 1, "409": 5}`、`PENDING=1`。窗口只在并发内：已存在 6 条 APPROVED 后串行再发
+  两次，两次都是 `400 MODEL_ALREADY_AVAILABLE`，`APPROVED` 不增。
+- **影响如实收窄**：**不产生重复授权**——`project_provider_grant_models` 实测仍只有 1 行（写授权走
+  `ON CONFLICT (grant_id, model_id) DO NOTHING`）。重复的是记录 / 审计 / 告警投递，不是越权或重复计费。
+- **改动**：`ModelApprovalService.java:139` 在 check-then-act 的第一处读**之前**取事务级
+  `pg_advisory_xact_lock(SHA-256(virtualKeyId + "|" + modelId) 前 8 字节)`（`#lockSubmit` `:511-514`、
+  `#submitLockKey` `:521-531`）。`submit` 本身 `@Transactional`，锁随事务提交/回滚自动释放。输家等赢家提交后
+  重新过预检，经 `DUPLICATE_PENDING`(409) / `MODEL_ALREADY_AVAILABLE`(400) 离场，对外与顺序重试不可区分。
+  同款写法仓库内已有先例（`ReconciliationService#findOrCreateReport`、审计链）。V73 索引**保留**作纵深防御。
+  **不需要新 migration**（纯服务层串行化，不动表结构）。
+- **验证**：新增 `concurrentWhitelistSubmitsAutoApproveOnce`（8 线程 barrier；断言状态只能是 `201`/`400`、
+  `201` 恰好一次、`APPROVED` 行数 1、`MODEL_APPROVAL_SUBMITTED` 1、`MODEL_APPROVAL_APPROVED` 1）。
+  未修复的树上该用例必红：`Expecting actual: [400, 400, 400, 201, 201, 400, 201, 400] to contain only once:
+  [201]`（`ModelApprovalApiIntegrationTest.java:405`）；修复后
+  `Tests run: 16, Failures: 0, Errors: 0, Skipped: 0` + `BUILD SUCCESS`。原始日志
+  `_orchestrate/_logs/ph65_probe/redcheck/{red_no_fix.log,green_with_fix.log}`。
+- 提交：`6605ad64`（修复）、`3c019c64`（V73 注释更正，见下）。issue #1333，PR #1314。
+- **V73 注释更正（`3c019c64`）**：原注释称「同 (Key, 模型) 的 PENDING 不可能来自不同的人」，被 `ownedKey`
+  的角色分支证伪（`SYSTEM_ADMIN` 可对他人名下的密钥提交，`ModelApprovalService#ownedKey`）。只改注释、
+  **不动一行 SQL**：删除仍安全（同一诉求的重复提交、两份审计都独立留在 append-only 的 `admin_audit_events`），
+  但结论收窄为「不要用本表行数或行内容反推谁申请过」。该迁移从未进入共享环境（`git branch -a --contains
+  acecdda0` 只有本分支；`origin/develop` 最新为 V72），故不属于「禁止修改已进入共享环境的迁移」。
