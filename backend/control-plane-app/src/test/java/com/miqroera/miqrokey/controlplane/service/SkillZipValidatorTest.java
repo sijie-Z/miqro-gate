@@ -578,6 +578,74 @@ class SkillZipValidatorTest {
         assertCode(bytes(pkg, new byte[30000], le32(0x06054B50L), new byte[2]), "SKILL_ZIP_STRUCTURE_INVALID");
     }
 
+    @Test
+    @DisplayName("fail-closed: two entries normalizing to one delivered path are rejected (#1242 r2 adversarial round)")
+    void duplicateNormalizedEntryPathRejected() {
+        // Duplicate paths used to be accepted whenever both views listed the
+        // entries in the same order: the metadata came from the last matching
+        // entry while the extractors disagree on which duplicate wins (python and
+        // java.util.zip.ZipFile deliver the directory-order-last, .NET the first),
+        // so the bytes a user unpacks can differ from what this validator parsed
+        // and charged. Every spelling is refused whatever the order.
+        assertCode(duplicateNotePathPackage(false), "SKILL_ZIP_STRUCTURE_INVALID");
+        assertCode(duplicateNotePathPackage(true), "SKILL_ZIP_STRUCTURE_INVALID");
+        assertCode(duplicateSkillMdDivergencePackage(), "SKILL_ZIP_STRUCTURE_INVALID");
+        assertCode(dotCollapsedSkillMdPackage(), "SKILL_ZIP_STRUCTURE_INVALID");
+    }
+
+    /**
+     * Two entries named web-scraper/assets/note.txt, CD record order as flagged.
+     */
+    private static byte[] duplicateNotePathPackage(boolean reversedCd) {
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] note = "hello asset\n".repeat(100).getBytes(StandardCharsets.UTF_8);
+        byte[] noteDef = deflate(note);
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
+        byte[] second = bytes(rawLocal("web-scraper/assets/note.txt", 8, 0, crc32(note), noteDef.length, note.length),
+                noteDef);
+        byte[] third = bytes(rawLocal("web-scraper/assets/note.txt", 8, 0, crc32(note), noteDef.length, note.length),
+                noteDef);
+        byte[] mdRecord = rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0);
+        byte[] noteRecord1 = rawCd("web-scraper/assets/note.txt", 8, 0, crc32(note), noteDef.length, note.length,
+                first.length);
+        byte[] noteRecord2 = rawCd("web-scraper/assets/note.txt", 8, 0, crc32(note), noteDef.length, note.length,
+                first.length + second.length);
+        byte[] cd = reversedCd ? bytes(noteRecord2, noteRecord1, mdRecord) : bytes(mdRecord, noteRecord1, noteRecord2);
+        return bytes(first, second, third, cd, rawEocd(3, cd.length, first.length + second.length + third.length));
+    }
+
+    /**
+     * The divergence shape of the adversarial round: two SKILL.md entries, the good
+     * one last in the local chain (what the walk parses) and the bad one last in
+     * the directory (what python and java.util.zip.ZipFile deliver) — the
+     * order-insensitive pairing alone would accept it, the duplicate-path rule
+     * refuses it.
+     */
+    private static byte[] duplicateSkillMdDivergencePackage() {
+        byte[] good = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] goodDef = deflate(good);
+        byte[] bad = SKILL_MD.replace("name: web-scraper", "name: claude-evil").getBytes(StandardCharsets.UTF_8);
+        byte[] badDef = deflate(bad);
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(bad), badDef.length, bad.length), badDef);
+        byte[] second = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(good), goodDef.length, good.length),
+                goodDef);
+        byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(good), goodDef.length, good.length, first.length),
+                rawCd("web-scraper/SKILL.md", 8, 0, crc32(bad), badDef.length, bad.length, 0));
+        return bytes(first, second, cd, rawEocd(2, cd.length, first.length + second.length));
+    }
+
+    /** One delivered path spelled two ways: the './' segment collapses onto it. */
+    private static byte[] dotCollapsedSkillMdPackage() {
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
+        byte[] second = bytes(rawLocal("web-scraper/./SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
+        byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
+                rawCd("web-scraper/./SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, first.length));
+        return bytes(first, second, cd, rawEocd(2, cd.length, first.length + second.length));
+    }
+
     private static void assertStructureRejected(byte[] pkg, String what) {
         assertCode(pkg, "SKILL_ZIP_STRUCTURE_INVALID", what);
     }
