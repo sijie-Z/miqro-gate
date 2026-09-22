@@ -180,6 +180,69 @@ describe('NextCredentialsView', () => {
     return button!;
   }
 
+  /** Opens a row's kebab menu and clicks 轮换 — the same radix flow as the #1231 test. */
+  async function openRotateDialog(
+    wrapper: ReturnType<typeof mountView>,
+    credentialId: string,
+  ): Promise<void> {
+    const kebab = wrapper.find(`[data-testid="credential-actions-${credentialId}"]`)
+      .element as HTMLElement;
+    kebab.click();
+    await flushPromises();
+    // Take the newest match: a menu opened earlier in the same test can still be in the DOM.
+    const items = document.body.querySelectorAll<HTMLElement>('[data-testid="credential-rotate"]');
+    const item = items[items.length - 1]?.closest('[role="menuitem"]') as HTMLElement | null;
+    expect(item, 'rotate menu item should render').toBeTruthy();
+    item!.focus();
+    item!.click();
+    await flushPromises();
+  }
+
+  /**
+   * The rotate dialog is portalled into document.body (UiDialog → radix
+   * DialogPortal), so wrapper.find cannot see it. Address it through the
+   * document the way the #1231 drawer test does.
+   */
+  function rotateDialog(): HTMLElement | null {
+    const anchor = document.body.querySelector('[data-testid="credential-rotate-secret"]');
+    // `anchor?.closest()` yields undefined when the dialog is gone; normalise to null
+    // so `toBeNull()` asserts "closed" rather than tripping over undefined.
+    return (anchor?.closest('.ui-dialog__content') as HTMLElement | null | undefined) ?? null;
+  }
+
+  function rotateSubmitButton(): HTMLButtonElement {
+    const button = document.body.querySelector<HTMLButtonElement>(
+      '[data-testid="credential-rotate-submit"]',
+    );
+    expect(button, '轮换 button should render').toBeTruthy();
+    return button!;
+  }
+
+  function rotateSecretInput(): HTMLInputElement {
+    const input = document.body.querySelector<HTMLInputElement>(
+      '[data-testid="credential-rotate-secret"]',
+    );
+    expect(input, 'secret input should render').toBeTruthy();
+    return input!;
+  }
+
+  function rotateErrorBox(): HTMLElement | null {
+    return document.body.querySelector<HTMLElement>('[data-testid="credential-rotate-error"]');
+  }
+
+  function rotateCancelButton(): HTMLButtonElement {
+    const cancel = [...(rotateDialog()?.querySelectorAll('button') ?? [])].find(
+      (b) => b.textContent?.trim() === '取消',
+    );
+    expect(cancel, '取消 button should render').toBeTruthy();
+    return cancel!;
+  }
+
+  function setRotateSecret(value: string): void {
+    const input = rotateSecretInput();
+    input.value = value;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
   it('renders credentials with masked fingerprints and Chinese statuses', async () => {
     const wrapper = mountView();
     await flushPromises();
@@ -352,5 +415,105 @@ describe('NextCredentialsView', () => {
     // This dialog never had a request in flight, so its 测试 button must be usable.
     expect(validateRunButton().disabled).toBe(false);
     expect(validateRunButton().getAttribute('aria-busy')).toBeNull();
+  });
+
+  it('#PH69R2B: 放弃一次轮换后再打开别的凭据，迟到的失败不会写进新弹窗', async () => {
+    // Hold credential A's rotation open, so the admin can walk away from it.
+    let failRotate!: (reason: unknown) => void;
+    mockApi.rotateCredential.mockImplementation(
+      () =>
+        new Promise<CredentialView>((_resolve, reject) => {
+          failRotate = reject;
+        }),
+    );
+    const wrapper = mountView();
+    await flushPromises();
+
+    await openRotateDialog(wrapper, '0190-0000-0000-0030');
+    setRotateSecret('sk-rotated-a');
+    rotateSubmitButton().click();
+    await flushPromises();
+    expect(mockApi.rotateCredential).toHaveBeenCalledTimes(1);
+
+    // The admin changes their mind and moves on to another credential.
+    rotateCancelButton().click();
+    await flushPromises();
+    expect(rotateDialog(), 'dialog should be gone after 取消').toBeNull();
+
+    await openRotateDialog(wrapper, 'c2');
+    // Precondition: this is B's dialog, and nothing has failed here yet.
+    expect(document.body.textContent).toContain('为「moonshot-main」提供新的密钥');
+    expect(rotateErrorBox()).toBeNull();
+
+    // A's failure finally lands — it was never this dialog's business.
+    failRotate(
+      new ApiError({
+        type: 'about:blank',
+        title: '轮换失败。',
+        status: 400,
+        code: 'INVALID_REQUEST',
+        detail: '轮换失败。',
+        requestId: 'req-rotate-a',
+      }),
+    );
+    await flushPromises();
+
+    // B's dialog never sent a request, so it must not report A's failure.
+    expect(rotateErrorBox(), 'A 的失败不该显示在 B 的轮换弹窗里').toBeNull();
+    expect(document.body.textContent).not.toContain('req-rotate-a');
+  });
+
+  it('#PH69R2B: 放弃一次轮换后再打开别的凭据，迟到的成功不会关掉新弹窗', async () => {
+    // Same walk-away, but A's rotation eventually succeeds.
+    let succeedRotate!: () => void;
+    mockApi.rotateCredential.mockImplementation(
+      () =>
+        new Promise<CredentialView>((resolve) => {
+          succeedRotate = () => resolve(credential({ id: '0190-0000-0000-0030' }));
+        }),
+    );
+    const wrapper = mountView();
+    await flushPromises();
+
+    await openRotateDialog(wrapper, '0190-0000-0000-0030');
+    setRotateSecret('sk-rotated-a');
+    rotateSubmitButton().click();
+    await flushPromises();
+
+    rotateCancelButton().click();
+    await flushPromises();
+    expect(rotateDialog()).toBeNull();
+
+    await openRotateDialog(wrapper, 'c2');
+    setRotateSecret('sk-typing-b');
+    await flushPromises();
+
+    succeedRotate();
+    await flushPromises();
+
+    // B's dialog is the admin's live work: A's success must not close it or wipe its input.
+    expect(rotateDialog(), 'B 的弹窗不该被 A 的迟到成功关掉').not.toBeNull();
+    expect(rotateSecretInput().value).toBe('sk-typing-b');
+  });
+
+  it('#PH69R2B: 放弃一次轮换后再打开别的凭据，轮换按钮不会带着上一次的 busy 出现', async () => {
+    // A's rotation never settles — the admin simply walked away from it.
+    mockApi.rotateCredential.mockImplementation(() => new Promise<CredentialView>(() => {}));
+    const wrapper = mountView();
+    await flushPromises();
+
+    await openRotateDialog(wrapper, '0190-0000-0000-0030');
+    setRotateSecret('sk-rotated-a');
+    rotateSubmitButton().click();
+    await flushPromises();
+    expect(rotateSubmitButton().disabled).toBe(true); // busy is right — A is in flight
+
+    rotateCancelButton().click();
+    await flushPromises();
+    await openRotateDialog(wrapper, 'c2');
+
+    // This dialog has no request in flight: its 轮换 button must be usable.
+    expect(rotateSubmitButton().disabled).toBe(false);
+    expect(rotateSubmitButton().getAttribute('aria-busy')).toBeNull();
   });
 });

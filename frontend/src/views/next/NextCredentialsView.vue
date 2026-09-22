@@ -249,12 +249,21 @@ const rotating = ref(false);
 const rotateError = ref('');
 const rotateRequestId = ref('');
 
+// #1351: request-sequence guard — a rotation abandoned with 取消 must not land in
+// the next credential's dialog (its error text and requestId would be misread as
+// that credential's failure, and a late success would slam the new dialog shut).
+let rotateRequestSeq = 0;
+
 function openRotate(cred: CredentialView) {
+  rotateRequestSeq++; // invalidate any rotation still in flight
   rotateTarget.value = cred;
   rotateSecret.value = '';
   showRotateSecret.value = false;
   rotateError.value = '';
   rotateRequestId.value = '';
+  // #1351: this dialog now owns the busy flag; the abandoned request's guarded
+  // `finally` will never clear it (same orphan as #1344), so clear it here.
+  rotating.value = false;
 }
 
 async function runRotate() {
@@ -262,17 +271,24 @@ async function runRotate() {
     rotateError.value = '请输入新的密钥。';
     return;
   }
+  const seq = ++rotateRequestSeq;
   rotating.value = true;
   rotateError.value = '';
   rotateRequestId.value = '';
   try {
     // Rotation targets a listed credential; ids are always present.
     await api.rotateCredential(rotateTarget.value.id!, { secret: rotateSecret.value });
+    if (seq !== rotateRequestSeq) {
+      return; // the dialog re-targeted — this rotation belongs to another credential
+    }
     toast.success('凭证已轮换，旧版本进入宽限期');
     rotateTarget.value = null;
     rotateSecret.value = '';
     await load();
   } catch (error) {
+    if (seq !== rotateRequestSeq) {
+      return;
+    }
     if (error instanceof ApiError) {
       rotateError.value = error.message;
       rotateRequestId.value = error.requestId ?? '';
@@ -280,7 +296,9 @@ async function runRotate() {
       rotateError.value = '轮换失败，请稍后重试。';
     }
   } finally {
-    rotating.value = false;
+    if (seq === rotateRequestSeq) {
+      rotating.value = false;
+    }
   }
 }
 
