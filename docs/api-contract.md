@@ -1005,6 +1005,7 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 | `POST /api/v1/admin/model-approvals/{id}/reject` | 驳回（`{ "reviewNote"? }`） |
 
 - `status` ∈ `PENDING\|APPROVED\|REJECTED`，缺省返回全部；`size` 默认 20、上限 100；`before` 为上一页 `nextCursor`（不透明，编码 `(created_at, id)`；非法游标 `400 PARAM_INVALID`）。倒序返回 `{ "items": [ModelApprovalView], "nextCursor" }`。
+- **游标精度（#1392）**：游标按 `(created_at, id)` 键集比较，而 `created_at` 是 `timestamptz`（微秒精度），因此游标携带**微秒**——毫秒会丢掉边界行自身的亚毫秒部分，把同一毫秒内的其它行永久跳过、并让队列提前翻到底。要读完整队列必须沿 `nextCursor` 逐页走，**不要**数页数；`nextCursor` 为服务端产出的不透明串，无下一页时为 `null`。客户端不得解析其内容，也不得跨版本缓存（精度变化时旧游标仍可解，但应重新从首页开始）。
 - **通过语义**：写入 `virtual_key_models`（申请 Key）+ 若模型不在 Grant 中先写入 `project_provider_grant_models`（网关按 `key.models ∩ grant.models ∩ model_catalog(ACTIVE)` 三层放行，缺一不可），随后**立即**触发路由快照刷新（不等 30s 定时）。同 Grant 其它 Key 不受影响（各自 Key 快照独立）。
 - **批准前复核目录（#506）**：提交与批准两个时点都校验模型在该产品的 `model_catalog` 中有 ACTIVE 行——提交后模型被移出/停用目录时，批准返回 `409 MODEL_NOT_IN_CATALOG`（否则将"批准成功但网关不可见"）。
 - 仅 PENDING 可审批：重复审批 `409 ALREADY_REVIEWED`（乐观锁，并发评审只有一个成功）；Key 已吊销/停用 → `409 KEY_NOT_ACTIVE`（含轮换后的旧 Key：申请永远无法生效，提示会指引管理员改为「驳回」）；Grant 已停用 → `409 GRANT_INACTIVE`；不存在 → `404 APPROVAL_NOT_FOUND`。
