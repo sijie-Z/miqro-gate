@@ -7,6 +7,7 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 import com.miqroera.miqrokey.domain.cache.CacheKey;
 import com.miqroera.miqrokey.gateway.vkey.AuthContext;
+import com.miqroera.miqrokey.spi.ProtocolFamily;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
@@ -132,9 +133,11 @@ public final class CacheKeyFactory {
      *            (derived from the path, see
      *            {@code ProxyController#wireProtocolOf}) — the response body shape
      *            follows the endpoint, so the family is a key dimension of its own
-     *            (#1236).
+     *            (#1236). Kept as the enum so routing and key derivation can never
+     *            drift onto two different spellings (#1421); canonicalization
+     *            happens once here via {@link ProtocolFamily#name()}.
      */
-    public CacheKey compute(AuthContext ctx, String modelName, byte[] body, String wireProtocol) {
+    public CacheKey compute(AuthContext ctx, String modelName, byte[] body, ProtocolFamily wireProtocol) {
         // Hot path: the body is already buffered by the caller and is never
         // mutated here, so it is parsed exactly once and the tree is shared by
         // every key dimension. Parsing per dimension made this method the most
@@ -146,7 +149,8 @@ public final class CacheKeyFactory {
                 + "|" + (modelName == null ? "" : modelName) + "|"
                 + (ctx.key().purpose() == null ? "" : ctx.key().purpose()) + "|"
                 + (streamFlag(root) ? "stream=1" : "stream=0") + "|" + "family="
-                + (wireProtocol == null ? "" : wireProtocol) + "|" + generationFingerprint(root) + "|" + normalized;
+                + (wireProtocol == null ? "" : wireProtocol.name()) + "|" + generationFingerprint(root) + "|"
+                + normalized;
         return CacheKey.from(sha256(canonical.getBytes(StandardCharsets.UTF_8)));
     }
 
