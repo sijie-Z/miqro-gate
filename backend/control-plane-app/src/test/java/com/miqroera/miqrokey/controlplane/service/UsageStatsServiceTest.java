@@ -33,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -152,7 +153,10 @@ class UsageStatsServiceTest {
         Instant from = Instant.now().minusSeconds(3600);
         Instant to = Instant.now();
         when(usageStatsRepository.countRecords(any())).thenReturn(1L);
-        when(usageStatsRepository.findRecords(any(), eq(0L), eq(50))).thenReturn(List.of(unadjusted(event())));
+        // Page 1 starts a fresh keyset walk (#1368): no cursor, and one row over the
+        // page size so the service can tell "there is more" without a second query.
+        when(usageStatsRepository.findRecords(any(), eq(51), isNull(), isNull()))
+                .thenReturn(List.of(unadjusted(event())));
 
         UsageRecordPage page = service.records(user, from, to, 1, 50);
 
@@ -189,7 +193,8 @@ class UsageStatsServiceTest {
         // event() fixture above uses 200 cache-read tokens and no cache-creation ones.
         RowPriceBasis basis = new RowPriceBasis(new BigDecimal("1.00"), new BigDecimal("2.00"), new BigDecimal("0.50"),
                 null);
-        when(usageStatsRepository.findRecords(any(), eq(0L), eq(50))).thenReturn(List.of(unadjusted(event(), basis)));
+        when(usageStatsRepository.findRecords(any(), eq(51), isNull(), isNull()))
+                .thenReturn(List.of(unadjusted(event(), basis)));
 
         UsageRecordPage page = service.records(user, null, null, 1, 50);
 
@@ -205,7 +210,7 @@ class UsageStatsServiceTest {
         // 未定价, never as a cost of 0 (docs/usage-accounting.md §6.2).
         when(keyRepository.findAllByUserId(USER_ID)).thenReturn(List.of(key(KEY_A)));
         when(usageStatsRepository.countRecords(any())).thenReturn(1L);
-        when(usageStatsRepository.findRecords(any(), eq(0L), eq(50)))
+        when(usageStatsRepository.findRecords(any(), eq(51), isNull(), isNull()))
                 .thenReturn(List.of(unadjusted(event(), RowPriceBasis.UNKNOWN)));
 
         UsageRecordPage page = service.records(user, null, null, 1, 50);
