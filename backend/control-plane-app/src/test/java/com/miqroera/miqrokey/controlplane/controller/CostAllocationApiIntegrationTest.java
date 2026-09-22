@@ -185,8 +185,7 @@ class CostAllocationApiIntegrationTest {
                         .param("from", "2026-08-01T00:00:00Z").param("to", "2026-08-31T00:00:00Z")
                         .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].weightTokens").value(0))
-                .andExpect(jsonPath("$[0].fixedCost").value(100.0))
+                .andExpect(jsonPath("$[0].weightTokens").value(0)).andExpect(jsonPath("$[0].fixedCost").value(100.0))
                 .andExpect(jsonPath("$[0].allocatedAmount").value(100.0)).andReturn();
         System.out.println("[PH72] tokenless window row: " + result.getResponse().getContentAsString());
     }
