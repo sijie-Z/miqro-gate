@@ -48,6 +48,35 @@ public class ExportTaskService {
     private static final Duration MAX_WINDOW = Duration.ofDays(93);
     private static final Duration DOWNLOAD_TTL = Duration.ofHours(24);
 
+    /**
+     * Rows a single raw-usage export will render. The same 50000 the three sibling
+     * exports cap at ({@code AuditEventReadService.MAX_EXPORT_ROWS},
+     * {@code ReconciliationService.EXPORT_MAX_ROWS},
+     * {@code AdminRetentionLogService.EXPORT_LIMIT}) and that the contract already
+     * states for them, so no consumer has to learn a second number.
+     *
+     * <p>
+     * A window over the cap is <em>refused</em>, not truncated. The siblings
+     * declare truncation in an {@code X-MiQroKey-Truncated} response header, and
+     * this artifact has no response — it is rendered offline and downloaded later,
+     * so it would have to carry the flag in its own bytes to mean anything. A
+     * silently short financial file is worse than a failure the admin can see and
+     * re-run on a narrower window, and the refusal keeps the existing signal honest
+     * (a {@code SUCCEEDED} task's {@code row_count} is still the whole window).
+     * </p>
+     */
+    public static final int EXPORT_MAX_ROWS = 50_000;
+
+    /**
+     * Rows read per page. The cap above is a row count, which by itself says
+     * nothing about memory; what bounds memory is reading a page at a time and
+     * writing each row out before asking for the next — the rule
+     * {@code AdminRetentionLogService} settled in #1023. This export had the
+     * opposite shape: it materialised the entire window in one list before
+     * rendering a single byte.
+     */
+    public static final int EXPORT_CHUNK = 500;
+
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final AuditService auditService;
@@ -195,10 +224,15 @@ public class ExportTaskService {
     private void run(ExportTask task) {
         mark(task.id(), ExportStatus.RUNNING, null);
         try {
-            List<Map<String, Object>> rows = readRows(task);
-            String reconcileLevel = reconcileLevelOf(rows);
-            String adjustmentLevel = adjustmentLevelOf(rows);
-            byte[] gzip = render(task.format(), rows, reconcileLevel, adjustmentLevel);
+            // One aggregate pass first: it both decides the cap (with the true row
+            // count to name in the refusal) and yields the two caliber levels, which
+            // every row carries in its own note — so they are needed before the first
+            // byte is written, and they cannot be derived from rows not yet read.
+            WindowSummary summary = summarizeWindow(task);
+            String reconcileLevel = reconcileLevelOf(summary.total(), summary.withProviderId());
+            String adjustmentLevel = adjustmentLevelOf(summary.total(), summary.anyAdjusted());
+            Rendered rendered = render(task, reconcileLevel, adjustmentLevel);
+            byte[] gzip = rendered.gzip();
             String sha256 = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(gzip));
             jdbc.update("""
                     UPDATE export_tasks
@@ -208,7 +242,7 @@ public class ExportTaskService {
                         adjustment_level = :adjustmentLevel
                     WHERE id = :id
                     """,
-                    new MapSqlParameterSource("sha256", sha256).addValue("rows", rows.size())
+                    new MapSqlParameterSource("sha256", sha256).addValue("rows", rendered.rowCount())
                             .addValue("bytes", gzip.length).addValue("file", gzip)
                             .addValue("reconcileLevel", reconcileLevel).addValue("adjustmentLevel", adjustmentLevel)
                             .addValue("finishedAt", java.sql.Timestamp.from(Instant.now()))
@@ -220,6 +254,34 @@ public class ExportTaskService {
         }
     }
 
+    /**
+     * The window's aggregate facts, read in one pass over the same FROM/JOIN the
+     * rows use so the levels cannot drift from what the file contains.
+     *
+     * <p>
+     * The join is safe to aggregate over: {@code ADJUSTMENT_TOTALS} groups by the
+     * parent's primary key, so it contributes at most one row per usage event and
+     * {@code count(*)} stays the window's row count rather than a fan-out.
+     * </p>
+     */
+    private WindowSummary summarizeWindow(ExportTask task) {
+        return jdbc.queryForObject("""
+                SELECT count(*) AS total,
+                       count(ue.provider_request_id) AS with_provider_id,
+                       COALESCE(bool_or(%s), FALSE) AS any_adjusted
+                FROM usage_event ue%s
+                WHERE ue.tenant_id = :tenantId AND ue.occurred_at >= :from AND ue.occurred_at < :to
+                """.formatted(UsageAdjustmentSql.ADJUSTED_FLAG, UsageAdjustmentSql.ADJUSTMENT_TOTALS),
+                windowParams(task), (rs, rowNum) -> new WindowSummary(rs.getLong("total"),
+                        rs.getLong("with_provider_id"), rs.getBoolean("any_adjusted")));
+    }
+
+    private static MapSqlParameterSource windowParams(ExportTask task) {
+        return new MapSqlParameterSource("tenantId", task.tenantId())
+                .addValue("from", java.sql.Timestamp.from(task.periodFrom()))
+                .addValue("to", java.sql.Timestamp.from(task.periodTo()));
+    }
+
     private void mark(UUID taskId, ExportStatus status, String error) {
         jdbc.update("""
                 UPDATE export_tasks SET status = :status, error_message = :error, finished_at = :finishedAt
@@ -228,9 +290,38 @@ public class ExportTaskService {
                 .addValue("finishedAt", java.sql.Timestamp.from(Instant.now())).addValue("id", taskId));
     }
 
-    private List<Map<String, Object>> readRows(ExportTask task) {
+    /**
+     * One page of raw rows, walking the window in {@code (occurred_at, id)} order.
+     *
+     * <p>
+     * The {@code id} tiebreaker is not decoration: {@code occurred_at} is not
+     * unique, so a timestamp-only cursor cannot resume inside a group of rows that
+     * share one instant — it either re-reads them or steps over them (#1368 is that
+     * bug in the detail list). The id travels in {@link RawRow} rather than in the
+     * row map, because the map is the artifact's content and a new column there
+     * would change every CSV and JSONL it has ever produced.
+     * </p>
+     *
+     * <p>
+     * The cursor predicate is the same OR form {@code AdminRetentionLogService}
+     * uses. It reads as a filter rather than an index condition, so a page re-walks
+     * the window's index entries up to its cursor — measured on 400k real rows, the
+     * last page of a cap-sized export (cursor at row 50000) costs 16ms and 57748
+     * buffers. Across all 100 pages that is under a second of background work, in a
+     * task that already answers its caller with 202, so it buys the bound without a
+     * new index.
+     * </p>
+     */
+    private List<RawRow> readChunk(ExportTask task, Instant cursorAt, UUID cursorId, int pageSize) {
+        String cursor = cursorAt == null
+                ? ""
+                : " AND (ue.occurred_at > :cursorAt OR (ue.occurred_at = :cursorAt AND ue.id > :cursorId))";
+        MapSqlParameterSource params = windowParams(task).addValue("limit", pageSize);
+        if (cursorAt != null) {
+            params.addValue("cursorAt", java.sql.Timestamp.from(cursorAt)).addValue("cursorId", cursorId);
+        }
         return jdbc.query("""
-                SELECT ue.occurred_at, ue.model_id, ue.cache_level,
+                SELECT ue.id, ue.occurred_at, ue.model_id, ue.cache_level,
                        COALESCE(ue.input_tokens, ue.prompt_tokens) AS input_tokens,
                        COALESCE(ue.output_tokens, ue.completion_tokens) AS output_tokens,
                        ue.cache_read_input_tokens, ue.cache_creation_input_tokens, ue.total_tokens, ue.latency_ms,
@@ -246,14 +337,12 @@ public class ExportTaskService {
                        %s AS net_cache_creation_tokens,
                        %s AS adjusted
                 FROM usage_event ue%s
-                WHERE ue.tenant_id = :tenantId AND ue.occurred_at >= :from AND ue.occurred_at < :to
-                ORDER BY ue.occurred_at
+                WHERE ue.tenant_id = :tenantId AND ue.occurred_at >= :from AND ue.occurred_at < :to%s
+                ORDER BY ue.occurred_at, ue.id
+                LIMIT :limit
                 """.formatted(UsageAdjustmentSql.netInput(), UsageAdjustmentSql.netOutput(),
                 UsageAdjustmentSql.netCacheRead(), UsageAdjustmentSql.netCacheCreation(),
-                UsageAdjustmentSql.ADJUSTED_FLAG, UsageAdjustmentSql.ADJUSTMENT_TOTALS),
-                new MapSqlParameterSource("tenantId", task.tenantId())
-                        .addValue("from", java.sql.Timestamp.from(task.periodFrom()))
-                        .addValue("to", java.sql.Timestamp.from(task.periodTo())),
+                UsageAdjustmentSql.ADJUSTED_FLAG, UsageAdjustmentSql.ADJUSTMENT_TOTALS, cursor), params,
                 (rs, rowNum) -> {
                     Map<String, Object> row = new LinkedHashMap<>();
                     row.put("occurredAt", rs.getTimestamp("occurred_at").toInstant().toString());
@@ -283,8 +372,22 @@ public class ExportTaskService {
                     row.put("netCacheReadInputTokens", rs.getObject("net_cache_read_tokens"));
                     row.put("netCacheCreationInputTokens", rs.getObject("net_cache_creation_tokens"));
                     row.put("adjusted", rs.getBoolean("adjusted"));
-                    return row;
+                    return new RawRow(row, rs.getTimestamp("occurred_at").toInstant(), rs.getObject("id", UUID.class));
                 });
+    }
+
+    /**
+     * One row plus the keyset cursor it carries; the id never enters the row map.
+     */
+    record RawRow(Map<String, Object> row, Instant occurredAt, UUID id) {
+    }
+
+    /** The window's aggregate facts, read before the first row is rendered. */
+    record WindowSummary(long total, long withProviderId, boolean anyAdjusted) {
+    }
+
+    /** A finished artifact and the number of rows that went into it. */
+    private record Rendered(byte[] gzip, long rowCount) {
     }
 
     /**
@@ -314,15 +417,14 @@ public class ExportTaskService {
      * Issue #330: provider-request-id coverage determines the task's reconcile
      * level; an empty window has nothing to declare (null).
      */
-    static String reconcileLevelOf(List<Map<String, Object>> rows) {
-        if (rows.isEmpty()) {
+    static String reconcileLevelOf(long total, long withProviderId) {
+        if (total == 0) {
             return null;
         }
-        long withId = rows.stream().filter(r -> r.get("providerRequestId") != null).count();
-        if (withId == rows.size()) {
+        if (withProviderId == total) {
             return "PROVIDER_ID_BACKED";
         }
-        return withId == 0 ? "LOCAL_ONLY" : "PARTIAL";
+        return withProviderId == 0 ? "LOCAL_ONLY" : "PARTIAL";
     }
 
     /**
@@ -336,11 +438,11 @@ public class ExportTaskService {
      * the task-level declaration and the file cannot disagree.
      * </p>
      */
-    static String adjustmentLevelOf(List<Map<String, Object>> rows) {
-        if (rows.isEmpty()) {
+    static String adjustmentLevelOf(long total, boolean anyAdjusted) {
+        if (total == 0) {
             return null;
         }
-        return rows.stream().anyMatch(r -> Boolean.TRUE.equals(r.get("adjusted"))) ? "PRESENT" : "NONE";
+        return anyAdjusted ? "PRESENT" : "NONE";
     }
 
     /**
@@ -366,30 +468,68 @@ public class ExportTaskService {
         return note.toString();
     }
 
-    /** Renders rows into the requested format and gzips the result. */
-    private byte[] render(ExportFormat format, List<Map<String, Object>> rows, String reconcileLevel,
-            String adjustmentLevel) throws Exception {
+    /**
+     * Reads the window a page at a time and gzips each row as it arrives, so the
+     * live set is one page plus the artifact — never the whole window (#1023's
+     * rule: the cap is a row count and says nothing about memory; only reading a
+     * page and writing it out before asking for the next bounds it).
+     *
+     * <p>
+     * The loop asks for one row past the cap so a full page at the cap is itself
+     * the witness that a row beyond it exists — the count from the pre-pass cannot
+     * be trusted for that, because rows may have landed in the window since. Coming
+     * up short of the requested page, and not a count, is what ends the walk.
+     * </p>
+     */
+    private Rendered render(ExportTask task, String reconcileLevel, String adjustmentLevel) throws Exception {
         String note = caliberNote(reconcileLevel, adjustmentLevel);
         ByteArrayOutputStream out = new ByteArrayOutputStream();
+        long written = 0;
+        Instant cursorAt = null;
+        UUID cursorId = null;
         try (GZIPOutputStream gzip = new GZIPOutputStream(out)) {
-            if (format == ExportFormat.CSV) {
+            if (task.format() == ExportFormat.CSV) {
                 gzip.write((String.join(",", CSV_COLUMN_ORDER) + ",local_caliber_note\n")
                         .getBytes(StandardCharsets.UTF_8));
-                for (Map<String, Object> row : rows) {
-                    // Read in the declared order, never the map's insertion order, so a
-                    // reordering of the map can no longer silently shift the columns.
-                    gzip.write(join(CSV_COLUMN_ORDER.stream().map(row::get).toList()).getBytes(StandardCharsets.UTF_8));
-                    gzip.write(("," + note + "\n").getBytes(StandardCharsets.UTF_8));
+            }
+            while (true) {
+                int pageSize = (int) Math.min(EXPORT_CHUNK, EXPORT_MAX_ROWS + 1L - written);
+                List<RawRow> page = readChunk(task, cursorAt, cursorId, pageSize);
+                if (page.size() + written > EXPORT_MAX_ROWS) {
+                    throw new ApiException(HttpStatus.PAYLOAD_TOO_LARGE, "EXPORT_TOO_LARGE",
+                            "The export window holds more than " + EXPORT_MAX_ROWS
+                                    + " usage rows; narrow the period and export it in parts");
                 }
-            } else {
-                for (Map<String, Object> row : rows) {
-                    row.put("localCaliberNote", note);
-                    gzip.write(objectMapper.writeValueAsBytes(row));
-                    gzip.write('\n');
+                if (page.isEmpty()) {
+                    break;
+                }
+                for (RawRow raw : page) {
+                    writeRow(gzip, task.format(), raw.row(), note);
+                    written++;
+                }
+                RawRow last = page.get(page.size() - 1);
+                cursorAt = last.occurredAt();
+                cursorId = last.id();
+                if (page.size() < pageSize) {
+                    break;
                 }
             }
         }
-        return out.toByteArray();
+        return new Rendered(out.toByteArray(), written);
+    }
+
+    private void writeRow(GZIPOutputStream gzip, ExportFormat format, Map<String, Object> row, String note)
+            throws Exception {
+        if (format == ExportFormat.CSV) {
+            // Read in the declared order, never the map's insertion order, so a
+            // reordering of the map can no longer silently shift the columns.
+            gzip.write(join(CSV_COLUMN_ORDER.stream().map(row::get).toList()).getBytes(StandardCharsets.UTF_8));
+            gzip.write(("," + note + "\n").getBytes(StandardCharsets.UTF_8));
+        } else {
+            row.put("localCaliberNote", note);
+            gzip.write(objectMapper.writeValueAsBytes(row));
+            gzip.write('\n');
+        }
     }
 
     /**
