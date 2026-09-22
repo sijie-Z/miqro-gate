@@ -2,6 +2,28 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 会话交接点 2026-09-22（PH79 配置项默认值与文档一致性·幽灵配置第二轮：#1371）
+
+- **形态**：猎线（机械化全量比对 + 实测生效性），不是 Goal。三份清单（代码/yml/文档）逐键比对 + 5 次本机启动的 A/B 实测。**确认 1 个缺陷、否证 9 类候选**，未凑数立案（上限 3，用 1）。
+- **#1371 `MIQROKEY_PRICE_CATALOG_PATH` 是幽灵配置项**：文档 :228 给出默认 `/etc/miqrokey/prices` 与说明「版本化价格目录」，但**全仓零读取点**。红证据（原始输出）：`grep -rn "MIQROKEY_PRICE_CATALOG_PATH" .` → 唯一命中就是 `./docs/configuration-reference.md:228` 自己；`grep -rniE "catalog[-_.]?path|catalogpath" backend deploy scripts` → 零命中；`grep -rniE "price[-_.]?catalog" backend deploy scripts | wc -l` → 19，且 **19/19** 都属 #585 的远程价源机制（`sync|mapper`），即**文件型价格目录根本不存在**。
+  - **静默性（运行时补充证据）**：把该键设成**不存在的目录** `/ph79/ghost/catalog` 启动，应用 10.059 s 正常起来、health UP、日志对键名与值的命中数 **0**、WARN/ERROR **0**。配置一个假目录连一行日志都不给——这是缺陷的实质（不报错、不告警，第 9 行承诺的「未知 `MIQROKEY_` 配置应使启动失败」也兜不住）。
+  - **危害不只是「一个键没用」**：同一份配置参考里存在**两套互相矛盾的价格来源说法**——§5（:161–168）真实生效的是 7 行 `MIQROKEY_PRICE_SYNC_*`（远程价源，默认 `https://openrouter.ai/api/v1/models`），§6 这行却说价格来自本地目录。照 §6 搭的人会搭错一整套机制。
+  - **修复**（`3ac347b0`，纯文档 1 行 1 增 1 删）：取文档 :19 自定策略里的**原地标注**形态，补「（**预留：当前版本未读取**——实现无文件型价格目录；真实价源为 §5 的 `MIQROKEY_PRICE_SYNC_URL`）」。§6 表由 8 行 / 7 标注 → **8 行 / 8 标注**。
+    - **为什么不选「从文档移除」**：那会连带要求确认同一批预留键 `MIQROKEY_CATALOG_PATH`(:22) 的去留，属另一决策，不并入本单。
+  - **非重复提报**：#733（CLOSED 2026-09-17）第 7 条**已点名** `PRICE_CATALOG_PATH`，第一轮收口给它那批 17 个键逐行补标注——**16 个补上了，这是唯一漏网的**（兄弟行 `CATALOG_PATH` 虽无行内标注但有 :19 引用块兜底，这行两个载体都没覆盖）。同族先例 #1116（CLOSED，`MIQROKEY_UPSTREAM_URL`）。
+- **§1-3 实测生效性（PH48 方法：真改一次、看行为变没变）**：5 次本机启动，PG `15513` / 服务 `18743`。
+  - **A 基线**：health UP；110 行；INFO 100 / WARN 0 / ERROR 0；price-sync 相关 **0** 行（跑过默认 60 s initial delay）。
+  - **B** `AUTO_ENABLED=true` + `INITIAL_DELAY_MS=2000` + `URL=http://127.0.0.1:18749/ph79-probe`：`Started 12:18:09.868` → `ERROR … Scheduled price sync failed`（`价格源不可达：ConnectException`）`12:18:11.936`，**Δ=2.068 s**。证明 开关 + 延迟 两个旋钮真实生效。
+  - **C** 同 B 但换 `URL=…/ph79-runC-probe` 指向自建 stub：stub 记到 `2026-09-22T12:20:26.211 GET /ph79-runC-probe`，应用侧报错文本变为 `价格源响应缺少 data 数组`。**URL 旋钮端到端钉死**（B 只证明「它在联网」，C 才证明「它去的是我指定的那个地址」）。
+  - **D** `MIQROKEY_LOG_LEVEL=DEBUG`：DEBUG 行 **0 → 1975**，总行 **110 → 3995**。
+  - **E** 全默认 + 幽灵键指向不存在目录：见上，**零效果**。
+  - **行数 110 vs 30 的差异已解释**（不是异常）：A 是**首次**启动，Flyway 逐条打 76 行 `Migrating schema …` + 4 行汇总；E 启动时 schema 已在 v76。扣除后 A=30 / E=26，余下 4 行是采样时长差。
+- **§1-2 默认值三方比对：真·不一致 0 个**。139 个文档键 / 70 个 yml 桥默认 / 43 个代码侧默认 / **22 个三处都有** → 22/22 语义一致。脚本按字面比对抛出的 **29 组「不一致」全部是「Java 表达式 vs 字面量」的书写形态差**：`Duration.ofSeconds(10)`≡`10s`≡`10000`、`1024 * 1024`≡`1048576`、`new BigDecimal("7.2")`≡`7.2`、`Duration.ofMinutes(30)`≡`PT30M`、`List.of()`≡空，另有 3 处是我把 `compose.prod.yaml` 的 `${VAR:-默认}` 部署层示例值当成了 yml 默认。归一后 **0**。
+- **§1-4 重启要求**：`grep -rnE "@RefreshScope|spring-cloud-context|devtools" backend/` **零命中** ⇒ **没有任何热生效通道，全部配置项都需重启**。文档只在 §4.3 密钥轮换 runbook（:75/76/79）提到重启，无全局说明。**判非缺陷**：这是**遗漏**而非**错误陈述**（没有任何一句声称某键热生效，运维不会因此做错事），且对所有键一视同仁；计为缺陷属凑数。留档备后续若要补全局说明。
+- **被否候选（9 类，逐条理由见报告 §5）**：① 文档 :19 引用块内的 12 个「预留」键；② `MIQROKEY_BACKUP_{PATH,DAILY_KEEP,WEEKLY_KEEP,KEY_FILE}` —— 读取点在 `deploy/backup/*.sh`，**是我第一版扫描器只走 `backend/` 漏了 `deploy/`**（已修，reachable 104→108）；③ 2 个 OIDC 键 —— 我的解析器把文档简写行 `A / _B / _C` 错误拼接成不存在的名字；④ `MIQROKEY_MODEL_CATALOG_REPROBE_ENABLED` —— **`@ConditionalOnProperty` 的键名藏在字符串字面量里，`${}` 扫描器看不见**（任务书点名要单扫这一类的原因）；⑤ 3 个 webhook 键 —— #733 第 3 条已刻意改写为「与实现一致」，真实旋钮是每端点的 DB 列；⑥ 死线 31 处 —— 全是 Spring 框架属性与 compose `services.*` 路径，**`miqrokey.*` 零命中**；⑦ 默认值差异（见上）；⑧ 重启说明；⑨ 文档 :9 的启动校验承诺 —— 已在 #733 第 9 项闭环，不重开。
+- **方法论三条（踩坑留档）**：① 环境变量优先级**高于** `application.yml` 且走 relaxed 归一，所以**「yml 里没有 `${ENV:...}` 桥」不等于幽灵**；② `@ConditionalOnProperty` 必须单独扫；③ 文档简写行会骗过机械解析，必须人工确认展开。
+- 分支 `fix/ph79-config-defaults-consistency`；issue #1371；PR #1373。
+
 ## 会话交接点 2026-09-22（PH67 数据保留/清理正确性：配额判定不得被用量删除解封，#1316）
 
 - **缺陷**：`quota_enforcement` 是网关 429 的唯一来源，控制面 `QuotaEnforcementService` 每 60s 用**实时**水位（`QuotaWatermarks` → `usage_event` 聚合）重算它。于是保留策略的 `UsageDeletionService.confirm()` 物理删掉当前窗口的 `usage_event` 行之后，下一轮水位归零 → 规则不再 EXCEEDED → 判定行消失 → **流量重新放行**。ADR-0020 D2 承诺的恢复路径只有「窗口滚过去」与「管理员提高限额」，删除用量不在其中。
