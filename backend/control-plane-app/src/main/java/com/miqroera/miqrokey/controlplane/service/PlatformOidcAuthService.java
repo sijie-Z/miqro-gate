@@ -247,8 +247,8 @@ public class PlatformOidcAuthService {
      * {@code oidc-outbound-*} reader. That absence is consistent with the
      * {@code cancel(true)} on both paths having interrupted each reader; the dump
      * shows none outlived its call, though the interrupt itself was not observed.
-     * What stays behind is the socket, each one pinning a handler thread on the
-     * IdP side. With this transport the same eight abandons leave none open; see
+     * What stays behind is the socket, each one pinning a handler thread on the IdP
+     * side. With this transport the same eight abandons leave none open; see
      * {@code PlatformOidcAbandonedConnectionAccumulationTest}.
      *
      * <p>

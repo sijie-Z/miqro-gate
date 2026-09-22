@@ -69,16 +69,18 @@ import static org.mockito.Mockito.mock;
 @DisplayName("#1300 abandoned OIDC calls return every connection they take")
 class PlatformOidcAbandonedConnectionAccumulationTest {
 
-    /** Same budget shape as the PH57 sweep: far below any transport idle deadline. */
+    /**
+     * Same budget shape as the PH57 sweep: far below any transport idle deadline.
+     */
     private static final Duration BUDGET = Duration.ofMillis(1500);
 
     /** How many calls are abandoned before the accounting is read. */
     private static final int ABANDONS = 8;
 
     /**
-     * How long the peer is given to notice a release after the last budget
-     * expired. The client either closes at the budget or not at all, so a longer
-     * wait cannot turn a leak into a release.
+     * How long the peer is given to notice a release after the last budget expired.
+     * The client either closes at the budget or not at all, so a longer wait cannot
+     * turn a leak into a release.
      */
     private static final long GRACE_MS = 5_000;
 
@@ -148,8 +150,8 @@ class PlatformOidcAbandonedConnectionAccumulationTest {
             }
             long elapsed = (System.nanoTime() - start) / 1_000_000;
             abandonWallClockMs.add(elapsed);
-            System.out.printf("[ph70] abandon %d/%d returned after %5d ms | peer accepted=%d open=%d released=%d%n",
-                    i, ABANDONS, elapsed, accepted.get(), openSockets.size(), releasedByClient.get());
+            System.out.printf("[ph70] abandon %d/%d returned after %5d ms | peer accepted=%d open=%d released=%d%n", i,
+                    ABANDONS, elapsed, accepted.get(), openSockets.size(), releasedByClient.get());
         }
 
         // Wait for the connections to come back, then read the accounting.
@@ -162,18 +164,17 @@ class PlatformOidcAbandonedConnectionAccumulationTest {
         System.out.println("[ph70] --- accounting -------------------------------------------");
         System.out.println("[ph70] " + before);
         System.out.println("[ph70] " + after);
-        System.out.printf("[ph70] abandons=%d, connections accepted=%d, still open on the peer=%d, released by the client=%d%n",
+        System.out.printf(
+                "[ph70] abandons=%d, connections accepted=%d, still open on the peer=%d, released by the client=%d%n",
                 ABANDONS, accepted.get(), after.openConnections(), releasedByClient.get());
-        System.out.printf("[ph70] budget was %d ms; wall clock per abandon: %s%n",
-                BUDGET.toMillis(), abandonWallClockMs);
+        System.out.printf("[ph70] budget was %d ms; wall clock per abandon: %s%n", BUDGET.toMillis(),
+                abandonWallClockMs);
 
         assertThat(after.openConnections())
-                .as("connections the peer still holds %d ms after the last budget expired: %s",
-                        GRACE_MS, openSockets)
+                .as("connections the peer still holds %d ms after the last budget expired: %s", GRACE_MS, openSockets)
                 .isZero();
         assertThat(releasedByClient.get())
-                .as("connections the client actually tore down (the peer saw its drip write fail)")
-                .isEqualTo(ABANDONS);
+                .as("connections the client actually tore down (the peer saw its drip write fail)").isEqualTo(ABANDONS);
     }
 
     // ------------------------------------------------------------------
@@ -231,10 +232,9 @@ class PlatformOidcAbandonedConnectionAccumulationTest {
     }
 
     /**
-     * Writes one byte every {@link #DRIP_INTERVAL_MS} until the client lets go.
-     * A failed write is the only way the peer can see that the connection was
-     * handed back, which makes this the one place {@link #releasedByClient}
-     * moves.
+     * Writes one byte every {@link #DRIP_INTERVAL_MS} until the client lets go. A
+     * failed write is the only way the peer can see that the connection was handed
+     * back, which makes this the one place {@link #releasedByClient} moves.
      */
     private void drip(OutputStream out) throws InterruptedException {
         while (!stopping) {
@@ -275,11 +275,10 @@ class PlatformOidcAbandonedConnectionAccumulationTest {
     // ------------------------------------------------------------------
 
     /**
-     * What the process looks like at one instant: connections the peer still
-     * holds, and the threads that would be pinned by an abandoned call. The
-     * thread dump is written to {@code target/} because virtual threads — the
-     * ones a blocked reader would occupy — are not listed by
-     * {@link Thread#getAllStackTraces()}.
+     * What the process looks like at one instant: connections the peer still holds,
+     * and the threads that would be pinned by an abandoned call. The thread dump is
+     * written to {@code target/} because virtual threads — the ones a blocked
+     * reader would occupy — are not listed by {@link Thread#getAllStackTraces()}.
      */
     private Snapshot snapshot(String label) throws Exception {
         int platformThreads = Thread.getAllStackTraces().size();
@@ -293,7 +292,8 @@ class PlatformOidcAbandonedConnectionAccumulationTest {
             }
         }
         String dump = threadDump(label);
-        System.out.printf("[ph70] snapshot %-6s open=%d accepted=%d platformThreads=%d platformThreadsInSocketRead=%d jcmd=%s%n",
+        System.out.printf(
+                "[ph70] snapshot %-6s open=%d accepted=%d platformThreads=%d platformThreadsInSocketRead=%d jcmd=%s%n",
                 label, openSockets.size(), accepted.get(), platformThreads, blockedOnSocketRead, dump);
         return new Snapshot(label, openSockets.size(), accepted.get(), platformThreads, blockedOnSocketRead, dump);
     }
@@ -306,11 +306,9 @@ class PlatformOidcAbandonedConnectionAccumulationTest {
     private String threadDump(String label) {
         String path = System.getProperty("user.dir") + "/target/ph70-thread-dump-" + label + ".json";
         try {
-            Process process = new ProcessBuilder(
-                    System.getProperty("java.home") + "/bin/jcmd",
-                    String.valueOf(ProcessHandle.current().pid()),
-                    "Thread.dump_to_file", "-format=json", "-overwrite", path)
-                    .redirectErrorStream(true).start();
+            Process process = new ProcessBuilder(System.getProperty("java.home") + "/bin/jcmd",
+                    String.valueOf(ProcessHandle.current().pid()), "Thread.dump_to_file", "-format=json", "-overwrite",
+                    path).redirectErrorStream(true).start();
             // Wait first, read after: jcmd answers in one short line, far below
             // the pipe buffer, so this cannot deadlock on a full pipe — while
             // reading first would block forever on a jcmd that never exits and
@@ -344,7 +342,9 @@ class PlatformOidcAbandonedConnectionAccumulationTest {
     // The service under test
     // ------------------------------------------------------------------
 
-    /** A callback request carrying the state cookie that {@code complete} checks. */
+    /**
+     * A callback request carrying the state cookie that {@code complete} checks.
+     */
     private static MockHttpServletRequest request() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setCookies(new Cookie("MIQROKEY_OAUTH_STATE", "state-value"));
