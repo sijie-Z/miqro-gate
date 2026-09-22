@@ -516,4 +516,66 @@ describe('NextCredentialsView', () => {
     expect(rotateSubmitButton().disabled).toBe(false);
     expect(rotateSubmitButton().getAttribute('aria-busy')).toBeNull();
   });
+
+  it('#PH82R2: 放弃一次轮换后重开同一行，在途未完时不得二次提交', async () => {
+    // A's rotation never settles — the admin cancels and immediately reopens the SAME row.
+    mockApi.rotateCredential.mockImplementation(() => new Promise<CredentialView>(() => {}));
+    const wrapper = mountView();
+    await flushPromises();
+
+    await openRotateDialog(wrapper, '0190-0000-0000-0030');
+    setRotateSecret('sk-rotated-first');
+    rotateSubmitButton().click();
+    await flushPromises();
+    expect(mockApi.rotateCredential).toHaveBeenCalledTimes(1);
+
+    rotateCancelButton().click();
+    await flushPromises();
+    expect(rotateDialog()).toBeNull();
+
+    await openRotateDialog(wrapper, '0190-0000-0000-0030');
+    setRotateSecret('sk-rotated-second');
+
+    // Clearing the busy flag when this dialog opens would re-arm 轮换 for a credential
+    // whose rotation is still running. 取消 abandons the dialog, not the request: the
+    // control plane takes no If-Match and no idempotency key, so a second POST is a
+    // second real rotation (old version demoted, new one inserted) — and whichever of
+    // the two concurrent requests loses the race can leave the wrong secret ACTIVE.
+    rotateSubmitButton().click();
+    await flushPromises();
+    expect(mockApi.rotateCredential, '不得发出第二次轮换请求').toHaveBeenCalledTimes(1);
+    expect(rotateSubmitButton().disabled, '同一凭据仍在轮换时按钮必须保持锁住').toBe(true);
+  });
+
+  it('#PH82R2: 被作废但服务端已成功的轮换，仍然刷新列表', async () => {
+    let succeedRotate!: () => void;
+    mockApi.rotateCredential.mockImplementation(
+      () =>
+        new Promise<CredentialView>((resolve) => {
+          succeedRotate = () => resolve(credential({ id: '0190-0000-0000-0030' }));
+        }),
+    );
+    const wrapper = mountView();
+    await flushPromises();
+    const listCallsBefore = mockApi.listCredentials.mock.calls.length;
+
+    await openRotateDialog(wrapper, '0190-0000-0000-0030');
+    setRotateSecret('sk-rotated-a');
+    rotateSubmitButton().click();
+    await flushPromises();
+
+    // The admin walks away to another credential before A's rotation lands.
+    rotateCancelButton().click();
+    await flushPromises();
+    await openRotateDialog(wrapper, 'c2');
+    await flushPromises();
+
+    succeedRotate();
+    await flushPromises();
+
+    // The dialog guard decides whose dialog this answer belongs to — not whether the
+    // list is stale. A's rotation really happened server-side, so the table must not
+    // keep showing A's old version / fingerprintPrefix.
+    expect(mockApi.listCredentials.mock.calls.length).toBeGreaterThan(listCallsBefore);
+  });
 });

@@ -245,7 +245,6 @@ async function runValidate() {
 const rotateTarget = ref<CredentialView | null>(null);
 const rotateSecret = ref('');
 const showRotateSecret = ref(false);
-const rotating = ref(false);
 const rotateError = ref('');
 const rotateRequestId = ref('');
 
@@ -254,6 +253,19 @@ const rotateRequestId = ref('');
 // that credential's failure, and a late success would slam the new dialog shut).
 let rotateRequestSeq = 0;
 
+// #1351 review F1: busy belongs to a *credential*, not to "this dialog".
+// A single boolean cannot express both halves of the abandonment story: clearing it
+// on open re-arms 轮换 for a credential whose rotation is still running (the control
+// plane has no If-Match and no idempotency key, so a second POST is a second real
+// rotation), while never clearing it strands the next credential behind a busy flag
+// it never earned (#1344's orphan). Keying it by credential id settles both: moving
+// to another row reads as idle, coming back to the same row still reads as in flight.
+const rotatingCredentialId = ref<string | null>(null);
+const rotateInFlight = computed(
+  () =>
+    rotatingCredentialId.value !== null && rotatingCredentialId.value === rotateTarget.value?.id,
+);
+
 function openRotate(cred: CredentialView) {
   rotateRequestSeq++; // invalidate any rotation still in flight
   rotateTarget.value = cred;
@@ -261,9 +273,7 @@ function openRotate(cred: CredentialView) {
   showRotateSecret.value = false;
   rotateError.value = '';
   rotateRequestId.value = '';
-  // #1351: this dialog now owns the busy flag; the abandoned request's guarded
-  // `finally` will never clear it (same orphan as #1344), so clear it here.
-  rotating.value = false;
+  // Deliberately does NOT reset the in-flight marker — see rotateInFlight above.
 }
 
 async function runRotate() {
@@ -271,20 +281,25 @@ async function runRotate() {
     rotateError.value = '请输入新的密钥。';
     return;
   }
+  // Rotation targets a listed credential; ids are always present.
+  const credentialId = rotateTarget.value.id!;
   const seq = ++rotateRequestSeq;
-  rotating.value = true;
+  rotatingCredentialId.value = credentialId;
   rotateError.value = '';
   rotateRequestId.value = '';
   try {
-    // Rotation targets a listed credential; ids are always present.
-    await api.rotateCredential(rotateTarget.value.id!, { secret: rotateSecret.value });
+    await api.rotateCredential(credentialId, { secret: rotateSecret.value });
+    // #1351 review F2: the guard below governs which dialog this answer belongs to,
+    // not whether the list is stale. The server really did rotate, so refresh it
+    // either way — otherwise an abandoned-but-successful rotation leaves the table
+    // showing the old version / fingerprintPrefix.
+    void load();
     if (seq !== rotateRequestSeq) {
       return; // the dialog re-targeted — this rotation belongs to another credential
     }
     toast.success('凭证已轮换，旧版本进入宽限期');
     rotateTarget.value = null;
     rotateSecret.value = '';
-    await load();
   } catch (error) {
     if (seq !== rotateRequestSeq) {
       return;
@@ -296,8 +311,11 @@ async function runRotate() {
       rotateError.value = '轮换失败，请稍后重试。';
     }
   } finally {
-    if (seq === rotateRequestSeq) {
-      rotating.value = false;
+    // Release by credential id, not by sequence: the abandoned request must hand its
+    // busy flag back too, or the same credential stays locked out forever (#1344's
+    // orphan). A rotation that started later for another credential keeps its own.
+    if (rotatingCredentialId.value === credentialId) {
+      rotatingCredentialId.value = null;
     }
   }
 }
@@ -866,7 +884,7 @@ onMounted(load);
         <UiButton variant="ghost" @click="rotateTarget = null">取消</UiButton>
         <UiButton
           variant="primary"
-          :loading="rotating"
+          :loading="rotateInFlight"
           data-testid="credential-rotate-submit"
           @click="runRotate"
         >
