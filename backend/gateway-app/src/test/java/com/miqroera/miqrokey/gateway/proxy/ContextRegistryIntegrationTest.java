@@ -219,6 +219,53 @@ class ContextRegistryIntegrationTest {
     }
 
     /**
+     * #1400: {@code context_registry_unavailable} asserts <em>we gave up waiting</em>.
+     * A read that fails for any other reason must not borrow that claim — with the
+     * table gone the read cannot even be parsed, which is a {@code DataAccessException}
+     * but not a {@code QueryTimeoutException}, and the caller has to be able to tell
+     * the two apart without reading gateway logs.
+     *
+     * <p>
+     * The table is dropped rather than renamed so the failure also survives pgjdbc's
+     * cached server-side prepared statements (a rename keeps the relation's OID, a
+     * drop does not), then recreated from {@code V56__project_repositories.sql} and
+     * re-seeded, so the fixture is exactly what the other tests expect.
+     * </p>
+     */
+    @Test
+    @DisplayName("#1400: a database fault that is not a timeout keeps its own error type")
+    void nonTimeoutDatabaseFaultKeepsItsOwnEnvelope() {
+        DriverManagerDataSource dataSource = new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(),
+                POSTGRES.getPassword());
+        NamedParameterJdbcTemplate sql = new NamedParameterJdbcTemplate(dataSource);
+        sql.getJdbcTemplate().execute("DROP TABLE project_repositories");
+        try {
+            webTestClient.get().uri("/v1/context-registry")
+                    .header("Authorization", "Bearer " + GatewayTestKeys.DEFAULT_KEY.presented()).exchange()
+                    .expectStatus().isEqualTo(HttpStatus.SERVICE_UNAVAILABLE).expectBody().jsonPath("$.error.type")
+                    .isEqualTo("context_registry_error");
+        } finally {
+            sql.getJdbcTemplate().execute("""
+                    CREATE TABLE project_repositories (
+                        id          uuid         PRIMARY KEY,
+                        tenant_id   uuid         NOT NULL REFERENCES tenants (id) ON DELETE RESTRICT,
+                        project_id  uuid         NOT NULL,
+                        repo_key    varchar(200) NOT NULL,
+                        created_by  uuid,
+                        created_at  timestamptz  NOT NULL DEFAULT now(),
+                        updated_at  timestamptz  NOT NULL DEFAULT now(),
+                        CONSTRAINT fk_project_repositories_project
+                            FOREIGN KEY (tenant_id, project_id) REFERENCES projects (tenant_id, id) ON DELETE RESTRICT,
+                        CONSTRAINT uq_project_repositories_tenant_repo UNIQUE (tenant_id, repo_key)
+                    )
+                    """);
+            sql.getJdbcTemplate().execute("CREATE INDEX idx_project_repositories_project ON project_repositories (project_id)");
+            map(sql, GatewayTestKeys.PROJECT_ID, "github.com/acme/alpha");
+            map(sql, GatewayTestKeys.OTHER_PROJECT_ID, "github.com/acme/beta");
+        }
+    }
+
+    /**
      * Fires {@code n} registry reads at once, asserting each is a {@code 503}, and
      * returns their wall times.
      */

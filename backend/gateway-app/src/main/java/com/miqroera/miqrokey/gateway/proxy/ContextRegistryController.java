@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DataAccessException;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.PreparedStatementCreator;
@@ -59,9 +60,12 @@ public class ContextRegistryController {
      * for the blocking read — it cannot interrupt it — so without a statement-level
      * bound the lane stays checked out (and its pooled connection stays borrowed)
      * until the database itself returns. Aborting first makes the release
-     * deterministic.
+     * deterministic. Clamped to at least one second: {@code setQueryTimeout(0)}
+     * means "no limit" in JDBC, so a shortened {@link #REGISTRY_TIMEOUT} must not
+     * silently disable the bound this constant exists to provide.
      */
-    private static final int STATEMENT_TIMEOUT_SECONDS = Math.toIntExact(REGISTRY_TIMEOUT.toSeconds()) - 2;
+    private static final int STATEMENT_TIMEOUT_SECONDS = Math.max(1,
+            Math.toIntExact(REGISTRY_TIMEOUT.toSeconds()) - 2);
 
     private static final String REPOSITORY_QUERY = "SELECT project_id, repo_key FROM project_repositories WHERE tenant_id = ? AND project_id IN (%s) "
             + "ORDER BY repo_key";
@@ -96,21 +100,32 @@ public class ContextRegistryController {
         // database read cannot park the transport that also carries LLM traffic.
         // #1400: the reactor timeout bounds the response, not the occupancy — the
         // read itself carries a statement timeout (see buildBody) so the lane and its
-        // connection come back on their own. Both failure modes mean the same thing to
-        // the caller, so they share one envelope.
+        // connection come back on their own. Those two are the same thing to the
+        // caller ("we gave up waiting") and share one envelope; a database fault that
+        // is not a timeout keeps its own, so the two are told apart at the API rather
+        // than only in the log.
         return Mono.fromCallable(() -> buildBody(identity)).subscribeOn(jdbcScheduler).timeout(REGISTRY_TIMEOUT)
                 .flatMap(body -> writeJson(exchange, HttpStatus.OK, body))
                 .onErrorResume(TimeoutException.class, e -> unavailable(exchange, e))
-                .onErrorResume(DataAccessException.class, e -> unavailable(exchange, e));
+                .onErrorResume(QueryTimeoutException.class, e -> unavailable(exchange, e))
+                .onErrorResume(DataAccessException.class, e -> registryFault(exchange, e));
     }
 
     private Mono<Void> unavailable(ServerWebExchange exchange, Throwable cause) {
-        // Not silent: the envelope tells the caller "timed out", so the real cause has
-        // to be recoverable from the log or a genuine database fault would be
-        // indistinguishable from a slow read.
-        log.warn("context registry read failed, answering context_registry_unavailable", cause);
+        log.warn("context registry read timed out, answering context_registry_unavailable", cause);
         return writeError(exchange, new AuthFailureException(HttpStatus.SERVICE_UNAVAILABLE,
                 "context_registry_unavailable", "The context registry read timed out"));
+    }
+
+    /**
+     * A read that failed for a reason other than a timeout. Deliberately not folded
+     * into {@link #unavailable}: "timed out" is a claim about our own deadline, and
+     * answering it for, say, a dropped connection would misattribute the fault.
+     */
+    private Mono<Void> registryFault(ServerWebExchange exchange, DataAccessException cause) {
+        log.error("context registry read failed, answering context_registry_error", cause);
+        return writeError(exchange, new AuthFailureException(HttpStatus.SERVICE_UNAVAILABLE, "context_registry_error",
+                "The context registry is unavailable"));
     }
 
     private Mono<Void> writeJson(ServerWebExchange exchange, HttpStatus status, String body) {
