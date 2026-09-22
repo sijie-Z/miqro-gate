@@ -267,8 +267,9 @@ public final class SkillZipValidator {
             throw structureInvalid();
         }
         for (int at = eocd + 1; at + 4 <= zip.length; at++) {
-            // Only one EOCD may exist: readers that scan backwards must land on
-            // the same record this validator just read.
+            // Bytes after the chosen record may only be padding (the block fill a
+            // streaming archiver writes): a further EOCD signature would let some
+            // reader pick a different record than this validator read.
             if (u32(zip, at) == EOCD_SIG) {
                 throw structureInvalid();
             }
@@ -322,7 +323,15 @@ public final class SkillZipValidator {
                 next = dataStart + declaredCsize;
             } else if (method == 8) {
                 boolean viaDescriptor = (flags & 8) != 0;
-                Inflated inflated = inflateEntry(zip, dataStart, viaDescriptor ? cdOffset - dataStart : declaredCsize,
+                if (!viaDescriptor && dataStart + declaredCsize > cdOffset) {
+                    // The declared compressed span must fit before the directory.
+                    // Feeding an over-long declared size to the inflater verbatim
+                    // read past the end of the array and leaked an uncaught
+                    // ArrayIndexOutOfBoundsException (500 instead of a clean 400).
+                    throw structureInvalid();
+                }
+                Inflated inflated = inflateEntry(zip, dataStart,
+                        Math.min(viaDescriptor ? cdOffset - dataStart : declaredCsize, zip.length - dataStart),
                         decompressed);
                 if (viaDescriptor) {
                     // #1242 direction 2: the descriptor is what a streaming
@@ -411,7 +420,12 @@ public final class SkillZipValidator {
                     if (available <= 0) {
                         throw structureInvalid(); // the deflate stream runs past its declared span
                     }
-                    int n = (int) Math.min(available, 1 << 20);
+                    // Never hand the inflater a slice past the end of the array,
+                    // whatever bound the caller computed.
+                    int n = (int) Math.min(Math.min(available, 1 << 20), zip.length - (long) at);
+                    if (n <= 0) {
+                        throw structureInvalid();
+                    }
                     inflater.setInput(zip, at, n);
                     at += n;
                     pushed += n;
@@ -470,15 +484,20 @@ public final class SkillZipValidator {
 
     /**
      * Locates the end-of-central-directory record the way the directory-based
-     * readers do: the last occurrence of the signature whose comment length reaches
-     * exactly to the end of the file.
+     * readers do: the last occurrence of the signature in the trailing window
+     * (the last 64 KiB + 22 bytes, matching python's rfind, Java's backward scan
+     * and .NET's SeekBackwardsToSignature). Bytes after the record — block
+     * padding written by streaming archivers such as bsdtar/libarchive — are
+     * tolerated; they must not carry a second EOCD signature (enforced by the
+     * uniqueness scan in {@link #verifyTwoViews}) and the record must still abut
+     * the central directory.
      */
     private static int findEocd(byte[] zip) {
         if (zip.length < 22) {
             return -1;
         }
         for (int at = zip.length - 22; at >= Math.max(0, zip.length - 22 - 0xFFFF); at--) {
-            if (u32(zip, at) == EOCD_SIG && at + 22 + u16(zip, at + 20) == zip.length) {
+            if (u32(zip, at) == EOCD_SIG) {
                 return at;
             }
         }
