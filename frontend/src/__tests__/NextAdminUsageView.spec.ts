@@ -1253,4 +1253,61 @@ describe('NextAdminUsageView', () => {
 
     wrapper.unmount();
   });
+
+  // #PH89: the 维度分解 dropdown offers 日/月, and the backend buckets those two
+  // dimensions by `tzOffsetMinutes` — null means UTC (`AdminUsageStatsService.java:143`).
+  // The trend chart on the same screen (`loadSeries`, `:756`) and the hourly table
+  // (`:536`) pass the viewer's offset; the breakdown summary did not, so one record
+  // sat in two different days on one screen: 请求日志 printed its local day, the
+  // table above it printed the UTC one.
+  //
+  // The mock mirrors the server rule (no offset ⇒ UTC buckets) so the failure shows
+  // in the rendered table, not merely in a request-parameter list. The viewer is
+  // pinned to UTC+8 rather than inheriting the runner's zone, which is UTC in CI
+  // (#1301) — there the two bucketings coincide and the test would prove nothing.
+  it('#PH89 维度分解的日/月分桶用查看者本地日，与同屏请求日志一致', async () => {
+    const offset = vi.spyOn(Date.prototype, 'getTimezoneOffset').mockReturnValue(-480); // UTC+8
+    try {
+      // 2026-09-03T17:30:00Z is 09-04 01:30 at UTC+8 — a record whose local day is
+      // the next one. Real capture, container `ph89tz2-pg` / control-plane :18766:
+      //   tz unset  → [('2026-09-03', 3, 117), ...]
+      //   tz=480    → [('2026-09-03', 1, 100), ('2026-09-04', 3, 24), ...]
+      const utcDay = '2026-09-03';
+      const localDay = '2026-09-04';
+      const dayGroup = (day: string) => group(day, day, 1, 17, 28, 0.004);
+      mockApi.adminUsageSummary.mockImplementation(async (query) => ({
+        groupBy: String(query?.groupBy ?? 'project'),
+        groups: [dayGroup(query?.tzOffsetMinutes === 480 ? localDay : utcDay)],
+        totals: group('__totals__', '合计', 1, 17, 28, 0.004),
+      }));
+      mockApi.adminUsageRecords.mockResolvedValue({
+        items: [recordRow(1, { occurredAt: '2026-09-03T17:30:00Z' })],
+        page: 1,
+        size: 20,
+        total: 1,
+      });
+
+      const wrapper = mountView();
+      await flushPromises();
+
+      // The request log states the day the viewer is in.
+      expect(wrapper.find('[data-testid="usage-records-table"]').text()).toContain(
+        '2026-09-04 01:30',
+      );
+
+      // 维度分解 → 日 must agree with it.
+      await wrapper.find('[data-testid="usage-tab-breakdown"]').trigger('click');
+      await flushPromises();
+      await wrapper
+        .find('[data-testid="usage-group-by"] .stub-option[data-option="day"]')
+        .trigger('click');
+      await flushPromises();
+
+      const breakdown = wrapper.find('[data-testid="usage-breakdown-table"]');
+      expect(breakdown.text()).toContain(localDay);
+      expect(breakdown.text()).not.toContain(utcDay);
+    } finally {
+      offset.mockRestore();
+    }
+  });
 });
