@@ -132,7 +132,7 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_UPSTREAM_CONNECT_TIMEOUT` | `PT10S` | 建立上游连接超时 |
 | `MIQROKEY_UPSTREAM_FIRST_BYTE_TIMEOUT` | `PT120S` | 等待首个响应字节（含头）超时；超时永不重试 |
 | `MIQROKEY_UPSTREAM_STREAM_IDLE_TIMEOUT` | `PT5M` | SSE 无数据超时（每个 chunk 重置）；已出首字节后超时 → `STREAM_INTERRUPTED` |
-| `MIQROKEY_UPSTREAM_RESPONSE_TIMEOUT` | `PT10M` | 整体硬截止（自请求体收齐起计时，不重置）：同一份预算连续覆盖**等调度器车道、L2 读、凭证解密与全部上游尝试**，拆成两个互不重叠的窗口（#1388 前该截止装在调度器 hop 之后，排队等待落在它之外）；流式空闲另算 |
+| `MIQROKEY_UPSTREAM_RESPONSE_TIMEOUT` | `PT10M` | 整体硬截止（**自请求体到手起计时**，**含排队等待**与缓存读/凭据解密/SSRF DNS 等前置跳，不重置）：同一份预算按剩余量拆成互不重叠的若干窗口（L2 读 / 凭据解密含等车道 / 全部上游尝试），每段只在自己的源产出前计时、总时长不超预算（#1388 前该截止装在调度器 hop 之后，排队等待整个落在它之外）；流式空闲另算 |
 | `MIQROKEY_MAX_INBOUND_HEADER_BYTES` | `32KB` | 入站 Header 上限（G2.6）；Netty 在路由前拒绝超限请求 → `431` |
 | `MIQROKEY_MAX_CONTROL_BODY_BYTES` | `1MB` | 管理 API body 上限 |
 | `MIQROKEY_MAX_PROXY_BUFFER_BYTES` | `256KB` | 只限制必要解析缓冲，不聚合完整响应 |
