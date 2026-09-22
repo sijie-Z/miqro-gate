@@ -29,9 +29,14 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
+import java.util.function.IntConsumer;
 
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsInAnyOrder;
@@ -251,6 +256,70 @@ class AdminUsageApiIntegrationTest {
                 get("/api/v1/admin/usage/records").param("userId", fx.otherUserId.toString()).cookie(adminSession))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(1))
                 .andExpect(jsonPath("$.items[0].providerRequestId").value("chatcmpl-other-1"));
+    }
+
+    /**
+     * #1368, half one: the console walks the detail list with {@code nextCursor},
+     * not with page numbers. Rows removed from the stretch the walk has already
+     * handed out must not shift the rows behind them out of reach — under
+     * {@code OFFSET} they do exactly that, and the walk silently skips them.
+     */
+    @Test
+    @DisplayName("#1368: a cursor walk skips nothing when rows are deleted behind it mid-walk")
+    void cursorWalkSurvivesRowsDeletedMidWalk() throws Exception {
+        UUID key = seedCursorWalkRows();
+        List<String> deleted = List.of(seedId(5), seedId(6), seedId(7), seedId(8), seedId(9));
+
+        Walk walk = walkRecords(key, 10, pageNo -> {
+            if (pageNo == 1) {
+                // Page 1, already handed out: under OFFSET their removal pulls five later rows
+                // up past the next OFFSET window, and those five are never returned.
+                for (String id : deleted) {
+                    jdbc.update("DELETE FROM usage_event WHERE provider_request_id = :id",
+                            new MapSqlParameterSource("id", id));
+                }
+            }
+        });
+
+        Assertions.assertThat(walk.firstCursor()).as("page 1 of a 60-row window must offer a cursor").isNotNull();
+        Assertions.assertThat(walk.sawCursorRoundTrip()).as("the walk must really resend a non-null before").isTrue();
+        Assertions.assertThat(walk.seenOrder()).as("no row may be handed out twice").doesNotHaveDuplicates();
+        Assertions.assertThat(walk.missing()).as("rows still in the table that no page ever returned").isEmpty();
+        Assertions.assertThat(walk.phantoms()).as("the only rows gone from the table are the ones this test deleted")
+                .containsExactlyInAnyOrderElementsOf(deleted);
+    }
+
+    /**
+     * #1368, half two: rows inserted above the walk's boundary must not make it
+     * hand a row out a second time. {@code OFFSET} re-reads them, because the
+     * insertion pushes the window down by one. A keyset walk only ever moves the
+     * boundary it already holds.
+     */
+    @Test
+    @DisplayName("#1368: a cursor walk repeats nothing when rows are inserted above it mid-walk")
+    void cursorWalkSurvivesRowsInsertedMidWalk() throws Exception {
+        UUID key = seedCursorWalkRows();
+        List<String> inserted = List.of("ph76-new-00", "ph76-new-01");
+
+        Walk walk = walkRecords(key, 10, pageNo -> {
+            if (pageNo == 1) {
+                // Newer than every row already handed out, so OFFSET would push page 2 down and
+                // re-read two rows page 1 already returned.
+                fx.insertUsage(key, inserted.get(0), 100L, 10L, MODEL, CURSOR_WALK_BASE.plusSeconds(10));
+                fx.insertUsage(key, inserted.get(1), 100L, 10L, MODEL, CURSOR_WALK_BASE.plusSeconds(11));
+            }
+        });
+
+        Assertions.assertThat(walk.firstCursor()).as("page 1 of a 60-row window must offer a cursor").isNotNull();
+        Assertions.assertThat(walk.sawCursorRoundTrip()).as("the walk must really resend a non-null before").isTrue();
+        Assertions.assertThat(walk.seenOrder()).as("no row may be handed out twice").doesNotHaveDuplicates();
+        Assertions.assertThat(walk.phantoms()).as("nothing was deleted, so nothing may disappear").isEmpty();
+        Set<String> neverSeen = new TreeSet<>(walk.dbIds());
+        neverSeen.removeAll(walk.seen());
+        Assertions.assertThat(neverSeen)
+                .as("rows created above the boundary after the walk started are out of its "
+                        + "scope; every other row must be returned exactly once")
+                .containsExactlyInAnyOrderElementsOf(inserted);
     }
 
     @Test
@@ -1178,6 +1247,80 @@ class AdminUsageApiIntegrationTest {
     private String summaryBody(String groupBy) throws Exception {
         return mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", groupBy).cookie(adminSession))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Timestamps for the two cursor-walk tests: 60 rows one second apart, so ties
+     * are impossible.
+     */
+    static final Instant CURSOR_WALK_BASE = Instant.parse("2026-06-01T00:00:00Z");
+
+    private static String seedId(int index) {
+        return String.format("ph76-seed-%03d", index);
+    }
+
+    private UUID seedCursorWalkRows() {
+        fx.insertCatalogAndGrant();
+        UUID key = fx.createOwnKey();
+        for (int i = 0; i < 60; i++) {
+            fx.insertUsage(key, seedId(i), 100L, 10L, MODEL, CURSOR_WALK_BASE.minusSeconds(i));
+        }
+        return key;
+    }
+
+    /**
+     * The console's walk: page 1 with no cursor, then whatever {@code nextCursor}
+     * came back, until it comes back null. {@code afterPage} runs once a page has
+     * been read, so a test can mutate the window mid-walk.
+     */
+    private Walk walkRecords(UUID key, int size, IntConsumer afterPage) throws Exception {
+        Instant from = CURSOR_WALK_BASE.minusSeconds(3_600);
+        Instant to = CURSOR_WALK_BASE.plusSeconds(3_600);
+        List<String> seenOrder = new ArrayList<>();
+        Set<String> cursors = new LinkedHashSet<>();
+        String before = null;
+        String firstCursor = null;
+        boolean sawCursorRoundTrip = false;
+        long pages = 0;
+        for (;;) {
+            var request = get("/api/v1/admin/usage/records").param("from", from.toString()).param("to", to.toString())
+                    .param("size", String.valueOf(size)).param("virtualKeyId", key.toString()).cookie(adminSession);
+            if (before != null) {
+                request = request.param("before", before);
+                sawCursorRoundTrip = true;
+            }
+            MvcResult result = mockMvc.perform(request).andExpect(status().isOk()).andReturn();
+            JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString(StandardCharsets.UTF_8));
+            for (JsonNode item : body.path("items")) {
+                seenOrder.add(item.path("providerRequestId").asText());
+            }
+            pages++;
+            JsonNode next = body.get("nextCursor");
+            String cursor = next == null || next.isNull() ? null : next.asText();
+            if (pages == 1) {
+                firstCursor = cursor;
+            }
+            afterPage.accept((int) pages);
+            // A null cursor ends the walk; a cursor that repeats itself would loop forever.
+            if (cursor == null || !cursors.add(cursor)) {
+                break;
+            }
+            before = cursor;
+        }
+        Assertions.assertThat(pages).as("the walk must terminate well inside this bound").isLessThan(50);
+        Set<String> dbIds = new TreeSet<>(
+                jdbc.queryForList("SELECT provider_request_id FROM usage_event WHERE virtual_key_id = :keyId",
+                        new MapSqlParameterSource("keyId", key), String.class));
+        Set<String> seen = new LinkedHashSet<>(seenOrder);
+        Set<String> missing = new TreeSet<>(dbIds);
+        missing.removeAll(seen);
+        Set<String> phantoms = new TreeSet<>(seen);
+        phantoms.removeAll(dbIds);
+        return new Walk(firstCursor, sawCursorRoundTrip, seenOrder, seen, dbIds, missing, phantoms);
+    }
+
+    private record Walk(String firstCursor, boolean sawCursorRoundTrip, List<String> seenOrder, Set<String> seen,
+            Set<String> dbIds, Set<String> missing, Set<String> phantoms) {
     }
 
     /**
