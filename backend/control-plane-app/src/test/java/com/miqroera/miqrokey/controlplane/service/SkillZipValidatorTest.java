@@ -443,6 +443,28 @@ class SkillZipValidatorTest {
                 .isEqualTo("web-scraper");
     }
 
+    @Test
+    @DisplayName("fail-closed: a GBK (non-UTF-8) entry name is refused cleanly, not as a 500 (#1242 review round)")
+    void nonUtf8EntryNameRejected() {
+        // bsdtar on a zh-CN box writes entry names in the platform encoding with the
+        // UTF-8 flag unset; the streaming reader's strict decode throws an
+        // IllegalArgumentException where a malformed-package verdict belongs.
+        // Pre-existing since develop (a 500 before #1242 too) — fixed alongside this
+        // review round, not a regression of it.
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
+        // 笔=B1CA 记=BCC7 in GBK: not a valid UTF-8 sequence.
+        byte[] gbkName = bytes("web-scraper/".getBytes(StandardCharsets.UTF_8),
+                new byte[]{(byte) 0xB1, (byte) 0xCA, (byte) 0xBC, (byte) 0xC7, '.', 'm', 'd'});
+        byte[] payload = "gbk named entry\n".getBytes(StandardCharsets.UTF_8);
+        byte[] second = bytes(rawLocal(gbkName, 0, 0, crc32(payload), payload.length, payload.length), payload);
+        byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
+                rawCd(gbkName, 0, 0, crc32(payload), payload.length, payload.length, first.length));
+
+        assertCode(bytes(first, second, cd, rawEocd(2, cd.length, first.length + second.length)), "SKILL_ZIP_INVALID");
+    }
+
     private static void assertStructureRejected(byte[] pkg, String what) {
         assertCode(pkg, "SKILL_ZIP_STRUCTURE_INVALID", what);
     }
@@ -609,9 +631,12 @@ class SkillZipValidatorTest {
     }
 
     private static byte[] rawLocal(String name, int method, int flags, long crc, long csize, long usize) {
-        byte[] n = name.getBytes(StandardCharsets.UTF_8);
+        return rawLocal(name.getBytes(StandardCharsets.UTF_8), method, flags, crc, csize, usize);
+    }
+
+    private static byte[] rawLocal(byte[] name, int method, int flags, long crc, long csize, long usize) {
         return bytes(le32(0x04034B50L), le16(20), le16(flags), le16(method), le16(0), le16(0), le32(crc), le32(csize),
-                le32(usize), le16(n.length), le16(0), n);
+                le32(usize), le16(name.length), le16(0), name);
     }
 
     private static byte[] rawDescriptor(long crc, long csize, long usize) {
@@ -619,9 +644,13 @@ class SkillZipValidatorTest {
     }
 
     private static byte[] rawCd(String name, int method, int flags, long crc, long csize, long usize, long offset) {
-        byte[] n = name.getBytes(StandardCharsets.UTF_8);
+        return rawCd(name.getBytes(StandardCharsets.UTF_8), method, flags, crc, csize, usize, offset);
+    }
+
+    private static byte[] rawCd(byte[] name, int method, int flags, long crc, long csize, long usize, long offset) {
         return bytes(le32(0x02014B50L), le16(20), le16(20), le16(flags), le16(method), le16(0), le16(0), le32(crc),
-                le32(csize), le32(usize), le16(n.length), le16(0), le16(0), le16(0), le16(0), le32(0), le32(offset), n);
+                le32(csize), le32(usize), le16(name.length), le16(0), le16(0), le16(0), le16(0), le32(0), le32(offset),
+                name);
     }
 
     private static byte[] rawEocd(int count, long cdSize, long cdOffset) {
