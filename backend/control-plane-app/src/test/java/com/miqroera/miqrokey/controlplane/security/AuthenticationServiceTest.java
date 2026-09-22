@@ -12,6 +12,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.env.Environment;
@@ -30,6 +31,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -78,6 +80,8 @@ class AuthenticationServiceTest {
             User user = buildActiveUser();
             when(userRepository.findByTenantIdAndUsername(TENANT_ID, "admin")).thenReturn(Optional.of(user));
             when(passwordHasher.verify("correct", PASSWORD_HASH)).thenReturn(true);
+            // #1334: the success path re-reads the row FOR UPDATE before writing it back.
+            when(userRepository.findByIdForUpdate(USER_ID)).thenReturn(Optional.of(user));
             when(sessionService.createSession(any())).thenReturn(new SessionToken("sess", "csrf"));
 
             var result = service.login("admin", "correct", "req-1");
@@ -93,6 +97,7 @@ class AuthenticationServiceTest {
             User user = buildUser(3, null, UserStatus.ACTIVE);
             when(userRepository.findByTenantIdAndUsername(TENANT_ID, "admin")).thenReturn(Optional.of(user));
             when(passwordHasher.verify("correct", PASSWORD_HASH)).thenReturn(true);
+            when(userRepository.findByIdForUpdate(USER_ID)).thenReturn(Optional.of(user));
             when(sessionService.createSession(any())).thenReturn(new SessionToken("sess", "csrf"));
 
             service.login("admin", "correct", "req-1");
@@ -171,10 +176,122 @@ class AuthenticationServiceTest {
             User user = buildUser(5, Instant.now().minus(Duration.ofMinutes(1)), UserStatus.LOCKED);
             when(userRepository.findByTenantIdAndUsername(TENANT_ID, "admin")).thenReturn(Optional.of(user));
             when(passwordHasher.verify("correct", PASSWORD_HASH)).thenReturn(true);
+            when(userRepository.findByIdForUpdate(USER_ID)).thenReturn(Optional.of(user));
             when(sessionService.createSession(any())).thenReturn(new SessionToken("sess", "csrf"));
 
             var result = service.login("admin", "correct", "req-1");
             assertThat(result).isNotNull();
+            assertThat(result.user().status()).isEqualTo(UserStatus.ACTIVE);
+        }
+    }
+
+    /**
+     * #1334: the success path used to write back the <em>snapshot</em> it had read
+     * before the Argon2 verification, with that snapshot's version bumping to
+     * {@code version + 1}. Any concurrent write in that window made the
+     * version-guarded UPDATE match zero rows and a correct password was answered
+     * with 409 CONCURRENT_MODIFICATION. The write must now be built from a locked
+     * re-read, and the account gates must be re-checked on it.
+     */
+    @Nested
+    @DisplayName("Successful login concurrency (#1334)")
+    class SuccessfulLoginConcurrency {
+
+        @Test
+        @DisplayName("writes the version of the locked row, not of the stale snapshot")
+        void writesVersionOfTheLockedRow() {
+            User snapshot = buildUserWithVersion(0, null, UserStatus.ACTIVE, 0);
+            // Another login committed in between: the locked row is one version ahead.
+            User locked = buildUserWithVersion(0, null, UserStatus.ACTIVE, 1);
+            when(userRepository.findByTenantIdAndUsername(TENANT_ID, "admin")).thenReturn(Optional.of(snapshot));
+            when(passwordHasher.verify("correct", PASSWORD_HASH)).thenReturn(true);
+            when(userRepository.findByIdForUpdate(USER_ID)).thenReturn(Optional.of(locked));
+            when(sessionService.createSession(any())).thenReturn(new SessionToken("sess", "csrf"));
+
+            service.login("admin", "correct", "req-1");
+
+            ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+            verify(userRepository).update(captor.capture());
+            assertThat(captor.getValue().version())
+                    .as("version written must follow the locked row (1+1), not the snapshot (0+1)").isEqualTo(2);
+        }
+
+        @Test
+        @DisplayName("refuses the login when the account was disabled while the password was being verified")
+        void refusesWhenDisabledMidLogin() {
+            User snapshot = buildUser(0, null, UserStatus.ACTIVE);
+            User locked = buildUser(0, null, UserStatus.DISABLED);
+            when(userRepository.findByTenantIdAndUsername(TENANT_ID, "admin")).thenReturn(Optional.of(snapshot));
+            when(passwordHasher.verify("correct", PASSWORD_HASH)).thenReturn(true);
+            when(userRepository.findByIdForUpdate(USER_ID)).thenReturn(Optional.of(locked));
+
+            assertThatThrownBy(() -> service.login("admin", "correct", "req-1"))
+                    .isInstanceOf(AuthenticationException.class).hasMessage(AuthenticationService.LOGIN_FAILED);
+
+            verify(sessionService, never()).createSession(any());
+            verify(userRepository, never()).update(any());
+        }
+
+        @Test
+        @DisplayName("refuses the login when a fresh lock landed while the password was being verified")
+        void refusesWhenLockedMidLogin() {
+            User snapshot = buildUser(0, null, UserStatus.ACTIVE);
+            User locked = buildUser(5, Instant.now().plus(Duration.ofHours(1)), UserStatus.LOCKED);
+            when(userRepository.findByTenantIdAndUsername(TENANT_ID, "admin")).thenReturn(Optional.of(snapshot));
+            when(passwordHasher.verify("correct", PASSWORD_HASH)).thenReturn(true);
+            when(userRepository.findByIdForUpdate(USER_ID)).thenReturn(Optional.of(locked));
+
+            assertThatThrownBy(() -> service.login("admin", "correct", "req-1"))
+                    .isInstanceOf(AuthenticationException.class).hasMessage(AuthenticationService.LOGIN_FAILED);
+
+            verify(sessionService, never()).createSession(any());
+        }
+
+        @Test
+        @DisplayName("writes the rehashed password through the same locked read")
+        void writesRehashedPasswordThroughTheLockedRead() {
+            byte[] upgraded = "upgraded".getBytes();
+            User snapshot = buildActiveUser();
+            User locked = buildActiveUser();
+            when(userRepository.findByTenantIdAndUsername(TENANT_ID, "admin")).thenReturn(Optional.of(snapshot));
+            when(passwordHasher.verify("correct", PASSWORD_HASH)).thenReturn(true);
+            when(passwordHasher.needsRehash(PASSWORD_HASH)).thenReturn(true);
+            when(passwordHasher.hash("correct")).thenReturn(upgraded);
+            when(userRepository.findByIdForUpdate(USER_ID)).thenReturn(Optional.of(locked));
+            when(sessionService.createSession(any())).thenReturn(new SessionToken("sess", "csrf"));
+
+            service.login("admin", "correct", "req-1");
+
+            ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+            verify(userRepository).update(captor.capture());
+            assertThat(captor.getValue().passwordHash()).isEqualTo(upgraded);
+        }
+
+        @Test
+        @DisplayName("does not revert a password change that landed while the password was being verified")
+        void doesNotRevertAPasswordChangeThatLandedMidLogin() {
+            byte[] upgraded = "upgraded".getBytes();
+            byte[] changedUnderUs = "changed-under-us".getBytes();
+            User snapshot = buildActiveUser();
+            // The user changed their password after we read the snapshot but before we
+            // took the row lock: the rehash we computed against the OLD hash must not
+            // overwrite the new one.
+            User locked = new User(USER_ID, TENANT_ID, "admin", "Admin User", changedUnderUs, UserRole.SYSTEM_ADMIN,
+                    UserStatus.ACTIVE, true, 0, null, null, 1, Instant.now(), Instant.now());
+            when(userRepository.findByTenantIdAndUsername(TENANT_ID, "admin")).thenReturn(Optional.of(snapshot));
+            when(passwordHasher.verify("correct", PASSWORD_HASH)).thenReturn(true);
+            when(passwordHasher.needsRehash(PASSWORD_HASH)).thenReturn(true);
+            when(passwordHasher.hash("correct")).thenReturn(upgraded);
+            when(userRepository.findByIdForUpdate(USER_ID)).thenReturn(Optional.of(locked));
+            when(sessionService.createSession(any())).thenReturn(new SessionToken("sess", "csrf"));
+
+            service.login("admin", "correct", "req-1");
+
+            ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+            verify(userRepository).update(captor.capture());
+            assertThat(captor.getValue().passwordHash())
+                    .as("the concurrent password change must survive the login that started before it")
+                    .isEqualTo(changedUnderUs);
         }
     }
 
@@ -313,7 +430,11 @@ class AuthenticationServiceTest {
     }
 
     private User buildUser(int failedCount, Instant lockedUntil, UserStatus status) {
+        return buildUserWithVersion(failedCount, lockedUntil, status, 0);
+    }
+
+    private User buildUserWithVersion(int failedCount, Instant lockedUntil, UserStatus status, long version) {
         return new User(USER_ID, TENANT_ID, "admin", "Admin User", PASSWORD_HASH, UserRole.SYSTEM_ADMIN, status, true,
-                failedCount, lockedUntil, null, 0, Instant.now(), Instant.now());
+                failedCount, lockedUntil, null, version, Instant.now(), Instant.now());
     }
 }
