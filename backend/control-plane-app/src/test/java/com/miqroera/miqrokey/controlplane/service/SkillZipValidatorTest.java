@@ -465,6 +465,119 @@ class SkillZipValidatorTest {
         assertCode(bytes(first, second, cd, rawEocd(2, cd.length, first.length + second.length)), "SKILL_ZIP_INVALID");
     }
 
+    @Test
+    @DisplayName("counter-control: CD records order-reversed (offsets intact) are accepted (#1242 r2 P1)")
+    void counterControlReversedCentralDirectoryAccepted() {
+        // Extractors resolve each directory record through its relative local
+        // header offset, never through record position: python's zipfile,
+        // java.util.zip.ZipFile and .NET all read this package, and the old
+        // index-based pairing refused it (regression found in review r2).
+        assertThat(SkillZipValidator.validate(rawHonestDeflateReversedCd()).name()).isEqualTo("web-scraper");
+    }
+
+    @Test
+    @DisplayName("fail-closed: reversed CD order with a broken offset is still rejected (#1242 r2 P1)")
+    void reversedCentralDirectoryBrokenOffsetRejected() {
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] asset = "hello asset\n".repeat(100).getBytes(StandardCharsets.UTF_8);
+        byte[] assetDef = deflate(asset);
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
+        byte[] second = bytes(
+                rawLocal("web-scraper/assets/note.txt", 8, 0, crc32(asset), assetDef.length, asset.length), assetDef);
+        // The record that describes note.txt points at SKILL.md's header (offset 0):
+        // pairing by offset must refuse it on the field comparison.
+        byte[] cd = bytes(rawCd("web-scraper/assets/note.txt", 8, 0, crc32(asset), assetDef.length, asset.length, 0),
+                rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, first.length));
+        assertCode(bytes(first, second, cd, rawEocd(2, cd.length, first.length + second.length)),
+                "SKILL_ZIP_STRUCTURE_INVALID");
+        // Two records claiming one offset: the pairing is no longer a bijection.
+        byte[] dup = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
+                rawCd("web-scraper/assets/note.txt", 8, 0, crc32(asset), assetDef.length, asset.length, 0));
+        assertCode(bytes(first, second, dup, rawEocd(2, dup.length, first.length + second.length)),
+                "SKILL_ZIP_STRUCTURE_INVALID");
+    }
+
+    @Test
+    @DisplayName("counter-control: an unsigned descriptor whose CRC32 equals the signature value is accepted (#1242 r2 P2a)")
+    void unsignedDescriptorCrcEqualsExtSigAccepted() {
+        // The entry's real CRC32 is 0x08074b50 — the very value marking a signed
+        // descriptor. The old reader took it as the signature and misread the
+        // descriptor; python, java.util.zip.ZipFile and .NET all read this package.
+        assertThat(crc32(crcExtSigPayload())).isEqualTo(0x08074B50L);
+        byte[] pkg = descriptorPackage(false, 0x08074B50L);
+
+        assertThat(SkillZipValidator.validate(pkg).name()).isEqualTo("web-scraper");
+    }
+
+    @Test
+    @DisplayName("counter-control: a signed descriptor whose CRC value equals the signature is still read as signed (#1242 r2 P2a)")
+    void signedDescriptorCrcEqualsExtSigAccepted() {
+        // The mirror case: a genuine 16-byte signed descriptor whose CRC field and
+        // signature word are both 0x08074b50. The signed reading is adopted only
+        // after its values are checked against the inflated bytes, so it wins over
+        // the (also self-consistent-looking) unsigned reading of its prefix.
+        assertThat(crc32(crcExtSigPayload())).isEqualTo(0x08074B50L);
+        byte[] pkg = descriptorPackage(true, 0x08074B50L);
+
+        assertThat(SkillZipValidator.validate(pkg).name()).isEqualTo("web-scraper");
+    }
+
+    @Test
+    @DisplayName("fail-closed: a descriptor matching neither spelling is still rejected (#1242 r2 P2a)")
+    void descriptorInconsistentBothSpellingsRejected() {
+        assertThat(crc32(crcExtSigPayload())).isEqualTo(0x08074B50L);
+        // Signed spelling present but the CRC value is wrong; the unsigned reading
+        // of the same bytes (signature word as CRC, then the real CRC as the size)
+        // is inconsistent too.
+        assertCode(descriptorPackage(true, 0xB0B0B0B0L), "SKILL_ZIP_STRUCTURE_INVALID");
+        // No signature word and a wrong CRC: neither reading fits.
+        assertCode(descriptorPackage(false, 0xB0B0B0B0L), "SKILL_ZIP_STRUCTURE_INVALID");
+    }
+
+    @Test
+    @DisplayName("counter-control: max EOCD comment plus max trailing padding is accepted (#1242 r2 P2b)")
+    void eocdCommentPlusMaxPaddingAccepted() {
+        // A 65535-byte comment (the record's field maximum) followed by 65535
+        // bytes of block padding pushes the true EOCD 22+65535+65535 bytes from
+        // the end — beyond the old 22+65535 search window, so the record was "not
+        // found". .NET reads this combination (review r2).
+        byte[] comment = new byte[0xFFFF];
+        java.util.Arrays.fill(comment, (byte) 'c');
+        byte[] pkg = bytes(rawHonestDeflateWithComment(comment), new byte[0xFFFF]);
+
+        assertThat(SkillZipValidator.validate(pkg).name()).isEqualTo("web-scraper");
+    }
+
+    @Test
+    @DisplayName("counter-control: an EOCD comment containing the EOCD signature bytes is accepted (#1242 r2 P2b)")
+    void eocdCommentContainingEocdSignatureAccepted() {
+        // The bytes a record's comment-length field declares are comment data:
+        // the EOCD signature may appear among them without being a second record.
+        // java.util.zip.ZipFile and .NET read this package; the old scan started
+        // right after the record and refused the bare signature.
+        byte[] comment = bytes("note".getBytes(StandardCharsets.UTF_8), le32(0x06054B50L));
+        byte[] pkg = rawHonestDeflateWithComment(comment);
+
+        assertThat(SkillZipValidator.validate(pkg).name()).isEqualTo("web-scraper");
+    }
+
+    @Test
+    @DisplayName("fail-closed: a second EOCD inside the trailing padding is still rejected (#1242 r2 P2b)")
+    void secondEocdInsidePaddingStillRejected() {
+        byte[] pkg = rawHonestDeflate();
+        byte[] eocdRecord = java.util.Arrays.copyOfRange(pkg, pkg.length - 22, pkg.length);
+        // A bare signature deep in the padding: the search window now reaches it,
+        // and its garbage record fields refuse the package.
+        assertCode(bytes(pkg, new byte[30000], le32(0x06054B50L), new byte[30000]), "SKILL_ZIP_STRUCTURE_INVALID");
+        // A full record copy deep in the padding: the later signature becomes the
+        // chosen record and no longer abuts the central directory.
+        assertCode(bytes(pkg, new byte[30000], eocdRecord, new byte[30000]), "SKILL_ZIP_STRUCTURE_INVALID");
+        // A bare signature in the last 21 bytes, past the backward scan's reach:
+        // the padding-region uniqueness scan is what must refuse it.
+        assertCode(bytes(pkg, new byte[30000], le32(0x06054B50L), new byte[2]), "SKILL_ZIP_STRUCTURE_INVALID");
+    }
+
     private static void assertStructureRejected(byte[] pkg, String what) {
         assertCode(pkg, "SKILL_ZIP_STRUCTURE_INVALID", what);
     }
@@ -596,6 +709,10 @@ class SkillZipValidatorTest {
     }
 
     private static byte[] rawHonestDeflate() {
+        return rawHonestDeflateWithComment(new byte[0]);
+    }
+
+    private static byte[] rawHonestDeflateWithComment(byte[] comment) {
         byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
         byte[] mdDef = deflate(md);
         byte[] asset = "hello asset\n".repeat(100).getBytes(StandardCharsets.UTF_8);
@@ -605,6 +722,23 @@ class SkillZipValidatorTest {
                 rawLocal("web-scraper/assets/note.txt", 8, 0, crc32(asset), assetDef.length, asset.length), assetDef);
         byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
                 rawCd("web-scraper/assets/note.txt", 8, 0, crc32(asset), assetDef.length, asset.length, first.length));
+        return bytes(first, second, cd, rawEocd(2, cd.length, first.length + second.length, comment));
+    }
+
+    /** rawHonestDeflate() with the two central-directory records order-reversed. */
+    private static byte[] rawHonestDeflateReversedCd() {
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] asset = "hello asset\n".repeat(100).getBytes(StandardCharsets.UTF_8);
+        byte[] assetDef = deflate(asset);
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
+        byte[] second = bytes(
+                rawLocal("web-scraper/assets/note.txt", 8, 0, crc32(asset), assetDef.length, asset.length), assetDef);
+        // The spec ties records to local headers by the offset field, not by
+        // position: reversing the records must not change the verdict.
+        byte[] cd = bytes(
+                rawCd("web-scraper/assets/note.txt", 8, 0, crc32(asset), assetDef.length, asset.length, first.length),
+                rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0));
         return bytes(first, second, cd, rawEocd(2, cd.length, first.length + second.length));
     }
 
@@ -641,6 +775,38 @@ class SkillZipValidatorTest {
 
     private static byte[] rawDescriptor(long crc, long csize, long usize) {
         return bytes(le32(0x08074B50L), le32(crc), le32(csize), le32(usize));
+    }
+
+    /**
+     * Payload whose CRC32 is exactly 0x08074b50, the data-descriptor signature
+     * value: the 36 ASCII bytes plus a 4-byte suffix found by solving the CRC32
+     * recurrence over GF(2) (the tests re-assert the CRC, so the constant is
+     * self-checking).
+     */
+    private static byte[] crcExtSigPayload() {
+        return bytes("web-scraper/assets/note.txt: payload ".getBytes(StandardCharsets.UTF_8),
+                new byte[]{(byte) 0x99, (byte) 0xBB, (byte) 0x4D, (byte) 0xC6});
+    }
+
+    /**
+     * rawHonestDeflate()-shaped package with a bit-3 note.txt entry whose CRC32 is
+     * 0x08074b50 and the given descriptor spelling (signed = 16 bytes with the
+     * 0x08074b50 signature word, unsigned = 12 bytes); {@code descriptorCrc} is the
+     * descriptor's first CRC value, which the honest tests set to the real one.
+     */
+    private static byte[] descriptorPackage(boolean signed, long descriptorCrc) {
+        byte[] content = crcExtSigPayload();
+        byte[] contentDef = deflate(content);
+        byte[] descriptor = signed
+                ? bytes(le32(0x08074B50L), le32(descriptorCrc), le32(contentDef.length), le32(content.length))
+                : bytes(le32(descriptorCrc), le32(contentDef.length), le32(content.length));
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
+        byte[] second = bytes(rawLocal("web-scraper/assets/note.txt", 8, 8, 0, 0, 0), contentDef, descriptor);
+        byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0), rawCd(
+                "web-scraper/assets/note.txt", 8, 8, crc32(content), contentDef.length, content.length, first.length));
+        return bytes(first, second, cd, rawEocd(2, cd.length, first.length + second.length));
     }
 
     private static byte[] rawCd(String name, int method, int flags, long crc, long csize, long usize, long offset) {
