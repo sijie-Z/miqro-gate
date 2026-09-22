@@ -272,11 +272,16 @@ describe('NextAdminWebhooksView', () => {
       const wrapper = mountView();
       await flushPromises();
 
-      const toggle = wrapper.find('[data-testid="webhook-toggle"]');
-      expect(toggle.exists(), 'enable/disable toggle should render').toBe(true);
+      // Locate by row text + button label rather than by `data-testid="webhook-toggle"`:
+      // that testid is introduced by the fix, so keying on it would make this test fail on
+      // the unfixed revision at the selector, not at the call count it is meant to prove.
+      const row = wrapper.findAll('tr').find((r) => r.text().includes('ops-alerts'));
+      expect(row, 'endpoint row should render').toBeDefined();
+      const toggle = row!.findAll('button').find((b) => ['停用', '启用'].includes(b.text()));
+      expect(toggle, 'enable/disable toggle should render').toBeDefined();
 
-      await toggle.trigger('click');
-      await toggle.trigger('click');
+      await toggle!.trigger('click');
+      await toggle!.trigger('click');
       await flushPromises();
 
       expect(mockApi.updateWebhook).toHaveBeenCalledTimes(1);
