@@ -7,6 +7,8 @@ import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.zip.CRC32;
+import java.util.zip.Deflater;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -301,6 +303,321 @@ class SkillZipValidatorTest {
         }
 
         assertThat(SkillZipValidator.validate(out.toByteArray()).name()).isEqualTo("web-scraper");
+    }
+
+    // ------------------------------------------------------------------
+    // #1242: the local-header stream and the central directory must describe
+    // the same entries. The three forms below are hand-assembled zips whose
+    // two views disagree; mainstream extractors (python zipfile, .NET,
+    // PowerShell Expand-Archive) follow the central directory and inflate
+    // ~640 MiB from a ~650 KB package, while a local-header walker (the
+    // pre-#1242 validator) sees ~650 KB and accepts. Each must be refused
+    // fail-closed; the raw honest controls (sizes upfront, no data
+    // descriptor — what python's zipfile writes) must still be accepted.
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("form A: local STORED / central directory DEFLATED divergence is rejected (#1242)")
+    void formARejected() {
+        assertStructureRejected(formA(), "form A (views disagree on method/size)");
+    }
+
+    @Test
+    @DisplayName("form B: central directory offset into an embedded fake local header is rejected (#1242)")
+    void formBRejected() {
+        assertStructureRejected(formB(), "form B (ghost local header inside carrier data)");
+    }
+
+    @Test
+    @DisplayName("form C: a second (evil) central directory next to the EOCD is rejected (#1242)")
+    void formCRejected() {
+        assertStructureRejected(formC(), "form C (double central directory)");
+    }
+
+    @Test
+    @DisplayName("fail-closed: zip64 markers are refused (#1242)")
+    void zip64Rejected() {
+        byte[] base = rawHonestDeflate();
+        byte[] upToEocd = java.util.Arrays.copyOf(base, base.length - 22);
+        byte[] eocd = java.util.Arrays.copyOfRange(base, base.length - 22, base.length);
+        byte[] locator = bytes(le32(0x07064B50L), le32(0), le32(8), le32(1));
+        assertCode(bytes(upToEocd, locator, eocd), "SKILL_ZIP64_UNSUPPORTED");
+    }
+
+    @Test
+    @DisplayName("fail-closed: a multi-disk archive is refused (#1242)")
+    void multiDiskRejected() {
+        byte[] pkg = rawHonestDeflate();
+        pkg[pkg.length - 22 + 4] = 1; // EOCD disk number
+        assertCode(pkg, "SKILL_ZIP_STRUCTURE_INVALID");
+    }
+
+    @Test
+    @DisplayName("fail-closed: a STORED entry with a data descriptor is refused (#1242)")
+    void storedWithDescriptorRejected() {
+        // Impossible to locate where a stored entry's data ends without trusting
+        // the very fields the descriptor is supposed to verify.
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] local = rawLocal("web-scraper/SKILL.md", 0, 8, 0, 0, 0);
+        byte[] cd = rawCd("web-scraper/SKILL.md", 0, 8, crc32(md), md.length, md.length, 0);
+        assertCode(bytes(local, md, rawDescriptor(crc32(md), md.length, md.length), cd,
+                rawEocd(1, cd.length, local.length + md.length + 16)), "SKILL_ZIP_STRUCTURE_INVALID");
+    }
+
+    @Test
+    @DisplayName("fail-closed: bytes appended after the EOCD make the trailer unverifiable and are refused (#1242)")
+    void trailingBytesAfterEocdRejected() {
+        assertCode(bytes(rawHonestDeflate(), new byte[] { (byte) 0xDE, (byte) 0xAD, (byte) 0xBE, (byte) 0xEF }),
+                "SKILL_ZIP_INVALID");
+    }
+
+    private static void assertStructureRejected(byte[] pkg, String what) {
+        assertCode(pkg, "SKILL_ZIP_STRUCTURE_INVALID", what);
+    }
+
+    private static void assertCode(byte[] pkg, String expectedCode) {
+        assertCode(pkg, expectedCode, expectedCode);
+    }
+
+    private static void assertCode(byte[] pkg, String expectedCode, String what) {
+        assertThatThrownBy(() -> SkillZipValidator.validate(pkg)).as("%s must be rejected", what)
+                .isInstanceOf(SkillValidationException.class).satisfies(thrown -> assertThat(
+                        ((SkillValidationException) thrown).code()).isEqualTo(expectedCode));
+    }
+
+    @Test
+    @DisplayName("counter-control: an honest raw package (sizes upfront, DEFLATED) is accepted (#1242)")
+    void rawHonestDeflateAccepted() {
+        assertThat(SkillZipValidator.validate(rawHonestDeflate()).name()).isEqualTo("web-scraper");
+    }
+
+    @Test
+    @DisplayName("counter-control: an honest raw package with STORED entries is accepted (#1242)")
+    void rawHonestStoredAccepted() {
+        assertThat(SkillZipValidator.validate(rawHonestStored()).name()).isEqualTo("web-scraper");
+    }
+
+    @Test
+    @DisplayName("counter-control: honest directory entry + EOCD comment is accepted (#1242)")
+    void rawHonestDirectoryAndCommentAccepted() {
+        assertThat(SkillZipValidator.validate(rawHonestDirComment()).name()).isEqualTo("web-scraper");
+    }
+
+    // --- raw zip construction (#1242): full control over both views ---
+
+    /** 640 MiB of zeros, raw-deflated; ~650 KB on the wire. Built once. */
+    private static final class Payload {
+        static final int SIZE = 640 * 1024 * 1024;
+        static final byte[] DEFLATE;
+        static final long CRC;
+
+        static {
+            try {
+                Deflater deflater = new Deflater(Deflater.BEST_COMPRESSION, true);
+                try {
+                    CRC32 crc = new CRC32();
+                    ByteArrayOutputStream out = new ByteArrayOutputStream();
+                    byte[] chunk = new byte[1024 * 1024];
+                    byte[] buf = new byte[64 * 1024];
+                    for (int i = 0; i < SIZE / chunk.length; i++) {
+                        crc.update(chunk);
+                        deflater.setInput(chunk);
+                        while (!deflater.needsInput()) {
+                            int n = deflater.deflate(buf);
+                            if (n > 0) {
+                                out.write(buf, 0, n);
+                            }
+                        }
+                    }
+                    deflater.finish();
+                    while (!deflater.finished()) {
+                        int n = deflater.deflate(buf);
+                        if (n > 0) {
+                            out.write(buf, 0, n);
+                        }
+                    }
+                    DEFLATE = out.toByteArray();
+                    CRC = crc.getValue();
+                } finally {
+                    deflater.end();
+                }
+            } catch (Exception e) {
+                throw new ExceptionInInitializerError(e);
+            }
+        }
+    }
+
+    private static byte[] formA() {
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] skillEntry = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length),
+                mdDef);
+        byte[] payloadData = Payload.DEFLATE;
+        // Local view: STORED, self-consistent, CRC over the raw (compressed) bytes.
+        byte[] payloadEntry = bytes(
+                rawLocal("web-scraper/payload.bin", 0, 0, crc32(payloadData), payloadData.length,
+                        payloadData.length),
+                payloadData);
+        // CD view: DEFLATED, inflating to 640 MiB.
+        byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
+                rawCd("web-scraper/payload.bin", 8, 0, Payload.CRC, payloadData.length, Payload.SIZE,
+                        skillEntry.length));
+        return bytes(skillEntry, payloadEntry, cd, rawEocd(2, cd.length, skillEntry.length + payloadEntry.length));
+    }
+
+    private static byte[] formB() {
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] skillEntry = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length),
+                mdDef);
+        String carrierName = "web-scraper/asset.bin";
+        byte[] fakeLocal = rawLocal("web-scraper/payload.bin", 8, 0, Payload.CRC, Payload.DEFLATE.length,
+                Payload.SIZE);
+        byte[] carrierData = bytes(fakeLocal, Payload.DEFLATE);
+        byte[] carrierEntry = bytes(
+                rawLocal(carrierName, 0, 0, crc32(carrierData), carrierData.length, carrierData.length),
+                carrierData);
+        long fakeOffset = skillEntry.length + rawLocal(carrierName, 0, 0, 0, 0, 0).length;
+        byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
+                rawCd("web-scraper/payload.bin", 8, 0, Payload.CRC, Payload.DEFLATE.length, Payload.SIZE,
+                        fakeOffset));
+        return bytes(skillEntry, carrierEntry, cd, rawEocd(2, cd.length, skillEntry.length + carrierEntry.length));
+    }
+
+    private static byte[] formC() {
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] skillEntry = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length),
+                mdDef);
+        String name = "web-scraper/data.bin";
+        byte[] fakeLocal = rawLocal(name, 8, 0, Payload.CRC, Payload.DEFLATE.length, Payload.SIZE);
+        byte[] carrierData = bytes(fakeLocal, Payload.DEFLATE);
+        byte[] carrierEntry = bytes(rawLocal(name, 0, 0, crc32(carrierData), carrierData.length, carrierData.length),
+                carrierData);
+        long fakePos = skillEntry.length + rawLocal(name, 0, 0, 0, 0, 0).length;
+        byte[] cdHonest = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
+                rawCd(name, 0, 0, crc32(carrierData), carrierData.length, carrierData.length, skillEntry.length));
+        // python's zipfile reads the CD at cdOffset + concat and adds concat to every
+        // header_offset (concat = EOCD_pos - cdSize - cdOffset); with two equal-length
+        // CDs that lands on the evil one, so its offset is pre-subtracted.
+        byte[] cdEvil = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
+                rawCd(name, 8, 0, Payload.CRC, Payload.DEFLATE.length, Payload.SIZE, fakePos - cdHonest.length));
+        if (cdHonest.length != cdEvil.length) {
+            throw new IllegalStateException("form C needs equal-length central directories");
+        }
+        return bytes(skillEntry, carrierEntry, cdHonest, cdEvil,
+                rawEocd(2, cdHonest.length, skillEntry.length + carrierEntry.length));
+    }
+
+    private static byte[] rawHonestDeflate() {
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] asset = "hello asset\n".repeat(100).getBytes(StandardCharsets.UTF_8);
+        byte[] assetDef = deflate(asset);
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
+        byte[] second = bytes(rawLocal("web-scraper/assets/note.txt", 8, 0, crc32(asset), assetDef.length,
+                asset.length), assetDef);
+        byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
+                rawCd("web-scraper/assets/note.txt", 8, 0, crc32(asset), assetDef.length, asset.length,
+                        first.length));
+        return bytes(first, second, cd, rawEocd(2, cd.length, first.length + second.length));
+    }
+
+    private static byte[] rawHonestStored() {
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] asset = "hello asset\n".repeat(100).getBytes(StandardCharsets.UTF_8);
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 0, 0, crc32(md), md.length, md.length), md);
+        byte[] second = bytes(rawLocal("web-scraper/assets/note.txt", 0, 0, crc32(asset), asset.length,
+                asset.length), asset);
+        byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 0, 0, crc32(md), md.length, md.length, 0),
+                rawCd("web-scraper/assets/note.txt", 0, 0, crc32(asset), asset.length, asset.length,
+                        first.length));
+        return bytes(first, second, cd, rawEocd(2, cd.length, first.length + second.length));
+    }
+
+    private static byte[] rawHonestDirComment() {
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
+        byte[] dir = rawLocal("web-scraper/assets/", 0, 0, 0, 0, 0);
+        byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
+                rawCd("web-scraper/assets/", 0, 0, 0, 0, 0, first.length));
+        return bytes(first, dir, cd, rawEocd(2, cd.length, first.length + dir.length, "skill package".getBytes(
+                StandardCharsets.UTF_8)));
+    }
+
+    private static byte[] rawLocal(String name, int method, int flags, long crc, long csize, long usize) {
+        byte[] n = name.getBytes(StandardCharsets.UTF_8);
+        return bytes(le32(0x04034B50L), le16(20), le16(flags), le16(method), le16(0), le16(0), le32(crc),
+                le32(csize), le32(usize), le16(n.length), le16(0), n);
+    }
+
+    private static byte[] rawDescriptor(long crc, long csize, long usize) {
+        return bytes(le32(0x08074B50L), le32(crc), le32(csize), le32(usize));
+    }
+
+    private static byte[] rawCd(String name, int method, int flags, long crc, long csize, long usize,
+            long offset) {
+        byte[] n = name.getBytes(StandardCharsets.UTF_8);
+        return bytes(le32(0x02014B50L), le16(20), le16(20), le16(flags), le16(method), le16(0), le16(0),
+                le32(crc), le32(csize), le32(usize), le16(n.length), le16(0), le16(0), le16(0), le16(0),
+                le32(0), le32(offset), n);
+    }
+
+    private static byte[] rawEocd(int count, long cdSize, long cdOffset) {
+        return rawEocd(count, cdSize, cdOffset, new byte[0]);
+    }
+
+    private static byte[] rawEocd(int count, long cdSize, long cdOffset, byte[] comment) {
+        return bytes(le32(0x06054B50L), le16(0), le16(0), le16(count), le16(count), le32(cdSize),
+                le32(cdOffset), le16(comment.length), comment);
+    }
+
+    private static byte[] le16(int value) {
+        return new byte[] { (byte) value, (byte) (value >> 8) };
+    }
+
+    private static byte[] le32(long value) {
+        return new byte[] { (byte) value, (byte) (value >> 8), (byte) (value >> 16), (byte) (value >> 24) };
+    }
+
+    private static byte[] bytes(byte[]... parts) {
+        int length = 0;
+        for (byte[] part : parts) {
+            length += part.length;
+        }
+        byte[] out = new byte[length];
+        int at = 0;
+        for (byte[] part : parts) {
+            System.arraycopy(part, 0, out, at, part.length);
+            at += part.length;
+        }
+        return out;
+    }
+
+    private static byte[] deflate(byte[] data) {
+        Deflater deflater = new Deflater(Deflater.BEST_COMPRESSION, true);
+        try {
+            deflater.setInput(data);
+            deflater.finish();
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            while (!deflater.finished()) {
+                int n = deflater.deflate(buf);
+                if (n > 0) {
+                    out.write(buf, 0, n);
+                }
+            }
+            return out.toByteArray();
+        } finally {
+            deflater.end();
+        }
+    }
+
+    private static long crc32(byte[] data) {
+        CRC32 crc = new CRC32();
+        crc.update(data);
+        return crc.getValue();
     }
 
     private static byte[] zipOf(TestEntry... entries) throws Exception {
