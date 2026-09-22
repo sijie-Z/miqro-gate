@@ -14,6 +14,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -21,9 +22,18 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
+import java.sql.Connection;
+import java.sql.Statement;
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -162,6 +172,81 @@ class ContextRegistryIntegrationTest {
         // Authorization; a blank credential expresses "missing" and must 401.
         webTestClient.get().uri("/v1/context-registry").header("Authorization", "").exchange().expectStatus()
                 .isUnauthorized();
+    }
+
+    /**
+     * #1400: {@code REGISTRY_TIMEOUT} bounds only how long the caller waits, so on
+     * its own it leaves the blocking read running — and its scheduler lane checked
+     * out — until PostgreSQL answers. The read now carries a statement bound
+     * strictly inside it, so a stalled query is <em>aborted</em> rather than merely
+     * stopped-waiting-for.
+     *
+     * <p>
+     * The two behaviours are told apart by <em>when</em> the caller is answered.
+     * Occupy every lane of the shared four-lane pool with reads that are genuinely
+     * stuck behind a table lock, then require each caller to be answered before
+     * {@code
+     * REGISTRY_TIMEOUT}: only an abort can answer early, and an abort is exactly
+     * what hands the lane back. Without the statement bound all four are parked in
+     * the socket read and can only surface when the reactor timer expires at the
+     * full timeout.
+     * </p>
+     */
+    @Test
+    @DisplayName("#1400: a table lock aborts the read at the statement bound instead of parking every lane")
+    void statementBoundAbortsTheReadAndFreesTheLanes() throws Exception {
+        int lanes = 4;
+        long reactorBoundMillis = 10_000;
+        long mustBeAnsweredBefore = reactorBoundMillis - 1_000;
+
+        DriverManagerDataSource admin = new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(),
+                POSTGRES.getPassword());
+        List<Long> elapsedMillis;
+        try (Connection held = admin.getConnection()) {
+            held.setAutoCommit(false);
+            try (Statement lock = held.createStatement()) {
+                lock.execute("LOCK TABLE project_repositories IN ACCESS EXCLUSIVE MODE");
+            }
+            elapsedMillis = probeConcurrently(lanes, GatewayTestKeys.DEFAULT_KEY.presented());
+            held.rollback();
+        }
+
+        assertThat(elapsedMillis).as("every lane must be answered at the statement bound, not the reactor bound")
+                .allSatisfy(ms -> assertThat(ms).isLessThan(mustBeAnsweredBefore));
+
+        // And the lane came back rather than lingering: the same read succeeds now.
+        assertThat(fetchEntries(GatewayTestKeys.DEFAULT_KEY.presented())).hasSize(1);
+    }
+
+    /**
+     * Fires {@code n} registry reads at once, asserting each is a {@code 503}, and
+     * returns their wall times.
+     */
+    private List<Long> probeConcurrently(int n, String presented) throws Exception {
+        // The autowired client gives up after 5s; both outcomes under test are slower
+        // than
+        // that, so the client bound would mask which server-side bound ended the read.
+        WebTestClient client = webTestClient.mutate().responseTimeout(Duration.ofSeconds(60)).build();
+        List<Callable<Long>> probes = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            probes.add(() -> {
+                long start = System.nanoTime();
+                client.get().uri("/v1/context-registry").header("Authorization", "Bearer " + presented).exchange()
+                        .expectStatus().isEqualTo(HttpStatus.SERVICE_UNAVAILABLE).expectBody().jsonPath("$.error.type")
+                        .isEqualTo("context_registry_unavailable");
+                return Duration.ofNanos(System.nanoTime() - start).toMillis();
+            });
+        }
+        ExecutorService pool = Executors.newFixedThreadPool(n);
+        try {
+            List<Long> out = new ArrayList<>();
+            for (Future<Long> probe : pool.invokeAll(probes)) {
+                out.add(probe.get(120, TimeUnit.SECONDS));
+            }
+            return out;
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
     @SuppressWarnings("unchecked")
