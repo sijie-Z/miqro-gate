@@ -1,6 +1,12 @@
 {
   "extends": "@vue/tsconfig/tsconfig.dom.json",
   "compilerOptions": {
+    // Raise the ES floor above @vue/tsconfig's ES2020 default: the app ships to
+    // Vite 8's "baseline-widely-available" browsers (chrome111 / edge111 /
+    // firefox114 / safari16.4), which all support the ES2022 built-ins
+    // (.at(), Object.hasOwn, findLast, Error.cause). @types/node >= 23 dropped
+    // its ES2022 .at() compat shim, so `Array#at` must come from the real lib.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "composite": true,
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
     "baseUrl": ".",
