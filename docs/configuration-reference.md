@@ -225,7 +225,7 @@ Gateway 使用版本化只读路由快照 + 有界用量写入队列（G2.2/G2.4
 | `MIQROKEY_MODEL_SYNC_INTERVAL` | `PT6H` | 模型目录同步（**预留：当前版本未读取**——真实旋钮为 `miqrokey.model-catalog.reprobe.*`） |
 | `miqrokey.quota.refresh-interval-ms` | `900000` | **实际生效**：配额/余额快照定时刷新周期（`QuotaSnapshotService` @Scheduled，毫秒） |
 | `miqrokey.model-catalog.reprobe.*` | 默认关 | **实际生效**：模型目录定期重探（#350 交付；enabled/interval 等子键） |
-| `MIQROKEY_PRICE_CATALOG_PATH` | `/etc/miqrokey/prices` | 版本化价格目录 |
+| `MIQROKEY_PRICE_CATALOG_PATH` | `/etc/miqrokey/prices` | 版本化价格目录（**预留：当前版本未读取**——实现无文件型价格目录；真实价源为 §5 的 `MIQROKEY_PRICE_SYNC_URL`） |
 | `MIQROKEY_EXPORT_MAX_RANGE` | `P93D` | 单次导出最大时间窗（**预留：当前版本未读取**——实现硬编码 93 天，与 api-contract 一致；#733 更正，原文档误写 `P366D` 且不可配） |
 | `MIQROKEY_EXPORT_LINK_TTL` | `PT24H` | 下载链接到期（**预留：当前版本未读取**——实现硬编码 24 小时；#733 更正，原文档误写 `PT1H` 且不可配） |
 
