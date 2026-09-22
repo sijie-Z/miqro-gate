@@ -11,8 +11,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.zip.CRC32;
 import java.util.zip.DataFormatException;
 import java.util.zip.Inflater;
@@ -81,8 +83,19 @@ public final class SkillZipValidator {
         String rootDir = null;
         String skillMdText = null;
         long decompressedBytes = 0;
+        Set<String> deliveredPaths = new HashSet<>();
         for (VerifiedEntry entry : verified) {
             String path = normalizedEntryPath(strictUtf8Name(entry.name()));
+            if (!deliveredPaths.add(path)) {
+                // Two entries normalizing to one delivered path (#1242 r2
+                // adversarial round): extractors disagree on which duplicate wins
+                // (python and java.util.zip.ZipFile take the directory-order-last,
+                // .NET the first, and extraction overwrites in its own order), so
+                // the bytes a user unpacks can differ from the entry this walk
+                // parsed and charged. No ordering rule can restore agreement —
+                // refused fail-closed whatever the order.
+                throw structureInvalid();
+            }
             int slash = path.indexOf('/');
             String top = slash > 0 ? path.substring(0, slash) : path;
             if (rootDir == null) {
@@ -269,10 +282,12 @@ public final class SkillZipValidator {
      */
     private static final int MAX_EOCD_COMMENT = 0xFFFF;
     /**
-     * Maximum trailing padding tolerated after the EOCD (+ comment): the block fill
-     * streaming archivers write (bsdtar/libarchive style). Bounds both how far the
-     * EOCD search must reach back and how much of the tail the second-EOCD scan
-     * must cover.
+     * Padding allowance in the EOCD search window behind a full comment
+     * ({@link #findEocd} reaches back 22 + a whole comment
+     * ({@link #MAX_EOCD_COMMENT}) + this much padding). Not an enforced per-file
+     * bound: with a shorter comment the tolerated padding grows by the unused
+     * comment allowance. The fill is the block padding streaming archivers write
+     * (bsdtar/libarchive style).
      */
     private static final int MAX_TRAILING_PADDING = 0xFFFF;
     /**
