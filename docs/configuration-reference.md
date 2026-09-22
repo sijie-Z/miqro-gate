@@ -284,7 +284,7 @@ F15 MCP 访问日志队列（网关数据面）：`miqrokey.gateway.mcp-log.capa
 
 请求前置预检（#553）在拒绝时计数 `miqrokey_gateway_context_limit_rejected_total`（零标签 counter，与 `miqrokey_gateway_requests_total` 同规矩）；命中日志只含 requestId、路径、实测字符数与阈值，不含 body 内容。
 
-上游错误体分类（ADR-0024 选项 B / #770，**只观测**）：网关对**已经缓冲**的上游非 2xx 响应体做**有界**（前 8KB）子串分类，命中即计数 `miqrokey_gateway_upstream_error_class_total{class=…}`——`class` 是**有界枚举**（`SIGNATURE_INVALID` / `THINKING_BLOCK_MISMATCH` / `MISSING_SIGNATURE` / `BUDGET_INVALID` / `UNCLASSIFIED`），符合上一段「标签不得高基数」的规矩；HTTP 状态码只进日志、**不作标签**（上游可能返回任意整数码）。同时打一行 `status=… class=…` 日志。**不重试、不改写请求、不改变响应**——客户端收到的仍是上游原字节；错误体**只读不存**（不进日志正文、不落库、不进事件），被缓冲上限截断的响应体一律记 `UNCLASSIFIED`（不从不完整片段下结论）。该计数是「签名类错误是否为稳定模式」这一判定的证据来源；升档（选项 C 的整流重试）需另行拍板。
+上游错误体分类（ADR-0024 选项 B / #770，**只观测**）：网关对**已经缓冲**的上游非 2xx 响应体做**有界**（前 8KB）子串分类，命中即计数 `miqrokey_gateway_upstream_error_class_total{class=…}`——`class` 是**有界枚举**（`SIGNATURE_INVALID` / `THINKING_BLOCK_MISMATCH` / `MISSING_SIGNATURE` / `BUDGET_INVALID` / `UNCLASSIFIED`），符合上一段「标签不得高基数」的规矩；HTTP 状态码只进日志、**不作标签**（上游可能返回任意整数码）。同时打一行 `status=… class=…` 日志。**不重试、不改写请求、不改变响应**——客户端收到的仍是上游原字节；错误体**只读不存**（不进日志正文、不落库、不进事件），被缓冲上限截断的响应体一律记 `UNCLASSIFIED`（不从不完整片段下结论）。该计数是「签名类错误是否为稳定模式」这一判定的证据来源。**升档已于 2026-09-22 拍板**（ADR-0024 转为 Accepted（部分））：实现首期**只允许 thinking / signature 整流**，且须满足该 ADR §0 的八条硬条件（白名单错误模式、仅首字节前、最多 1 次重试、不改 messages 正文、不记正文、计费语义明确、无副作用证明的供应商不整流）；**`budget_tokens` 留二期**。
 
 ## 9. Cache（ADR-0009 已启用）
 

@@ -1,9 +1,30 @@
 # ADR-0021：同产品凭证回退——多凭证切换与「每笔唯一归属」的兼容设计
 
 - 日期：2026-09-18
-- 状态：**Proposed（待所有者拍板）**——本 ADR 只给出决策点、选项、代价与建议，**不含任何已实施的代码**。文中的「建议」「推荐」均为**待 owner 裁决的提案**，不是既成结论。本文件若被 owner 否决，记录的价值等同：issue #717 允许「不做」也是有效产出。
-- 效力（仅在被 Accepted 后生效）：将修订 [CLAUDE.md](../../CLAUDE.md) §2「不自动故障切换」与 [architecture.md](../architecture.md) 的「禁止跨供应商或跨真实凭证故障切换」。**修订范围严格限定为：同一供应商产品内、首字节前、凭证级的显式回退**。跨供应商/跨产品的自动路由与故障切换维持红线不变（feature-backlog F46 维持 DECLINED）。
+- 状态：**Accepted（有条件）——2026-09-22 owner 拍板「有条件采纳」**，条件见 §0。**本文其余章节保留提出时的提案原文与论证，不代表已被逐条实现、更不代表其中的选项取舍已全部生效**；实现跟踪见 issue #704（ADR 先行）。
+- 效力（经 §0 条件限定后生效）：将修订 [CLAUDE.md](../../CLAUDE.md) §2「不自动故障切换」与 [architecture.md](../architecture.md) 的「禁止跨供应商或跨真实凭证故障切换」。**修订范围严格限定为：同一供应商产品内、首字节前、凭证级的显式回退**。跨供应商/跨产品的自动路由与故障切换维持红线不变（feature-backlog F46 维持 DECLINED）。**该修订尚未执行**，见 §0 末尾的待决项。
 - 关联：issue #717（本 ADR 的提出）、issue #704（实现跟踪，**ADR 先行**）；[ADR-0002](0002-transparent-proxy.md)（透明代理——本议题不改写请求内容）；[ADR-0018](0018-single-key-multi-project.md)（key×project 多绑定，`grant_id` 的来源）；[ADR-0020](0020-quota-soft-landing.md)（opt-in + 默认关闭的取舍风格、配额判定集）；feature-backlog F46（跨供应商切换，DECLINED）/ F50（多服务绑定，ADR）；[ai-gateway-comparison](../ai-gateway-comparison.md) §「多 Key 均衡/Key 池轮询」；[operations-runbook](../operations-runbook.md) §5（供应商故障处置）；[bill-reconciliation-contract](../bill-reconciliation-contract.md)（F19 对账）；V1/V6/V8/V57（见 §1.3）、V9/V64/V67（见 §2-Q4、§2-Q2 与 §4）。
+
+---
+
+## 0. 采纳条件（owner 2026-09-22 拍板）
+
+方向**采纳**，但**范围与不变量先钉死**，满足后才进入实现：
+
+- **首期只允许「同供应商 + 同 product/model 兼容池内」的显式回退。**
+  **不**放开跨供应商语义切换（`DeepSeek → Kimi`、`DeepSeek → GLM`）—— **跨供应商 fallback 另开 ADR。**
+- `virtual_key_id`、`project_id`、`gateway_request_id` **在整条 fallback 链中不变**。
+- **每一次 credential attempt 都有自己的可追踪记录** —— 不能最后只留下「这次请求用了 credential C」。
+  否则出现「第一次 credential A 已发出请求 → 上游有无计费不确定 → 第二次换 credential B 成功」时，
+  **根本无法做可信对账**。
+- 不改变 tenant / project / key 归属；**不能绕过 quota**。
+- 成功 / 失败的**计量规则明确**；全部 credential 失败时的行为**固定**。
+- **默认关闭。**
+
+### 待决（本 ADR 未覆盖，需 owner 另行拍板）
+
+上一条「效力」要求修订 `CLAUDE.md` §2「不自动故障切换」与 `architecture.md` 的相应表述。
+**该修订尚未执行** —— 是否按本 ADR 的限定范围落地，待 owner 明确（未拍板前，`CLAUDE.md` 的红线原样有效）。
 
 ---
 

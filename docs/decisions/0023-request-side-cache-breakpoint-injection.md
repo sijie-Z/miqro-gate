@@ -1,10 +1,35 @@
 # ADR-0023：请求侧可选改造①——prompt 缓存断点自动注入（opt-in 按 Key）
 
-- 状态：**Proposed（待所有者拍板；拍板前不实现，选项见 §3）**
+- 状态：**Accepted（有条件）——2026-09-22 owner 拍板「有条件采纳」**，条件见 §0。**采纳的是方向与边界，不是 §3 里任一选项的照单实现**；实现范围由 §0 限定。
 - 日期：2026-09-18
 - 关联：issue #769；[ADR-0002](0002-transparent-proxy.md)（透明代理）；[ADR-0009](0009-enable-response-cache.md)（缓存双重 opt-in 先例）；[ADR-0005](0005-no-redis-v1.md)（不引外部状态）；[ADR-0020](0020-quota-soft-landing.md)（opt-in 判定的落地形态先例）；姊妹篇 [ADR-0024](0024-request-side-rectification-retry.md)；issue #740（同属「默认关的改写族」决策批次）、#742（封闭客户端接入，本提案的价值场景）、#704/#717（模型路由与回退，未决）
 - 触发事件：issue #769——对照 cc-switch 源码（`src-tauri/src/proxy/cache_injector.rs`）逐模块比对后，提出「不带断点的客户端在 Anthropic 系上游拿不到 prompt 缓存收益」；该能力与 CLAUDE.md 的透明代理红线正面冲突，故先行 ADR。
 - **独立复核补充（2026-09-19，对 develop `8e35fddb`）**：全文约 30 处坐标逐条复验，**2 处漂移已修**——① `CacheKeyFactory.java:42-43` → `:49-50`；② `PostgresUsageEventWriter.java:181,230`（两处 `INSERT INTO request_usage_records` 的行号）→ `:253,302`（§5 与 §1.2 的论证正落在这两处，故必须修正）。其余坐标均落在所引区间内。两条此后落地的事实并入本 ADR：① §2 的 E1 提到「可用字节级契约测试锁定」——**该契约测试现已存在**：`AnthropicProxyContractTest$PromptCachePassthrough`（PR #933），对单断点与「system + tools + 内容块」多断点的 `cache_control` 请求断言**字节级原样转发**，用例注释写明「将来引入请求改写（如 #769 注入器）必须显式修改该契约」——即若采纳选项 B，这份测试就是必须同步更新的第一处；② 姊妹议题 [ADR-0022](0022-semantic-cache-evaluation.md)（语义缓存）已转 **Accepted**，其 P1 阶段一实测结论为「按当前本地档位不支持进入 P2」——**本提案因而是当前唯一不触碰合规红线的成本杠杆**（前提是 §6-1 的上游支持被实测确认）。
+
+---
+
+## 0. 采纳条件（owner 2026-09-22 拍板）
+
+方向**采纳**，但条件必须写死 —— 否则本 ADR 会被后来者当作「网关可以改请求」的先例。
+
+1. **永远默认关闭。**
+2. **只能 Key 级 opt-in。**
+3. **只允许「加标记」**，不得顺手变成泛化的 request optimizer：
+   - 不删除已有 `cache_control`；
+   - 不重排；
+   - 不改 messages 内容；
+   - 不碰鉴权 / 计量；
+   - 不碰 OpenAI 路径；
+   - 注入点与数量有**明确上限**；
+   - 有 metrics；
+   - 有审计事件；
+   - **审计不记录正文**；
+   - UI / 文档明确告知用户：该 Key 开启后，**请求已经不是字节透明代理**。
+4. **本 ADR 必须写明「这是透明代理红线的一个明确例外」** —— 而不是可以被引作先例的通例。
+
+> 落地提示（来自本文件的复核补充）：采纳后，字节级契约测试
+> `AnthropicProxyContractTest$PromptCachePassthrough`（PR #933）是**必须同步更新的第一处** ——
+> 它的用例注释已写明「将来引入请求改写（如 #769 注入器）必须显式修改该契约」。
 
 ---
 

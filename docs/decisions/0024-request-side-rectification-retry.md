@@ -1,10 +1,34 @@
 # ADR-0024：请求侧可选改造②——错误驱动的整流重试（thinking 签名/预算，默认关）
 
-- 状态：**Accepted（部分）——选项 B（观察档）已采纳为一期**（2026-09-19 所有者拍板「按推荐」；推荐原文为「先 B → 数据支持再上 C」，见 §3）；**C / D / E 仍待二期拍板**。B = 有界错误体分类 + 计数 + 日志，**零改体、零重试**，实现见 issue #770。
+- 状态：**Accepted（部分）**——选项 B（观察档）已采纳为一期（2026-09-19 所有者拍板「按推荐」；推荐原文为「先 B → 数据支持再上 C」，见 §3）；**2026-09-22 owner 进一步限定「实现首期只允许 thinking / signature 整流，`budget_tokens` 留二期」**，硬条件见 §0；**C / D / E 的其余部分仍待二期拍板**。B = 有界错误体分类 + 计数 + 日志，**零改体、零重试**，实现见 issue #770。
 - 日期：2026-09-18
 - 关联：issue #770；[ADR-0002](0002-transparent-proxy.md)（透明代理）；[ADR-0009](0009-enable-response-cache.md)（缓存：整流请求不得写缓存）；[ADR-0020](0020-quota-soft-landing.md)（网关自产 429，不得被误判为上游错误）；[ADR-0005](0005-no-redis-v1.md)；姊妹篇 [ADR-0023](0023-request-side-cache-breakpoint-injection.md)（同属「opt-in 改体例外族」）；issue #704/#717（路由与回退，未决）、#742（封闭客户端接入）、#740（同族改写）、#544（已关闭，见 §1.3 的边界澄清）
 - 触发事件：issue #770——对照 cc-switch 源码（`src-tauri/src/proxy/thinking_rectifier.rs`、`thinking_budget_rectifier.rs`、`thinking_optimizer.rs`）比对后，提出「换供应商后旧会话的 thinking 签名必然失效，网关能否在上游报错后自动整流并重试一次」。
 - **独立复核补充（2026-09-19，对 develop `8e35fddb`）**：坐标复验，**1 处漂移已修**——`PostgresUsageEventWriter.java:181,230`（两处 `INSERT INTO request_usage_records` 的行号）→ `:253,302`（§5「改动面不止一次性迁移」的论证正落在这两处）；`ProxyController` / `RequestStatus` / `LlmCircuitBreakerRegistry` / `ContextLimitGuard` / 迁移文件 / `architecture.md` / `CLAUDE.md` 等其余引用均落在所引区间内。另：为 §2 的「改体」不变量提供锁定的字节级契约测试**现已存在**（`AnthropicProxyContractTest$PromptCachePassthrough`，PR #933，断言关闭态下请求体字节级原样转发）——若采纳本提案，它同样是必须同步更新的第一处。
+
+---
+
+## 0. 实现首期的硬条件（owner 2026-09-22 拍板）
+
+**ADR 可以是 Accepted，但实现首期只允许 thinking / signature 整流。**
+
+不赞成第一版同时做 signature rectifier + budget rectifier + thinking optimizer ——
+那样很容易从一个明确的故障修复，慢慢长成「模型请求自动重写器」。
+
+1. 只匹配**明确白名单错误模式**；
+2. 只在**首字节之前**；
+3. 最多 **1 次重试**；
+4. **不修改普通 messages 正文**；
+5. 不允许把它变成通用 retry；
+6. 必须记录「**为什么**发生了整流」，但**不记录正文**；
+7. 必须明确该次失败请求的**计量 / 计费语义**；
+8. **无法证明「第一次失败没有副作用 / 费用风险」的供应商，不自动整流。**
+
+**`budget_tokens` 留二期**：它已不是简单的「坏 signature 清洗」，而进入「**改变请求参数重跑**」的领域，
+风险明显更高。
+
+> 落地提示：采纳后，字节级契约测试 `AnthropicProxyContractTest$PromptCachePassthrough`（PR #933）
+> 是**必须同步更新的第一处**（断言关闭态下请求体字节级原样转发）。
 
 ---
 
