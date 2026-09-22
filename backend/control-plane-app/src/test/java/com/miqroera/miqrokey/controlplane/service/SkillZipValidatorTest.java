@@ -337,11 +337,19 @@ class SkillZipValidatorTest {
     @Test
     @DisplayName("fail-closed: zip64 markers are refused (#1242)")
     void zip64Rejected() {
+        // (a) a zip64 EOCD locator (20 bytes: sig, disk, 8-byte offset, disk count)
+        // right before the EOCD, as a zip64 archive would carry it.
         byte[] base = rawHonestDeflate();
         byte[] upToEocd = java.util.Arrays.copyOf(base, base.length - 22);
         byte[] eocd = java.util.Arrays.copyOfRange(base, base.length - 22, base.length);
-        byte[] locator = bytes(le32(0x07064B50L), le32(0), le32(8), le32(1));
+        byte[] locator = bytes(le32(0x07064B50L), le32(0), le32(8), le32(0), le32(1));
         assertCode(bytes(upToEocd, locator, eocd), "SKILL_ZIP64_UNSUPPORTED");
+
+        // (b) zip64 sentinel values in the EOCD entry count.
+        byte[] sentinel = rawHonestDeflate();
+        sentinel[sentinel.length - 22 + 8] = (byte) 0xFF;
+        sentinel[sentinel.length - 22 + 9] = (byte) 0xFF;
+        assertCode(sentinel, "SKILL_ZIP64_UNSUPPORTED");
     }
 
     @Test
@@ -369,6 +377,39 @@ class SkillZipValidatorTest {
     void trailingBytesAfterEocdRejected() {
         assertCode(bytes(rawHonestDeflate(), new byte[] { (byte) 0xDE, (byte) 0xAD, (byte) 0xBE, (byte) 0xEF }),
                 "SKILL_ZIP_INVALID");
+    }
+
+    @Test
+    @DisplayName("fail-closed: a central directory that lies about an entry's size is rejected (#1242)")
+    void cdSizeLieRejected() {
+        // The local header is honest (and so is the data), but the directory
+        // under-reports the inflated size. The streaming view never reads the
+        // directory, so pre-#1242 the package was accepted while a
+        // directory-based reader saw a different entry description.
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length),
+                mdDef);
+        byte[] second = bytes(rawLocal("web-scraper/note.txt", 8, 0, crc32(md), mdDef.length, md.length),
+                mdDef);
+        byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
+                rawCd("web-scraper/note.txt", 8, 0, crc32(md), mdDef.length, 1, first.length));
+        assertCode(bytes(first, second, cd, rawEocd(2, cd.length, first.length + second.length)),
+                "SKILL_ZIP_STRUCTURE_INVALID");
+    }
+
+    @Test
+    @DisplayName("counter-control: an honest bit-3 package whose descriptor has no signature is accepted (#1242)")
+    void rawHonestDescriptorWithoutSignatureAccepted() {
+        // APPNOTE makes the 0x08074b50 signature marking a data descriptor
+        // optional; both spellings occur in the wild and must stay accepted.
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] bareDescriptor = bytes(le32(crc32(md)), le32(mdDef.length), le32(md.length));
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 8, 0, 0, 0), mdDef, bareDescriptor);
+        byte[] cd = rawCd("web-scraper/SKILL.md", 8, 8, crc32(md), mdDef.length, md.length, 0);
+        assertThat(SkillZipValidator.validate(bytes(first, cd, rawEocd(1, cd.length, first.length))).name())
+                .isEqualTo("web-scraper");
     }
 
     private static void assertStructureRejected(byte[] pkg, String what) {
