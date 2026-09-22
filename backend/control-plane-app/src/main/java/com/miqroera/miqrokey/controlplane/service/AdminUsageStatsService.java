@@ -173,7 +173,16 @@ public class AdminUsageStatsService {
     /** Paged raw usage records over the whole tenant, newest first. */
     /** Tenant-scoped records for the system (billing) channel. */
     public UsageRecordPage records(UUID tenantId, Instant from, Instant to, long page, int size) {
-        return records(tenantId, from, to, page, size, null, null, null, null, null, null, null, null, null);
+        return records(tenantId, from, to, page, size, null);
+    }
+
+    /**
+     * The same page, continued from an opaque {@code before} cursor (#1368) —
+     * what the console's export walks with. Null/blank means "start at the
+     * newest row".
+     */
+    public UsageRecordPage records(UUID tenantId, Instant from, Instant to, long page, int size, String before) {
+        return records(tenantId, from, to, page, size, null, null, null, null, null, null, null, null, null, before);
     }
 
     public UsageRecordPage records(UUID tenantId, Instant from, Instant to, long page, int size, UUID userId,
@@ -186,6 +195,13 @@ public class AdminUsageStatsService {
     public UsageRecordPage records(UUID tenantId, Instant from, Instant to, long page, int size, UUID userId,
             UUID projectId, UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId,
             String modelId, String clientIp, UUID teamId) {
+        return records(tenantId, from, to, page, size, userId, projectId, virtualKeyId, credentialId, subscriptionId,
+                providerProductId, modelId, clientIp, teamId, null);
+    }
+
+    public UsageRecordPage records(UUID tenantId, Instant from, Instant to, long page, int size, UUID userId,
+            UUID projectId, UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId,
+            String modelId, String clientIp, UUID teamId, String before) {
         if (page < 1 || page > MAX_PAGE) {
             // #475: an unchecked huge page overflows (page-1)*size into a negative
             // SQL OFFSET; bound it as a client error instead.
@@ -197,24 +213,65 @@ public class AdminUsageStatsService {
         }
         UsageStatsRepository.UsageFilter filter = adminFilter(tenantId, from, to, userId, projectId, virtualKeyId,
                 credentialId, subscriptionId, providerProductId, modelId, clientIp, teamId);
-        return recordsFor(tenantId, filter, page, size);
+        return recordsFor(tenantId, filter, page, size, UsageRecordCursor.of(before));
     }
 
     public UsageRecordPage records(User admin, Instant from, Instant to, long page, int size, UUID userId,
             UUID projectId, UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId,
             String modelId, String clientIp, UUID teamId) {
-        return records(admin.tenantId(), from, to, page, size, userId, projectId, virtualKeyId, credentialId,
-                subscriptionId, providerProductId, modelId, clientIp, teamId);
+        return records(admin, from, to, page, size, userId, projectId, virtualKeyId, credentialId, subscriptionId,
+                providerProductId, modelId, clientIp, teamId, null);
     }
 
-    private UsageRecordPage recordsFor(UUID tenantId, UsageStatsRepository.UsageFilter filter, long page, int size) {
+    public UsageRecordPage records(User admin, Instant from, Instant to, long page, int size, UUID userId,
+            UUID projectId, UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId,
+            String modelId, String clientIp, UUID teamId, String before) {
+        return records(admin.tenantId(), from, to, page, size, userId, projectId, virtualKeyId, credentialId,
+                subscriptionId, providerProductId, modelId, clientIp, teamId, before);
+    }
+
+    /**
+     * One page of records plus the cursor that continues it (#1368).
+     *
+     * <p>
+     * {@code total} is a separate exact {@code COUNT(*)} over the same filter, as
+     * before — it is what the console's pager shows ("共 N 条"). It is a second
+     * read, so on a table the gateway is still writing it can differ from what a
+     * walk ends up handing out; {@code nextCursor} is what says whether there is
+     * more, not the total.
+     * </p>
+     *
+     * <p>
+     * Two windows. A cursor — and page 1, where a walk starts — reads the keyset
+     * window and over-fetches one row to learn whether another page exists. An
+     * explicit {@code page > 1} is a jump-to-page request: the caller asked for
+     * "roughly here", so it keeps the offset window, which is the only thing that
+     * can answer it. Either way the rows come back in the same total order
+     * ({@code occurred_at DESC, id DESC}), and the cursor handed out is the last
+     * row returned, so a walk started from page 1 stays exact from then on.
+     * </p>
+     */
+    private UsageRecordPage recordsFor(UUID tenantId, UsageStatsRepository.UsageFilter filter, long page, int size,
+            UsageRecordCursor cursor) {
         long total = usageStatsRepository.countRecords(filter);
-        List<AdjustedUsageRow> events = usageStatsRepository.findRecords(filter, (page - 1) * size, size);
-        List<UsageRecordPage.UsageRecordView> items = new ArrayList<>(events.size());
-        for (AdjustedUsageRow row : events) {
-            items.add(view(row));
+        boolean keyset = cursor.occurredAt() != null || page == 1;
+        List<AdjustedUsageRow> events = keyset
+                ? usageStatsRepository.findRecords(filter, size + 1, cursor.occurredAt(), cursor.id())
+                : usageStatsRepository.findRecords(filter, (page - 1) * size, size);
+        int returned = Math.min(events.size(), size);
+        List<UsageRecordPage.UsageRecordView> items = new ArrayList<>(returned);
+        for (int i = 0; i < returned; i++) {
+            items.add(view(events.get(i)));
         }
-        return new UsageRecordPage(items, page, size, total);
+        // Keyset: the extra row is the whole answer to "is there more". Offset: a
+        // short page is the only signal available — a full one may or may not have
+        // a successor, and the cursor says it safely either way.
+        boolean hasMore = keyset ? events.size() > size : events.size() == size;
+        AdjustedUsageRow last = returned == 0 ? null : events.get(returned - 1);
+        String nextCursor = hasMore && last != null
+                ? UsageRecordCursor.encode(last.observed().occurredAt(), last.observed().id())
+                : null;
+        return new UsageRecordPage(items, page, size, total, nextCursor);
     }
 
     // -------------------------------------------------------------------

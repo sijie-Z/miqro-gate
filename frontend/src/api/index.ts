@@ -217,14 +217,21 @@ export function usageSummary(
   return get<UsageSummary>('/api/v1/me/usage/summary', { groupBy, from, to, tzOffsetMinutes });
 }
 
+/**
+ * `page` jumps to a page; `before` (opaque `nextCursor` from the previous
+ * response) walks the list without repeating or skipping rows (#1368). Use
+ * `before` for anything that reads the whole list; the cursor wins if both are
+ * given.
+ */
 export function usageRecords(
-  options: { from?: string; to?: string; page?: number; size?: number } = {},
+  options: { from?: string; to?: string; page?: number; size?: number; before?: string } = {},
 ): Promise<UsageRecordPage> {
   return get<UsageRecordPage>('/api/v1/me/usage/records', {
     from: options.from,
     to: options.to,
     page: options.page,
     size: options.size,
+    before: options.before,
   });
 }
 
@@ -1173,6 +1180,8 @@ export function adminUsageRecords(query: {
   modelId?: string;
   clientIp?: string;
   teamId?: string;
+  /** Opaque `nextCursor`; walks the list instead of jumping to a page (#1368). */
+  before?: string;
 }): Promise<UsageRecordPage> {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {

@@ -4410,6 +4410,7 @@ export interface components {
             size?: number;
             /** Format: int64 */
             total?: number;
+            nextCursor?: string;
         };
         UsageRecordView: {
             /** Format: date-time */
@@ -8928,6 +8929,7 @@ export interface operations {
                 to?: string;
                 page?: number;
                 size?: number;
+                before?: string;
             };
             header?: never;
             path?: never;
@@ -9038,6 +9040,7 @@ export interface operations {
                 to?: string;
                 page?: number;
                 size?: number;
+                before?: string;
             };
             header?: never;
             path?: never;
@@ -9354,6 +9357,7 @@ export interface operations {
                 modelId?: string;
                 clientIp?: string;
                 teamId?: string;
+                before?: string;
             };
             header?: never;
             path?: never;
@@ -10117,6 +10121,7 @@ export interface operations {
                 to?: string;
                 page?: number;
                 size?: number;
+                before?: string;
             };
             header?: never;
             path?: never;
