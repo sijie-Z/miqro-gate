@@ -3,7 +3,8 @@
 #
 #   miqrokey-restore.sh [--replace] <backup-file.sql.gz.enc> [target-db-name]
 #
-# Verifies the SHA-256 manifest before touching anything.
+# Verifies the SHA-256 manifest, and in --replace mode that the archive can
+# actually be read back, before touching anything.
 #
 # The two modes differ in what they require of the target database:
 #
@@ -85,6 +86,39 @@ ACTUAL=$(sha256sum "$BACKUP_FILE" | cut -d' ' -f1)
 if [ -z "$EXPECTED" ] || [ "$EXPECTED" != "$ACTUAL" ]; then
   echo "restore aborted: checksum mismatch" >&2
   exit 1
+fi
+
+# Read-back gate, --replace only.
+#
+# The manifest gate above pins the *ciphertext*: it proves the file we were
+# handed is the file we archived, and nothing about whether the key we hold
+# opens it. --replace drops the target database further down, so a lost,
+# rotated or mismatched backup key would leave the operator with an empty
+# database where a working one used to be — at the worst possible moment, in
+# the middle of a rollback. Decrypt and list the archive while the target is
+# still intact (#1436); only readability is being asserted, the table of
+# contents is thrown away.
+#
+# The plain restore path does not repeat this: it is already atomic
+# (--single-transaction below) and leaves the target untouched on failure, so
+# paying for a second decryption there would buy nothing. Standalone
+# miqrokey-verify.sh remains the way to pre-flight an archive out of band.
+if [ "$REPLACE" = 1 ]; then
+  ARCHIVE_TOC=$(mktemp)
+  trap 'rm -f "$ARCHIVE_TOC"' EXIT
+  if ! openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass file:"$(winpath "$MIQROKEY_BACKUP_KEY_FILE")" \
+         -in "$BACKUP_FILE" \
+       | gunzip \
+       | pg_restore --list > "$ARCHIVE_TOC"; then
+    echo "restore aborted: $BACKUP_FILE cannot be read back" >&2
+    echo "  the backup key is wrong, was rotated, or the archive is corrupt." >&2
+    echo "  $DB_NAME was not touched." >&2
+    exit 1
+  fi
+  [ -s "$ARCHIVE_TOC" ] || {
+    echo "restore aborted: $BACKUP_FILE decrypted to an empty archive" >&2
+    echo "  $DB_NAME was not touched." >&2
+    exit 1; }
 fi
 
 if ! command -v psql >/dev/null 2>&1; then
