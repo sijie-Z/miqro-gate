@@ -210,7 +210,9 @@ public class AuthenticationService {
         auditService.record(user.tenantId(), user.id(), "LOGIN", "USER", user.id(), buildSummary(user.username()),
                 requestId);
 
-        LOG.info("User {} logged in successfully", user.username());
+        // #1313: usernames are caller-supplied free text and reach the log line
+        // verbatim otherwise — a JSON "\n" would render a second physical line.
+        LOG.info("User {} logged in successfully", LogValues.forLog(user.username()));
         return new LoginResult(enrichWithView(afterSuccess, newStatus), tokens, sessionExpires);
     }
 
@@ -310,7 +312,8 @@ public class AuthenticationService {
             Duration lockDuration = authProperties.getLoginLockBase().multipliedBy(multiplier);
             lockedUntil = now.plus(lockDuration);
             newStatus = UserStatus.LOCKED;
-            LOG.warn("User {} locked until {} after {} failures", fresh.username(), lockedUntil, newFailCount);
+            LOG.warn("User {} locked until {} after {} failures", LogValues.forLog(fresh.username()), lockedUntil,
+                    newFailCount);
         }
 
         User updated = new User(fresh.id(), fresh.tenantId(), fresh.username(), fresh.displayName(),
@@ -375,7 +378,7 @@ public class AuthenticationService {
         auditService.record(SEED_TENANT_ID, admin.id(), "BOOTSTRAP", "USER", admin.id(), buildSummary(username),
                 requestId);
 
-        LOG.info("Bootstrap admin {} created", username);
+        LOG.info("Bootstrap admin {} created", LogValues.forLog(username));
         return new BootstrapResult(sanitizeUser(admin), temporaryPassword, tokens, sessionExpires);
     }
 
@@ -423,7 +426,7 @@ public class AuthenticationService {
         Instant sessionExpires = now.plus(authProperties.getSessionAbsoluteTimeout());
         auditService.record(SEED_TENANT_ID, user.id(), "REGISTER", "USER", user.id(), buildSummary(username),
                 requestId);
-        LOG.info("User {} self-registered", username);
+        LOG.info("User {} self-registered", LogValues.forLog(username));
         return new RegisterResult(user, tokens, sessionExpires);
     }
 
@@ -454,14 +457,14 @@ public class AuthenticationService {
         auditService.record(currentUser.tenantId(), currentUser.id(), "PASSWORD_CHANGE", "USER", currentUser.id(),
                 "\"password_change:user_initiated\"", requestId);
 
-        LOG.info("User {} changed password and revoked other sessions", currentUser.username());
+        LOG.info("User {} changed password and revoked other sessions", LogValues.forLog(currentUser.username()));
     }
 
     public void logout(User user, UUID sessionId, String requestId) {
         sessionService.revokeSession(sessionId);
         auditService.record(user.tenantId(), user.id(), "LOGOUT", "SESSION", sessionId, buildSummary(user.username()),
                 requestId);
-        LOG.info("User {} logged out", user.username());
+        LOG.info("User {} logged out", LogValues.forLog(user.username()));
     }
 
     /**
@@ -474,7 +477,7 @@ public class AuthenticationService {
         sessionService.revokeOtherSessions(currentUser.id(), currentSessionId);
         auditService.record(currentUser.tenantId(), currentUser.id(), "LOGOUT_OTHERS", "USER", currentUser.id(),
                 buildSummary(currentUser.username()), requestId);
-        LOG.info("User {} revoked other sessions", currentUser.username());
+        LOG.info("User {} revoked other sessions", LogValues.forLog(currentUser.username()));
     }
 
     // -----------------------------------------------------------------------

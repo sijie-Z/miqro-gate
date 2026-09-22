@@ -57,6 +57,28 @@ describe('NextAdminExportsView', () => {
     expect(wrapper.text()).toContain('120');
   });
 
+  it('#PH89: 窗口列与同一行的创建时间同口径（本地），不写后端 UTC 日', async () => {
+    // One instant, two columns. 2026-08-31T16:30:00Z is chosen so the local and
+    // UTC clocks disagree at UTC+8 — the day turns over between them, which is
+    // exactly what the window column used to print.
+    const instant = '2026-08-31T16:30:00Z';
+    mockApi.exportRecent.mockResolvedValue([
+      task({ id: 'tz', periodFrom: instant, periodTo: instant, createdAt: instant }),
+    ]);
+    const wrapper = mountView();
+    await flushPromises();
+
+    // Derived with local getters, so this holds in whatever zone it runs in.
+    const d = new Date(instant);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const localDay = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const localClock = `${localDay} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+    const text = wrapper.text();
+    expect(text).toContain(localClock);
+    expect(text).toContain(`${localDay} → ${localDay}`);
+  });
+
   it('#716: marks a file that contains corrections, and leaves an untouched one unmarked', async () => {
     mockApi.exportRecent.mockResolvedValue([
       task({ id: 'a1', adjustmentLevel: 'PRESENT' }),

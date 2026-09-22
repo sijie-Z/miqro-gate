@@ -181,23 +181,41 @@ async function createWebhook() {
   }
 }
 
+// #1374: row actions are plain link buttons, so unlike the create/submit
+// buttons they never inherited the :loading convention. A second click on the
+// same row while its request was still in flight fired a second real request —
+// for 「测试」 that means a second signed outbound delivery to the customer's
+// receiver. Guarded per row (not globally) so a pending row never swallows a
+// click meant for a different row; the id is added before the first await so a
+// reentrant click already sees it.
+const togglingIds = ref<Set<string>>(new Set());
+const testingIds = ref<Set<string>>(new Set());
+
 async function toggle(endpoint: WebhookEndpointView) {
+  // list rows always carry ids
+  const id = endpoint.id!;
+  if (togglingIds.value.has(id)) return;
+  togglingIds.value.add(id);
   try {
-    // list rows always carry ids
-    await api.updateWebhook(endpoint.id!, { enabled: !endpoint.enabled });
+    await api.updateWebhook(id, { enabled: !endpoint.enabled });
     toast.success(endpoint.enabled ? 'Webhook 已停用' : 'Webhook 已启用');
     await load();
   } catch (error) {
     if (error instanceof ApiError) {
       toast.error(error.message);
     }
+  } finally {
+    togglingIds.value.delete(id);
   }
 }
 
 async function test(endpoint: WebhookEndpointView) {
+  // list rows always carry ids
+  const id = endpoint.id!;
+  if (testingIds.value.has(id)) return;
+  testingIds.value.add(id);
   try {
-    // list rows always carry ids
-    const result = await api.testWebhook(endpoint.id!);
+    const result = await api.testWebhook(id);
     if (result.httpStatus) {
       toast.success(`测试投递成功（HTTP ${result.httpStatus}）`);
     } else {
@@ -207,6 +225,8 @@ async function test(endpoint: WebhookEndpointView) {
     if (error instanceof ApiError) {
       toast.error(error.message);
     }
+  } finally {
+    testingIds.value.delete(id);
   }
 }
 
@@ -492,6 +512,7 @@ onMounted(load);
               variant="link"
               size="sm"
               data-testid="webhook-test"
+              :loading="testingIds.has((row as WebhookEndpointView).id!)"
               @click="test(row as WebhookEndpointView)"
               >测试</UiButton
             >
@@ -502,9 +523,14 @@ onMounted(load);
               @click="openDeliveries(row as WebhookEndpointView)"
               >投递</UiButton
             >
-            <UiButton variant="link" size="sm" @click="toggle(row as WebhookEndpointView)">{{
-              (row as WebhookEndpointView).enabled ? '停用' : '启用'
-            }}</UiButton>
+            <UiButton
+              variant="link"
+              size="sm"
+              data-testid="webhook-toggle"
+              :loading="togglingIds.has((row as WebhookEndpointView).id!)"
+              @click="toggle(row as WebhookEndpointView)"
+              >{{ (row as WebhookEndpointView).enabled ? '停用' : '启用' }}</UiButton
+            >
             <UiButton
               variant="link-danger"
               size="sm"

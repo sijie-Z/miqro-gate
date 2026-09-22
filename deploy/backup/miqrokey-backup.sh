@@ -10,6 +10,8 @@
 #
 # Exit codes: 0 = ok, 1 = dump/encrypt failure, 2 = retention failure,
 # 3 = webhook notification failure (backup itself succeeded).
+# These codes hold even when the webhook is unreachable; only exit 3 is *about*
+# the webhook, and only on the success path (#1402).
 set -euo pipefail
 
 # Git Bash (Windows) passes MSYS paths that native openssl cannot open.
@@ -70,17 +72,28 @@ if ! pg_dump --format=custom --no-owner --no-privileges "$DB_NAME" \
   # its output file up front) — remove it so ops never finds a
   # restorable-looking stub without a manifest (#438).
   rm -f -- "$FILE"
-  notify failure "pg_dump or encryption failed"
+  # The exit codes above are the contract callers alert on, and an unreachable
+  # webhook must not replace them — a failing database and a failing webhook are
+  # usually the same incident. `notify` failing here means curl failed; swallow
+  # it so `exit 1` still runs (#1402).
+  notify failure "pg_dump or encryption failed" || true
   exit 1
 fi
 
 # Checksum manifest (recorded before retention runs so the kept file set
 # always has its own manifest).
-sha256sum "$FILE" > "$MANIFEST"
+#
+# Record the bare file name, never the absolute path the backup happened to be
+# written to: the archive is synced off-host by design (operations-runbook §10
+# 「存放于独立介质」/ §G6.2 「备份产物需另行同步异地（COS）」) and restored from
+# wherever it lands. A manifest that pinned the producing host's path would
+# make restore/verify check a file that no longer exists — or, worse, the old
+# copy that does — instead of the archive being restored (#1381).
+( cd "$(dirname "$FILE")" && sha256sum "$(basename "$FILE")" ) > "$MANIFEST"
 
 # Retention: daily set + newest per ISO week among the remainder (#438).
 PRUNE_COUNT=$(apply_retention "$MIQROKEY_BACKUP_PATH" "$MIQROKEY_BACKUP_DAILY_KEEP" "$MIQROKEY_BACKUP_WEEKLY_KEEP") \
-  || { notify failure "retention failed"; exit 2; }
+  || { notify failure "retention failed" || true; exit 2; }
 
 if ! notify success "backup completed ($(du -h "$FILE" | cut -f1))"; then
   exit 3

@@ -139,6 +139,52 @@ describe('NextProvidersView', () => {
     expect(dialog!.textContent).toContain('人工');
   });
 
+  // #PH89: `probedAt` reaches the console as a UTC ISO string
+  // (ModelCatalogProbeService serialises `Instant.toString()`), so it has to be
+  // converted to the viewer's zone like every other timestamp in the console.
+  //
+  // The expectation is *derived* with local getters rather than hard-coded.
+  // Note the limit of that: at UTC+0 the old `slice(0, 16)` and the correct
+  // conversion print byte-identical text, so this test cannot tell them apart —
+  // and CI does not pin TZ (#1301). The zone-independent teeth live in
+  // `utc-timestamp-display.spec.ts`; this one is the end-to-end check that the
+  // view actually calls the shared helper. Run it under two zones to see the
+  // same instant print two different times:
+  //   TZ=Asia/Shanghai npx vitest run src/__tests__/NextProvidersView.spec.ts
+  //   TZ=EST5EDT       npx vitest run src/__tests__/NextProvidersView.spec.ts
+  it('#PH89: 上次探测时间按浏览器本地时区显示，不直接打印后端 UTC 串', async () => {
+    const probedAt = '2026-09-22T01:30:00Z';
+    const d = new Date(probedAt);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const local = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(
+      d.getHours(),
+    )}:${pad(d.getMinutes())}`;
+
+    mockApi.adminListModels.mockResolvedValue([]);
+    mockApi.adminModelProbeStatus.mockResolvedValue({
+      status: 'SUCCEEDED',
+      error: null,
+      modelCount: 2,
+      probedAt,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="product-models-open"]').trigger('click');
+    await flushPromises();
+
+    const text = document.querySelector('[data-testid="product-probe-status"]')?.textContent ?? '';
+    // Asserted in every zone: whatever the viewer's zone, this is its wall clock.
+    expect(text).toContain(local);
+
+    // Only meaningful where the UTC wall clock differs from the local one. At
+    // UTC+0 the two strings are equal, so asserting absence would fail against
+    // *correct* code — a false red on the very runners this has to stay green on.
+    const utcRendering = probedAt.slice(0, 16).replace('T', ' ');
+    if (utcRendering !== local) {
+      expect(text).not.toContain(utcRendering);
+    }
+  });
+
   it('I4: probes the provider model catalog and shows the last probe status', async () => {
     mockApi.adminListModels.mockResolvedValue([]);
     mockApi.adminModelProbeStatus.mockResolvedValue({
@@ -509,5 +555,79 @@ describe('NextProvidersView', () => {
     idInput.dispatchEvent(new Event('input', { bubbles: true }));
     await flushPromises();
     expect(document.querySelector('[data-testid="field-error"]')).toBeNull();
+  });
+
+  // rowsOf：抽屉读数（带 providerProductId）与页面读数（无参）是**同一张表**的两次
+  // 读，这里让两者给出不同的行数 —— 复现「服务器侧已经变了、页面那次读数还是旧的」。
+  function rowsOf(productId: string, n: number) {
+    return Array.from({ length: n }, (_, i) => ({
+      id: `${productId}-m${i}`,
+      providerProductId: productId,
+      modelId: `model-${i}`,
+    }));
+  }
+
+  it('#PH78: 行上的「N 个模型」跟着抽屉里的模型目录走', async () => {
+    mockApi.adminListModels.mockImplementation((productId?: string) =>
+      Promise.resolve(productId ? rowsOf(productId, 5) : rowsOf('0190-0000-0000-0020', 2)),
+    );
+    mockApi.adminModelProbeStatus.mockResolvedValue({
+      status: null,
+      error: null,
+      modelCount: null,
+      probedAt: null,
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    const rowCount = () => wrapper.findAll('[data-testid="product-catalog-count"]')[0]!.text();
+    expect(rowCount()).toContain('2 个模型');
+
+    await wrapper.find('[data-testid="product-models-open"]').trigger('click');
+    await flushPromises();
+    await flushPromises();
+
+    // 抽屉确实读到 5 条（服务器侧这份数据已经是 5）……
+    const dialog = document.querySelector('[data-testid="product-models-dialog"]');
+    expect(dialog?.textContent).toContain('model-4');
+    // …那行上那份副本就不许还说 2。
+    expect(rowCount()).toContain('5 个模型');
+  });
+
+  it('#PH78: 探测成功后行上的「N 个模型」跟着抽屉里的目录走', async () => {
+    // 开抽屉那次读到的仍是 2；探测后的重读才是 5 —— 只有探测这条写路径变了。
+    let drawerReads = 0;
+    mockApi.adminListModels.mockImplementation((productId?: string) => {
+      if (!productId) return Promise.resolve(rowsOf('0190-0000-0000-0020', 2));
+      drawerReads += 1;
+      return Promise.resolve(rowsOf(productId, drawerReads === 1 ? 2 : 5));
+    });
+    mockApi.adminModelProbeStatus.mockResolvedValue({
+      status: null,
+      error: null,
+      modelCount: null,
+      probedAt: null,
+    });
+    mockApi.adminProbeModels.mockResolvedValue({
+      providerProductId: '0190-0000-0000-0020',
+      productCode: 'deepseek-payg-api',
+      modelCount: 5,
+      probedAt: '2026-09-22T00:00:00Z',
+      models: [],
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    const rowCount = () => wrapper.findAll('[data-testid="product-catalog-count"]')[0]!.text();
+    await wrapper.find('[data-testid="product-models-open"]').trigger('click');
+    await flushPromises();
+    expect(rowCount()).toContain('2 个模型');
+
+    (document.querySelector('[data-testid="product-probe"]') as HTMLButtonElement).click();
+    await flushPromises();
+    await flushPromises();
+
+    expect(mockApi.adminProbeModels).toHaveBeenCalledWith('0190-0000-0000-0020');
+    expect(rowCount()).toContain('5 个模型');
   });
 });

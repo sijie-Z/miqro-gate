@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.gateway.proxy;
 import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.domain.cache.CacheKey;
 import com.miqroera.miqrokey.gateway.vkey.AuthContext;
+import com.miqroera.miqrokey.spi.ProtocolFamily;
 import com.miqroera.miqrokey.testing.GatewayTestKeys;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -32,6 +33,27 @@ class CacheKeyFactoryTest {
         return body.getBytes(StandardCharsets.UTF_8);
     }
 
+    /**
+     * The wire protocol family for tests that do not exercise the protocol
+     * dimension itself — the chat endpoint's family (#1236).
+     */
+    private static final String CHAT_FAMILY = ProtocolFamily.OPENAI_CHAT_COMPLETIONS.name();
+
+    @Test
+    @DisplayName("wire protocol family is a key dimension (#1236)")
+    void wireProtocolChangesTheKey() {
+        byte[] body = json("{\"model\":\"m\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+
+        // The same bytes sent to two endpoints produce two response shapes, so
+        // the family must split the key — otherwise the cached chat answer
+        // replays into an Anthropic client (#444's argument one level up).
+        assertThat(factory.compute(ctx, "m", body, ProtocolFamily.OPENAI_CHAT_COMPLETIONS.name()))
+                .isNotEqualTo(factory.compute(ctx, "m", body, ProtocolFamily.ANTHROPIC_MESSAGES.name()));
+        // Same endpoint: still one key.
+        assertThat(factory.compute(ctx, "m", body, ProtocolFamily.OPENAI_CHAT_COMPLETIONS.name()))
+                .isEqualTo(factory.compute(ctx, "m", body, ProtocolFamily.OPENAI_CHAT_COMPLETIONS.name()));
+    }
+
     @Test
     @DisplayName("stream flag is a key format dimension (#444)")
     void streamFlagChangesTheKey() {
@@ -43,9 +65,11 @@ class CacheKeyFactoryTest {
                 "{\"model\":\"m\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
 
         // An SSE response must never be replayed to a JSON client (or vice versa).
-        assertThat(factory.compute(ctx, "m", streaming)).isNotEqualTo(factory.compute(ctx, "m", buffered));
+        assertThat(factory.compute(ctx, "m", streaming, CHAT_FAMILY))
+                .isNotEqualTo(factory.compute(ctx, "m", buffered, CHAT_FAMILY));
         // Field order and position must not matter for the same format.
-        assertThat(factory.compute(ctx, "m", streaming)).isEqualTo(factory.compute(ctx, "m", streamingAgain));
+        assertThat(factory.compute(ctx, "m", streaming, CHAT_FAMILY))
+                .isEqualTo(factory.compute(ctx, "m", streamingAgain, CHAT_FAMILY));
     }
 
     @Nested
@@ -97,8 +121,8 @@ class CacheKeyFactoryTest {
             byte[] a = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
             byte[] b = json(
                     "{ \"messages\": [ { \"content\" : \"hi\", \"role\" : \"user\" } ], \"model\" : \"gpt-4o-mini\" }");
-            CacheKey k1 = factory.compute(ctx, "gpt-4o-mini", a);
-            CacheKey k2 = factory.compute(ctx, "gpt-4o-mini", b);
+            CacheKey k1 = factory.compute(ctx, "gpt-4o-mini", a, CHAT_FAMILY);
+            CacheKey k2 = factory.compute(ctx, "gpt-4o-mini", b, CHAT_FAMILY);
             assertThat(k1).isEqualTo(k2);
         }
 
@@ -106,10 +130,10 @@ class CacheKeyFactoryTest {
         @DisplayName("should differ across tenants, keys, and models")
         void shouldDifferAcrossIdentity() {
             byte[] body = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
-            CacheKey base = factory.compute(ctx, "gpt-4o-mini", body);
+            CacheKey base = factory.compute(ctx, "gpt-4o-mini", body, CHAT_FAMILY);
             AuthContext otherKey = context(GatewayTestKeys.OTHER_KEY);
-            assertThat(factory.compute(otherKey, "gpt-4o-mini", body)).isNotEqualTo(base);
-            assertThat(factory.compute(ctx, "demo-model", body)).isNotEqualTo(base);
+            assertThat(factory.compute(otherKey, "gpt-4o-mini", body, CHAT_FAMILY)).isNotEqualTo(base);
+            assertThat(factory.compute(ctx, "demo-model", body, CHAT_FAMILY)).isNotEqualTo(base);
         }
 
         @Test
@@ -117,14 +141,15 @@ class CacheKeyFactoryTest {
         void shouldDifferWhenBodyDiffers() {
             byte[] a = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
             byte[] b = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"bye\"}]}");
-            assertThat(factory.compute(ctx, "gpt-4o-mini", a)).isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", b));
+            assertThat(factory.compute(ctx, "gpt-4o-mini", a, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", b, CHAT_FAMILY));
         }
 
         @Test
         @DisplayName("should be a SHA-256 digest, never the body")
         void shouldBeDigest() {
             byte[] body = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
-            CacheKey key = factory.compute(ctx, "gpt-4o-mini", body);
+            CacheKey key = factory.compute(ctx, "gpt-4o-mini", body, CHAT_FAMILY);
             assertThat(key.sha256()).hasSize(32);
             assertThat(key.hex()).hasSize(64);
             // The key must not be recoverable as any substring of the request.
@@ -144,8 +169,8 @@ class CacheKeyFactoryTest {
             byte[] longHist = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"first\"},"
                     + "{\"role\":\"assistant\",\"content\":\"first reply\"},"
                     + "{\"role\":\"user\",\"content\":\"hi\"}]}");
-            assertThat(factory.compute(ctx, "gpt-4o-mini", shortHist))
-                    .isEqualTo(factory.compute(ctx, "gpt-4o-mini", longHist));
+            assertThat(factory.compute(ctx, "gpt-4o-mini", shortHist, CHAT_FAMILY))
+                    .isEqualTo(factory.compute(ctx, "gpt-4o-mini", longHist, CHAT_FAMILY));
         }
 
         @Test
@@ -154,8 +179,8 @@ class CacheKeyFactoryTest {
             byte[] a = json("{\"model\":\"claude-3-7-sonnet\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
             byte[] b = json("{\"model\":\"claude-3-7-sonnet\",\"messages\":[{\"role\":\"assistant\",\"content\":\"x\"},"
                     + "{\"role\":\"user\",\"content\":\"hi\"}]}");
-            assertThat(factory.compute(ctx, "claude-3-7-sonnet", a))
-                    .isEqualTo(factory.compute(ctx, "claude-3-7-sonnet", b));
+            assertThat(factory.compute(ctx, "claude-3-7-sonnet", a, CHAT_FAMILY))
+                    .isEqualTo(factory.compute(ctx, "claude-3-7-sonnet", b, CHAT_FAMILY));
         }
 
         @Test
@@ -164,7 +189,8 @@ class CacheKeyFactoryTest {
             byte[] a = json("{\"model\":\"gpt-5.2\",\"input\":[\"hi\"]}");
             byte[] b = json("{\"model\":\"gpt-5.2\",\"input\":[{\"role\":\"user\",\"content\":\"first\"},"
                     + "{\"role\":\"assistant\",\"content\":\"reply\"},\"hi\"]}");
-            assertThat(factory.compute(ctx, "gpt-5.2", a)).isEqualTo(factory.compute(ctx, "gpt-5.2", b));
+            assertThat(factory.compute(ctx, "gpt-5.2", a, CHAT_FAMILY))
+                    .isEqualTo(factory.compute(ctx, "gpt-5.2", b, CHAT_FAMILY));
         }
 
         @Test
@@ -174,7 +200,8 @@ class CacheKeyFactoryTest {
                     + "{\"role\":\"user\",\"content\":\"hi\"}]}");
             byte[] b = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"system\",\"content\":\"be verbose\"},"
                     + "{\"role\":\"user\",\"content\":\"hi\"}]}");
-            assertThat(factory.compute(ctx, "gpt-4o-mini", a)).isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", b));
+            assertThat(factory.compute(ctx, "gpt-4o-mini", a, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", b, CHAT_FAMILY));
         }
 
         @Test
@@ -183,7 +210,8 @@ class CacheKeyFactoryTest {
             byte[] a = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":["
                     + "{\"type\":\"text\",\"text\":\"hi\"},{\"type\":\"text\",\"text\":\" there\"}]}]}");
             byte[] b = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"hi there\"}]}");
-            assertThat(factory.compute(ctx, "gpt-4o-mini", a)).isEqualTo(factory.compute(ctx, "gpt-4o-mini", b));
+            assertThat(factory.compute(ctx, "gpt-4o-mini", a, CHAT_FAMILY))
+                    .isEqualTo(factory.compute(ctx, "gpt-4o-mini", b, CHAT_FAMILY));
         }
 
         @Test
@@ -192,7 +220,8 @@ class CacheKeyFactoryTest {
             byte[] a = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"assistant\",\"content\":\"only\"}]}");
             byte[] b = json(
                     "{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"assistant\",\"content\":\"other\"}]}");
-            assertThat(factory.compute(ctx, "gpt-4o-mini", a)).isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", b));
+            assertThat(factory.compute(ctx, "gpt-4o-mini", a, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", b, CHAT_FAMILY));
         }
 
         @Test
@@ -200,7 +229,8 @@ class CacheKeyFactoryTest {
         void differentQuestionMisses() {
             byte[] a = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
             byte[] b = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"bye\"}]}");
-            assertThat(factory.compute(ctx, "gpt-4o-mini", a)).isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", b));
+            assertThat(factory.compute(ctx, "gpt-4o-mini", a, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", b, CHAT_FAMILY));
         }
     }
 
@@ -255,8 +285,8 @@ class CacheKeyFactoryTest {
         void anthropicImageSplits() {
             byte[] imageA = json(ANTHROPIC.formatted("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"));
             byte[] imageB = json(ANTHROPIC.formatted("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAC"));
-            assertThat(factory.compute(ctx, "claude-3-7-sonnet", imageA))
-                    .isNotEqualTo(factory.compute(ctx, "claude-3-7-sonnet", imageB));
+            assertThat(factory.compute(ctx, "claude-3-7-sonnet", imageA, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "claude-3-7-sonnet", imageB, CHAT_FAMILY));
         }
 
         @Test
@@ -264,8 +294,8 @@ class CacheKeyFactoryTest {
         void openAiImageSplits() {
             byte[] imageA = json(OPENAI.formatted("https://example.test/cat.png"));
             byte[] imageB = json(OPENAI.formatted("https://example.test/dog.png"));
-            assertThat(factory.compute(ctx, "gpt-4o-mini", imageA))
-                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", imageB));
+            assertThat(factory.compute(ctx, "gpt-4o-mini", imageA, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", imageB, CHAT_FAMILY));
         }
 
         @Test
@@ -273,8 +303,8 @@ class CacheKeyFactoryTest {
         void anthropicTopLevelSystemImageSplits() {
             byte[] imageA = json(ANTHROPIC_SYSTEM.formatted("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"));
             byte[] imageB = json(ANTHROPIC_SYSTEM.formatted("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAC"));
-            assertThat(factory.compute(ctx, "claude-3-7-sonnet", imageA))
-                    .isNotEqualTo(factory.compute(ctx, "claude-3-7-sonnet", imageB));
+            assertThat(factory.compute(ctx, "claude-3-7-sonnet", imageA, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "claude-3-7-sonnet", imageB, CHAT_FAMILY));
         }
 
         @Test
@@ -282,7 +312,8 @@ class CacheKeyFactoryTest {
         void responsesInstructionsImageSplits() {
             byte[] imageA = json(RESPONSES_INSTRUCTIONS.formatted("https://example.test/cat.png"));
             byte[] imageB = json(RESPONSES_INSTRUCTIONS.formatted("https://example.test/dog.png"));
-            assertThat(factory.compute(ctx, "gpt-5.2", imageA)).isNotEqualTo(factory.compute(ctx, "gpt-5.2", imageB));
+            assertThat(factory.compute(ctx, "gpt-5.2", imageA, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-5.2", imageB, CHAT_FAMILY));
         }
 
         @Test
@@ -292,8 +323,8 @@ class CacheKeyFactoryTest {
             byte[] imageB = json(ASSISTANT_HISTORY.formatted("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAC"));
             // The last user turn ("and this") is identical in both, so the scope
             // path would collapse them; the history image must keep them apart.
-            assertThat(factory.compute(ctx, "claude-3-7-sonnet", imageA))
-                    .isNotEqualTo(factory.compute(ctx, "claude-3-7-sonnet", imageB));
+            assertThat(factory.compute(ctx, "claude-3-7-sonnet", imageA, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "claude-3-7-sonnet", imageB, CHAT_FAMILY));
         }
     }
 
@@ -324,7 +355,7 @@ class CacheKeyFactoryTest {
         /** Full-body parses performed by one {@code compute} of the given body. */
         private int parsesFor(byte[] body) {
             CountingObjectMapper counting = new CountingObjectMapper();
-            new CacheKeyFactory(counting).compute(ctx, "gpt-4o-mini", body);
+            new CacheKeyFactory(counting).compute(ctx, "gpt-4o-mini", body, CHAT_FAMILY);
             return counting.bodyParses();
         }
     }
@@ -382,18 +413,18 @@ class CacheKeyFactoryTest {
             byte[] budget = json("{\"model\":\"gpt-4o-mini\",\"temperature\":0.9,\"max_tokens\":1024,"
                     + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
 
-            assertThat(factory.compute(ctx, "gpt-4o-mini", warm))
-                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", cold));
-            assertThat(factory.compute(ctx, "gpt-4o-mini", warm))
-                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", budget));
+            assertThat(factory.compute(ctx, "gpt-4o-mini", warm, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", cold, CHAT_FAMILY));
+            assertThat(factory.compute(ctx, "gpt-4o-mini", warm, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", budget, CHAT_FAMILY));
             // Identical parameters (any field order) stay a stable hit.
             byte[] warmAgain = json("{\"max_tokens\":256,\"temperature\":0.9,\"model\":\"gpt-4o-mini\","
                     + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
-            assertThat(factory.compute(ctx, "gpt-4o-mini", warm))
-                    .isEqualTo(factory.compute(ctx, "gpt-4o-mini", warmAgain));
+            assertThat(factory.compute(ctx, "gpt-4o-mini", warm, CHAT_FAMILY))
+                    .isEqualTo(factory.compute(ctx, "gpt-4o-mini", warmAgain, CHAT_FAMILY));
             // Absent parameters keep the pre-existing key shape (both absent = equal).
-            assertThat(factory.compute(ctx, "gpt-4o-mini", json(BASE)))
-                    .isEqualTo(factory.compute(ctx, "gpt-4o-mini", json(BASE)));
+            assertThat(factory.compute(ctx, "gpt-4o-mini", json(BASE), CHAT_FAMILY))
+                    .isEqualTo(factory.compute(ctx, "gpt-4o-mini", json(BASE), CHAT_FAMILY));
         }
 
         @Test
@@ -403,8 +434,8 @@ class CacheKeyFactoryTest {
                     + "\"budget_tokens\":1024},\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
             byte[] large = json("{\"model\":\"claude-3-7-sonnet\",\"thinking\":{\"type\":\"enabled\","
                     + "\"budget_tokens\":16384},\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
-            assertThat(factory.compute(ctx, "claude-3-7-sonnet", small))
-                    .isNotEqualTo(factory.compute(ctx, "claude-3-7-sonnet", large));
+            assertThat(factory.compute(ctx, "claude-3-7-sonnet", small, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "claude-3-7-sonnet", large, CHAT_FAMILY));
         }
 
         @Test
@@ -417,11 +448,11 @@ class CacheKeyFactoryTest {
             byte[] sameAsA = json("{\"model\":\"claude-3-7-sonnet\",\"system\":[{\"type\":\"text\","
                     + "\"text\":\"You are terse.\"}],\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
 
-            assertThat(factory.compute(ctx, "claude-3-7-sonnet", a))
-                    .isNotEqualTo(factory.compute(ctx, "claude-3-7-sonnet", b));
+            assertThat(factory.compute(ctx, "claude-3-7-sonnet", a, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "claude-3-7-sonnet", b, CHAT_FAMILY));
             // Array-form system parts flatten identically to the plain string.
-            assertThat(factory.compute(ctx, "claude-3-7-sonnet", a))
-                    .isEqualTo(factory.compute(ctx, "claude-3-7-sonnet", sameAsA));
+            assertThat(factory.compute(ctx, "claude-3-7-sonnet", a, CHAT_FAMILY))
+                    .isEqualTo(factory.compute(ctx, "claude-3-7-sonnet", sameAsA, CHAT_FAMILY));
         }
 
         @Test
@@ -429,7 +460,8 @@ class CacheKeyFactoryTest {
         void responsesInstructionsMatter() {
             byte[] a = json("{\"model\":\"gpt-5.2\",\"instructions\":\"answer briefly\",\"input\":[\"hi\"]}");
             byte[] b = json("{\"model\":\"gpt-5.2\",\"instructions\":\"answer verbosely\",\"input\":[\"hi\"]}");
-            assertThat(factory.compute(ctx, "gpt-5.2", a)).isNotEqualTo(factory.compute(ctx, "gpt-5.2", b));
+            assertThat(factory.compute(ctx, "gpt-5.2", a, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-5.2", b, CHAT_FAMILY));
         }
 
         @Test
@@ -443,8 +475,8 @@ class CacheKeyFactoryTest {
             // Anthropic names this parameter "stop_sequences"; "stop" (OpenAI's
             // name) is already a dimension, so an Anthropic client that bounds the
             // generation must not replay an unbounded response.
-            assertThat(factory.compute(ctx, "claude-3-7-sonnet", unbounded))
-                    .isNotEqualTo(factory.compute(ctx, "claude-3-7-sonnet", bounded));
+            assertThat(factory.compute(ctx, "claude-3-7-sonnet", unbounded, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "claude-3-7-sonnet", bounded, CHAT_FAMILY));
         }
 
         @Test
@@ -457,8 +489,8 @@ class CacheKeyFactoryTest {
 
             // max_tokens (the legacy name) is a dimension; max_completion_tokens is
             // the name current OpenAI models require, and must split identically.
-            assertThat(factory.compute(ctx, "gpt-4o-mini", tiny))
-                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", large));
+            assertThat(factory.compute(ctx, "gpt-4o-mini", tiny, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", large, CHAT_FAMILY));
         }
 
         @Test
@@ -470,8 +502,8 @@ class CacheKeyFactoryTest {
 
             // A client that asked for token-level probabilities must not receive a
             // cached response that carries none.
-            assertThat(factory.compute(ctx, "gpt-4o-mini", plain))
-                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", withLogprobs));
+            assertThat(factory.compute(ctx, "gpt-4o-mini", plain, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", withLogprobs, CHAT_FAMILY));
         }
 
         @Test
@@ -484,8 +516,8 @@ class CacheKeyFactoryTest {
 
             // include_usage makes the upstream append a final usage chunk; replaying
             // a stream that lacks it violates the client's stream contract.
-            assertThat(factory.compute(ctx, "gpt-4o-mini", withoutUsage))
-                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", withUsage));
+            assertThat(factory.compute(ctx, "gpt-4o-mini", withoutUsage, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", withUsage, CHAT_FAMILY));
         }
 
         @Test
@@ -502,16 +534,17 @@ class CacheKeyFactoryTest {
             // body has an extractable scope, so an unpicked nested field is invisible
             // to the key: a client that demanded a JSON schema would be served a
             // cached plain-text answer.
-            assertThat(factory.compute(ctx, "gpt-5.2", plainText))
-                    .isNotEqualTo(factory.compute(ctx, "gpt-5.2", jsonSchema));
-            assertThat(factory.compute(ctx, "gpt-5.2", terse)).isNotEqualTo(factory.compute(ctx, "gpt-5.2", chatty));
+            assertThat(factory.compute(ctx, "gpt-5.2", plainText, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-5.2", jsonSchema, CHAT_FAMILY));
+            assertThat(factory.compute(ctx, "gpt-5.2", terse, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-5.2", chatty, CHAT_FAMILY));
             // Key order inside the nested object is normalized away, so an
             // equivalent body stays a stable hit.
             byte[] schemaReordered = json(
                     base + "\"text\":{\"format\":{\"schema\":{\"type\":\"object\"},\"name\":\"out\","
                             + "\"type\":\"json_schema\"}}}");
-            assertThat(factory.compute(ctx, "gpt-5.2", jsonSchema))
-                    .isEqualTo(factory.compute(ctx, "gpt-5.2", schemaReordered));
+            assertThat(factory.compute(ctx, "gpt-5.2", jsonSchema, CHAT_FAMILY))
+                    .isEqualTo(factory.compute(ctx, "gpt-5.2", schemaReordered, CHAT_FAMILY));
         }
 
         @Test
@@ -521,7 +554,8 @@ class CacheKeyFactoryTest {
             byte[] low = json(base + "\"reasoning\":{\"effort\":\"low\"}}");
             byte[] high = json(base + "\"reasoning\":{\"effort\":\"high\"}}");
 
-            assertThat(factory.compute(ctx, "gpt-5.2", low)).isNotEqualTo(factory.compute(ctx, "gpt-5.2", high));
+            assertThat(factory.compute(ctx, "gpt-5.2", low, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-5.2", high, CHAT_FAMILY));
         }
 
         @Test
@@ -537,12 +571,12 @@ class CacheKeyFactoryTest {
             // Each of these changes what the client receives back (extra output
             // items, a truncated input, an in-progress envelope) without touching
             // the scope, so a shared entry would return the wrong payload shape.
-            assertThat(factory.compute(ctx, "gpt-5.2", plain))
-                    .isNotEqualTo(factory.compute(ctx, "gpt-5.2", withReasoningItems));
-            assertThat(factory.compute(ctx, "gpt-5.2", autoTruncation))
-                    .isNotEqualTo(factory.compute(ctx, "gpt-5.2", disabledTruncation));
-            assertThat(factory.compute(ctx, "gpt-5.2", plain))
-                    .isNotEqualTo(factory.compute(ctx, "gpt-5.2", background));
+            assertThat(factory.compute(ctx, "gpt-5.2", plain, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-5.2", withReasoningItems, CHAT_FAMILY));
+            assertThat(factory.compute(ctx, "gpt-5.2", autoTruncation, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-5.2", disabledTruncation, CHAT_FAMILY));
+            assertThat(factory.compute(ctx, "gpt-5.2", plain, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-5.2", background, CHAT_FAMILY));
         }
 
         @Test
@@ -559,10 +593,10 @@ class CacheKeyFactoryTest {
             // The response payload is audio, not text: a text-only client must not
             // receive a base64 audio envelope, nor a client that chose a voice
             // receive another one's audio.
-            assertThat(factory.compute(ctx, "gpt-4o-audio-preview", textOnly))
-                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-audio-preview", withAudio));
-            assertThat(factory.compute(ctx, "gpt-4o-audio-preview", alloy))
-                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-audio-preview", echo));
+            assertThat(factory.compute(ctx, "gpt-4o-audio-preview", textOnly, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-audio-preview", withAudio, CHAT_FAMILY));
+            assertThat(factory.compute(ctx, "gpt-4o-audio-preview", alloy, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-audio-preview", echo, CHAT_FAMILY));
         }
 
         @Test
@@ -575,8 +609,8 @@ class CacheKeyFactoryTest {
             // The referenced history is invisible to the gateway — the body carries
             // only the new turn — so the pointer is the sole representation of the
             // conversation and has to split the key.
-            assertThat(factory.compute(ctx, "gpt-5.2", firstConversation))
-                    .isNotEqualTo(factory.compute(ctx, "gpt-5.2", secondConversation));
+            assertThat(factory.compute(ctx, "gpt-5.2", firstConversation, CHAT_FAMILY))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-5.2", secondConversation, CHAT_FAMILY));
         }
     }
 }

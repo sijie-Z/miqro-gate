@@ -5,6 +5,7 @@ import com.miqroera.miqrokey.domain.model.AdminApiKeyCapabilities;
 import com.miqroera.miqrokey.domain.model.UserRole;
 import com.miqroera.miqrokey.domain.repository.AdminApiKeyRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
+import com.miqroera.miqrokey.controlplane.service.AuditSummaries;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -152,12 +153,14 @@ public class AdminApiKeyAuthFilter extends OncePerRequestFilter {
         if (!(issuer instanceof UUID) || !(tenantId instanceof UUID) || !(keyId instanceof UUID)) {
             return;
         }
+        // #1382: the path is client-controlled and arrives DECODED, so a
+        // percent-encoded control character reaches this point as a raw byte.
+        // Splicing it into the summary by hand produced a non-JSON document that
+        // the ::jsonb round-trip in AuditServiceImpl rejected — no audit row, and
+        // the throw escaped this filter before forbiddenScope() could answer.
+        // AuditSummaries serializes the value instead of splicing it.
         auditService.record((UUID) tenantId, (UUID) issuer, "ADMIN_API_KEY_SCOPE_DENIED", "ADMIN_API_KEY", (UUID) keyId,
-                "{\"path\":\"" + safeJson(RequestPaths.lookupPath(request)) + "\"}", null);
-    }
-
-    private static String safeJson(String value) {
-        return value.replace("\\", "\\\\").replace("\"", "\\\"");
+                AuditSummaries.summary("path", RequestPaths.lookupPath(request)), null);
     }
 
     private static byte[] sha256(String value) {

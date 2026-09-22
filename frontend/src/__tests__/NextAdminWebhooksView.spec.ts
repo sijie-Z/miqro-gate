@@ -246,4 +246,83 @@ describe('NextAdminWebhooksView', () => {
     expect(badge.exists()).toBe(true);
     expect(badge.text()).toContain('2/3');
   });
+
+  describe('row actions while a request is still in flight', () => {
+    it('sends one test delivery when 测试 is clicked twice before the first returns', async () => {
+      mockApi.listWebhooks.mockResolvedValue([endpoint()]);
+      // never resolves: both clicks land while the first request is in flight
+      mockApi.testWebhook.mockReturnValue(
+        new Promise<{ httpStatus?: number; errorMessage?: string }>(() => {}),
+      );
+      const wrapper = mountView();
+      await flushPromises();
+
+      const button = wrapper.find('[data-testid="webhook-test"]');
+      await button.trigger('click');
+      await button.trigger('click');
+      await flushPromises();
+
+      // one click is one real outbound signed delivery to the customer's receiver
+      expect(mockApi.testWebhook).toHaveBeenCalledTimes(1);
+    });
+
+    it('sends one PATCH when the enable/disable toggle is clicked twice before the first returns', async () => {
+      mockApi.listWebhooks.mockResolvedValue([endpoint()]);
+      mockApi.updateWebhook.mockReturnValue(new Promise<WebhookEndpointView>(() => {}));
+      const wrapper = mountView();
+      await flushPromises();
+
+      // Locate by row text + button label rather than by `data-testid="webhook-toggle"`:
+      // that testid is introduced by the fix, so keying on it would make this test fail on
+      // the unfixed revision at the selector, not at the call count it is meant to prove.
+      const row = wrapper.findAll('tr').find((r) => r.text().includes('ops-alerts'));
+      expect(row, 'endpoint row should render').toBeDefined();
+      const toggle = row!.findAll('button').find((b) => ['停用', '启用'].includes(b.text()));
+      expect(toggle, 'enable/disable toggle should render').toBeDefined();
+
+      await toggle!.trigger('click');
+      await toggle!.trigger('click');
+      await flushPromises();
+
+      expect(mockApi.updateWebhook).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows the in-flight row as busy instead of silently swallowing the click', async () => {
+      mockApi.listWebhooks.mockResolvedValue([endpoint()]);
+      mockApi.testWebhook.mockReturnValue(new Promise<{ httpStatus?: number }>(() => {}));
+      const wrapper = mountView();
+      await flushPromises();
+
+      const button = wrapper.find('[data-testid="webhook-test"]');
+      expect(button.attributes('disabled')).toBeUndefined();
+
+      await button.trigger('click');
+      await flushPromises();
+
+      expect(button.attributes('disabled')).toBeDefined();
+      expect(button.attributes('aria-busy')).toBe('true');
+    });
+
+    it('does not let one pending row block an action on a different row', async () => {
+      mockApi.listWebhooks.mockResolvedValue([
+        endpoint({ id: 'w1' }),
+        endpoint({ id: 'w2', name: 'sre-hook' }),
+      ]);
+      mockApi.testWebhook.mockReturnValue(new Promise<{ httpStatus?: number }>(() => {}));
+      const wrapper = mountView();
+      await flushPromises();
+
+      const tests = wrapper.findAll('[data-testid="webhook-test"]');
+      expect(tests).toHaveLength(2);
+
+      await tests[0]!.trigger('click');
+      await flushPromises();
+      await tests[1]!.trigger('click');
+      await flushPromises();
+
+      expect(mockApi.testWebhook).toHaveBeenCalledTimes(2);
+      expect(mockApi.testWebhook).toHaveBeenNthCalledWith(1, 'w1');
+      expect(mockApi.testWebhook).toHaveBeenNthCalledWith(2, 'w2');
+    });
+  });
 });

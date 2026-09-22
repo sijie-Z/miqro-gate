@@ -48,6 +48,30 @@ describe('NextAdminDeletionsView', () => {
     expect(wrapper.text()).toContain('已执行');
   });
 
+  it('#PH89: 窗口列与同一行的创建时间同口径（本地），不写后端 UTC 日', async () => {
+    // One instant, three columns. 2026-08-31T16:30:00Z is chosen so the local
+    // and UTC clocks disagree at UTC+8 — the day turns over between them, which
+    // is exactly what the window column used to print.
+    const instant = '2026-08-31T16:30:00Z';
+    mockApi.deletionRecent.mockResolvedValue([
+      { ...request, periodFrom: instant, periodTo: instant, createdAt: instant },
+    ]);
+    const wrapper = mountView();
+    await flushPromises();
+
+    // Derived with local getters, so this holds in whatever zone it runs in.
+    const d = new Date(instant);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const localDay = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const localClock = `${localDay} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+    const text = wrapper.text();
+    // createdAt already renders through local getters (formatTime); the window
+    // column has to read the same clock or one row carries two different dates.
+    expect(text).toContain(localClock);
+    expect(text).toContain(`${localDay} → ${localDay}`);
+  });
+
   it('previews, creates and confirms a deletion with the token', async () => {
     mockApi.createDeletion.mockResolvedValue({
       id: 'd9',

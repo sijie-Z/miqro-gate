@@ -31,6 +31,7 @@ import com.miqroera.miqrokey.gateway.vkey.QuotaGate;
 import com.miqroera.miqrokey.gateway.vkey.VirtualKeyResolver;
 import com.miqroera.miqrokey.queue.RequestCoalescer;
 import com.miqroera.miqrokey.queue.UsageEventBus;
+import io.netty.handler.timeout.ReadTimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -65,6 +66,7 @@ import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.LongConsumer;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -317,7 +319,9 @@ public class ProxyController {
             boolean cacheable = CacheEligibility.isCacheable(ctx,
                     exchange.getRequest().getHeaders().getFirst(CacheEligibility.CACHEABLE_HEADER), body,
                     hasToolFields);
-            CacheKey cacheKey = cacheable ? cacheKeyFactory.compute(ctx, modelName, body) : null;
+            CacheKey cacheKey = cacheable
+                    ? cacheKeyFactory.compute(ctx, modelName, body, wireProtocolOf(exchange))
+                    : null;
 
             // #444: the cache lookup is blocking I/O (L2 hits PostgreSQL) — it
             // must never run on the event loop. Reads go through the bounded
@@ -345,7 +349,30 @@ public class ProxyController {
                             e -> writeError(exchange,
                                     new AuthFailureException(HttpStatus.BAD_GATEWAY, "upstream_unavailable",
                                             "Upstream provider is unreachable")))
-                    .onErrorResume(PrematureCloseException.class, e -> upstreamClosedBeforeFirstByte(exchange, e));
+                    .onErrorResume(PrematureCloseException.class, e -> upstreamClosedBeforeFirstByte(exchange, e))
+                    // #1375: the same leak, one operator further out. The two
+                    // gateway-owned deadlines (responseTimeout at the overall
+                    // level, streamIdleTimeout on the observed body) are plain
+                    // Flux/Mono timeouts: they emit
+                    // java.util.concurrent.TimeoutException, which is neither a
+                    // WebClientRequestException nor a PrematureCloseException, so
+                    // it matched none of the clauses above and a gateway-side
+                    // deadline rendered as the container's 500 document.
+                    .onErrorResume(TimeoutException.class, e -> upstreamDeadlineExceeded(exchange, e))
+                    // And the fourth deadline, which is the gateway's too: the
+                    // upstream first-byte timeout is reactor-netty's own
+                    // ReadTimeoutException (io.netty.handler.timeout — no ancestor
+                    // in common with the JDK TimeoutException above). It reaches
+                    // this chain in two shapes: while the response head is still
+                    // outstanding the netty failure is wrapped in a
+                    // WebClientRequestException and takes the 502 clause above,
+                    // but once the head has been read it surfaces unwrapped and,
+                    // with no clause of its own, escaped as the container's 500
+                    // document. It is also the deadline that fires first by
+                    // default: it is armed between reads, so at the shipped
+                    // PT120S it preempts both gateway-owned caps (PT5M idle,
+                    // PT10M overall).
+                    .onErrorResume(ReadTimeoutException.class, e -> upstreamDeadlineExceeded(exchange, e));
         }).onErrorResume(DataBufferLimitException.class,
                 e -> writeError(exchange, new AuthFailureException(HttpStatus.PAYLOAD_TOO_LARGE, "payload_too_large",
                         "Request body exceeds the gateway buffer limit")));
@@ -946,9 +973,55 @@ public class ProxyController {
                 "Upstream provider closed the connection before sending a response body"));
     }
 
+    /**
+     * A deadline the gateway set for the upstream expired: the overall hard
+     * deadline ({@code miqrokey.gateway.upstream.response-timeout}), the
+     * stream-idle deadline ({@code miqrokey.gateway.upstream.stream-idle-timeout}),
+     * or the first-byte deadline
+     * ({@code miqrokey.gateway.upstream.first-byte-timeout}) — the last one when
+     * the upstream announced a status but never sent a body byte.
+     *
+     * <p>
+     * The parameter is {@link Throwable} because the three deadlines do not share a
+     * type: the two gateway-owned ones are plain {@code Mono}/{@code Flux} timeouts
+     * ({@link TimeoutException}) while the first-byte one is reactor-netty's
+     * {@code io.netty.handler.timeout.ReadTimeoutException}, whose nearest common
+     * ancestor with the JDK type is {@code Throwable}. Their handling is the same,
+     * so they share it.
+     * </p>
+     *
+     * <p>
+     * Nothing has been relayed downstream in any of the three cases, so the
+     * response is still uncommitted and the protocol envelope can be written; the
+     * deadline then maps exactly like its transport siblings — the upstream did not
+     * produce a usable response in time. Once a body byte has been relayed the
+     * response is committed and any UTF-8 envelope would corrupt the stream already
+     * on the wire, so the deadline is propagated unchanged, for the same reason as
+     * {@link #upstreamClosedBeforeFirstByte}.
+     * </p>
+     */
+    private Mono<Void> upstreamDeadlineExceeded(ServerWebExchange exchange, Throwable error) {
+        if (exchange.getResponse().isCommitted()) {
+            return Mono.error(error);
+        }
+        return writeError(exchange, new AuthFailureException(HttpStatus.BAD_GATEWAY, "upstream_unavailable",
+                "Upstream provider did not respond before the gateway deadline"));
+    }
+
+    /**
+     * Writes a protocol error envelope. The provider's response head may already
+     * have been copied onto this response (see {@code callUpstreamOnce}), so the
+     * entity headers describing a body that never arrived have to go first: a
+     * {@code Content-Length} of the provider's making would claim a size the
+     * envelope does not have, leaving the client to wait for bytes no one will send
+     * (#1416), and a {@code Content-Encoding} would have it decode plain UTF-8
+     * JSON.
+     */
     private Mono<Void> writeError(ServerWebExchange exchange, AuthFailureException e) {
         ServerHttpResponse response = exchange.getResponse();
         response.setStatusCode(HttpStatusCode.valueOf(e.status()));
+        response.getHeaders().remove(HttpHeaders.CONTENT_LENGTH);
+        response.getHeaders().remove(HttpHeaders.CONTENT_ENCODING);
         response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
         if (e.retryAfterSeconds() != null) {
             response.getHeaders().set(HttpHeaders.RETRY_AFTER, String.valueOf(e.retryAfterSeconds()));

@@ -188,6 +188,74 @@ describe('NextProjectsView', () => {
     expect((mockApi.listProjectMembers as ReturnType<typeof vi.fn>).mock.calls.length).toBe(2);
   });
 
+  it('#PH78: the 成员 count in the row follows the roster after an add', async () => {
+    mockApi.listProjectMembers.mockResolvedValue([member()]);
+    mockApi.addProjectMember.mockResolvedValue(undefined);
+    mockApi.listUsers.mockResolvedValue([
+      user({ id: 'u1', username: 'alice', displayName: 'Alice' }),
+      user({ id: 'u2', username: 'bob', displayName: 'Bob' }),
+    ]);
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.findAll('[data-testid="project-member-count"]')[0]!.text()).toBe('1');
+
+    await wrapper.find('[data-testid="project-members-open"]').trigger('click');
+    await flushPromises();
+
+    // The add lands server-side: the next roster read returns two members.
+    mockApi.listProjectMembers.mockResolvedValue([
+      member(),
+      member({ userId: 'u2', username: 'bob', displayName: 'Bob' }),
+    ]);
+
+    const select = wrapper.findComponent(UiSelect);
+    select.vm.$emit('update:modelValue', 'u2');
+    await flushPromises();
+    (document.querySelector('[data-testid="project-member-add"]') as HTMLButtonElement).click();
+    await flushPromises();
+
+    // The roster the user is looking at now holds two people...
+    expect(document.querySelector('[data-testid="project-members-table"]')!.textContent).toContain(
+      'bob',
+    );
+    // ...so the project row behind it must not still be advertising the old count.
+    expect(wrapper.findAll('[data-testid="project-member-count"]')[0]!.text()).toBe('2');
+  });
+
+  it('#PH78: the 成员 count in the row follows the roster after a remove', async () => {
+    mockApi.listProjectMembers.mockResolvedValue([
+      member(),
+      member({ userId: 'u2', username: 'bob', displayName: 'Bob' }),
+    ]);
+    mockApi.removeProjectMember.mockResolvedValue(undefined);
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.findAll('[data-testid="project-member-count"]')[0]!.text()).toBe('2');
+
+    await wrapper.find('[data-testid="project-members-open"]').trigger('click');
+    await flushPromises();
+
+    // The removal lands server-side: the next roster read returns one member.
+    mockApi.listProjectMembers.mockResolvedValue([member()]);
+
+    (document.querySelector('[data-testid="project-member-remove"]') as HTMLButtonElement).click();
+    await flushPromises();
+    const confirm = (Array.from(document.querySelectorAll('button')) as HTMLButtonElement[]).find(
+      (b) => b.textContent?.trim() === '移除' && b.className.includes('ui-btn--danger'),
+    );
+    confirm!.click();
+    await flushPromises();
+
+    // The roster behind the drawer shrank...
+    expect(
+      document.querySelector('[data-testid="project-members-table"]')!.textContent,
+    ).not.toContain('bob');
+    // ...so the row must not keep advertising the pre-removal headcount.
+    expect(wrapper.findAll('[data-testid="project-member-count"]')[0]!.text()).toBe('1');
+  });
+
   it('shows the routing-tag hint on the create form (#617)', async () => {
     const wrapper = mountView();
     await flushPromises();

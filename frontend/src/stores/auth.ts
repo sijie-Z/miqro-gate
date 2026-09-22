@@ -128,6 +128,18 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  /**
+   * #PH78: 身份在 store 里是第二份副本，改的是自己时它必须跟着走。管理端改完显示名
+   * 只会重载用户表格，而 `NextOverviewView` 的 load() 不含任何 auth 读（唯一会重读
+   * 身份的资料页 :222 靠 fetchMe 自愈），问候语就一直停在旧名字。
+   * 只认 id 相同的那个用户，别的用户怎么改都动不到这份身份。
+   */
+  function applyDisplayName(userId: string, displayName: string): void {
+    if (user.value?.id === userId) {
+      user.value.displayName = displayName;
+    }
+  }
+
   return {
     user,
     loaded,
@@ -139,5 +151,6 @@ export const useAuthStore = defineStore('auth', () => {
     register,
     logout,
     changePassword,
+    applyDisplayName,
   };
 });

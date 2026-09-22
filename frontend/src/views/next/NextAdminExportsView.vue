@@ -7,6 +7,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import * as api from '@/api';
 import { countWhenLoaded } from '@/utils/load-state';
+import { localDayKey } from '@/utils/datetime';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDonut, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
 import { CHART_TONE_COLORS } from '@/lib/chart-palette';
@@ -324,10 +325,12 @@ onMounted(load);
         :error="loadError"
         @retry="load"
       >
+        <!-- The window is an Instant, so slice(0, 10) would print the UTC day
+             while the createdAt column beside it prints the local one. -->
         <template #period="{ row }">
           <span class="ui-mono"
-            >{{ (row as ExportTask).periodFrom?.slice(0, 10) ?? '' }} →
-            {{ (row as ExportTask).periodTo?.slice(0, 10) ?? '' }}</span
+            >{{ localDayKey((row as ExportTask).periodFrom) }} →
+            {{ localDayKey((row as ExportTask).periodTo) }}</span
           >
         </template>
         <template #status="{ row }">

@@ -112,10 +112,11 @@ public class McpServiceRepositoryImpl implements McpServiceRepository {
 
     @Override
     @Transactional
-    public McpService update(McpService service, long expectedVersion) {
+    public McpService replace(McpService service, long expectedVersion) {
         int rows = jdbc.update("""
                 UPDATE mcp_services
-                SET description = :description, endpoint = :endpoint, transport = :transport, status = :status,
+                SET name = :name, description = :description, endpoint = :endpoint, transport = :transport,
+                    status = :status,
                     health_status = :healthStatus, health_checked_at = :checkedAt,
                     consecutive_failures = :failures, consecutive_successes = :successes,
                     check_interval_seconds = :interval, check_timeout_seconds = :timeout,

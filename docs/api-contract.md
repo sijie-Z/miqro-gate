@@ -214,6 +214,8 @@
 
 `status` ∈ `ACTIVE | ROTATING | REVOKED | DISABLED`。`cachePolicy` 默认 `DISABLED`（显式开启才可参与响应缓存）。
 
+**归属与例外**：`/api/v1/me/virtual-keys/**` 默认只作用于调用者自己的 Key——非属主请求 `/{id}` 一律 `404 KEY_NOT_FOUND`（不区分「不存在」与「不是你的」，反枚举）。唯一例外是 `SYSTEM_ADMIN`：安全闸按前缀放行后，管理员可对该面上**任意** Key 执行 `GET`/`PATCH`/`disable`/`enable`/`rotate`/`revoke`（实现为 `VirtualKeyService.ownedKey()` 的 `SYSTEM_ADMIN` 豁免；对应 `virtual-key-lifecycle.md` §4/§5「管理员可以禁用或吊销任意 Key」）。**注意这是 `{id}` 级运维面**：要「按用户列出某人的 Key」，会话面没有对应端点（§5 序言那条 `/api/v1/admin/virtual-keys` 仍未实现，见 #1377）；`GET /api/v1/me/virtual-keys` 对管理员也严格自限。管理员代为 `rotate` 会一次性拿到新明文 Secret（§4.3），需按凭证处置。
+
 ### 4.3 轮换与吊销
 
 `POST /api/v1/me/virtual-keys/{id}/rotate` 原子轮换：旧 Key 立即停止接受新请求，在配置宽限期（`miqrokey.virtual-key-rotate-grace`，默认 `PT0S`）内仍可路由，宽限结束后失效。响应与创建响应相同（`CreateVirtualKeyResponse`，新 Secret 仅本次出现一次）。
@@ -390,13 +392,14 @@
 - `/api/v1/admin/teams`、`/projects`：组织与项目。
 - `/api/v1/admin/provider-products`：供应商产品实例、Base URL、协议族、目录版本。
 - `/api/v1/admin/subscriptions`：PAYG、个人 Plan、团队 Plan、企业 Plan。
-- `/api/v1/admin/subscriptions/{id}/members`：席位、成员 Key 或共享池成员关系。
+- `/api/v1/admin/subscriptions/{id}/seats`：席位、成员 Key 或共享池成员关系（详见 §5.0b）。
 - `/api/v1/admin/credentials`：创建、测试、轮换、禁用真实凭证。
 - `/api/v1/admin/grants`：向用户授予项目、产品、凭证和模型范围。
-- `/api/v1/admin/virtual-keys`：全局查询、吊销；仍不返回明文。
+- `/api/v1/admin/virtual-keys`：**未实现（#1377）**——该路由在代码中不存在，请求一律 `404 NOT_FOUND`（本机实例实测：四形状 `GET` / `GET ?userId=` / `GET /{id}` / `POST /{id}/revoke` 全部 404）。管理员的密钥运维实际落在 §4 的自助面上：`VirtualKeyService.ownedKey()` 对 `SYSTEM_ADMIN` 豁免归属校验，故管理员可对**任意** Key 调 `GET`/`PATCH /api/v1/me/virtual-keys/{id}` 与 `/{id}/disable|enable|rotate|revoke`（对应 `virtual-key-lifecycle.md` §4/§5「管理员也可以代为轮换」「管理员可以禁用或吊销任意 Key」的要求），代价是必须**已知目标 Key 的 UUID**；非管理员对他人 Key 仍是 `404 KEY_NOT_FOUND`（反枚举口径不变）。该面的**读响应不含明文**（只有 `displayPrefix`/`lastFour`），`revoke` 只回 `{"message":"Virtual key revoked"}`；只有 `create`/`rotate` 会一次性返回明文 Secret（`shownOnce`，§4.2/§4.3）——管理员代为 `rotate` 他人的 Key，也会拿到一次新明文，需按凭证处置。
+  - **跨用户列表在会话面不存在**：`GET /api/v1/me/virtual-keys` 严格只返回调用者自己的 Key（管理员亦然）。按用户查列表目前只有机器密钥面 `GET /api/v1/admin-api/virtual-keys?userId=`（§9；需机器密钥且先知道 `userId`）。`VirtualKeyRepository.findAllByTenantId()` 虽已存在但无生产调用方——即本条承诺的「全局查询」在**任何会话面都没有实现**，是否补一个会话面管理员端点属产品决定，见 #1377。
 - `/api/v1/admin/usage/**`：全局汇总、差异视图、解析失败队列。
 - `/api/v1/admin/exports`：创建和下载原始记录导出任务。
-- `/api/v1/admin/reconciliation/**`：导入官方账单并生成匹配结果。
+- `/api/v1/admin/reconciliations/**`：导入官方账单并生成匹配结果（详见 §5.27）。
 - `/api/v1/admin/webhooks`：目标、签名 Secret、测试和投递记录。
 - `/api/v1/admin/audit-events`：不可修改的管理审计事件（读面可选 `action`/`targetType`/`actorId`/
   `from`/`to` 精确筛选 + `beforePosition` cursor）；每行带**只读** `targetName`（#389，doc 27）：按页内
@@ -1002,6 +1005,7 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 | `POST /api/v1/admin/model-approvals/{id}/reject` | 驳回（`{ "reviewNote"? }`） |
 
 - `status` ∈ `PENDING\|APPROVED\|REJECTED`，缺省返回全部；`size` 默认 20、上限 100；`before` 为上一页 `nextCursor`（不透明，编码 `(created_at, id)`；非法游标 `400 PARAM_INVALID`）。倒序返回 `{ "items": [ModelApprovalView], "nextCursor" }`。
+- **游标精度（#1392）**：游标按 `(created_at, id)` 键集比较，而 `created_at` 是 `timestamptz`（微秒精度），因此游标携带**微秒**——毫秒会丢掉边界行自身的亚毫秒部分，把同一毫秒内的其它行永久跳过、并让队列提前翻到底。要读完整队列必须沿 `nextCursor` 逐页走，**不要**数页数；`nextCursor` 为服务端产出的不透明串，无下一页时为 `null`。客户端不得解析其内容，也不得跨版本缓存（精度变化时旧游标仍可解，但应重新从首页开始）。
 - **通过语义**：写入 `virtual_key_models`（申请 Key）+ 若模型不在 Grant 中先写入 `project_provider_grant_models`（网关按 `key.models ∩ grant.models ∩ model_catalog(ACTIVE)` 三层放行，缺一不可），随后**立即**触发路由快照刷新（不等 30s 定时）。同 Grant 其它 Key 不受影响（各自 Key 快照独立）。
 - **批准前复核目录（#506）**：提交与批准两个时点都校验模型在该产品的 `model_catalog` 中有 ACTIVE 行——提交后模型被移出/停用目录时，批准返回 `409 MODEL_NOT_IN_CATALOG`（否则将"批准成功但网关不可见"）。
 - 仅 PENDING 可审批：重复审批 `409 ALREADY_REVIEWED`（乐观锁，并发评审只有一个成功）；Key 已吊销/停用 → `409 KEY_NOT_ACTIVE`（含轮换后的旧 Key：申请永远无法生效，提示会指引管理员改为「驳回」）；Grant 已停用 → `409 GRANT_INACTIVE`；不存在 → `404 APPROVAL_NOT_FOUND`。
@@ -1265,6 +1269,7 @@ detail_currency, detail_occurred_at, detail_status, detail_bucket_key, detail_pr
 - 用量记录：每个请求写入 `usage_event`（幂等，`provider_request_id` 在 tenant 内唯一）；usage 缺失时标记 `usage_missing=true`；正文（prompt、代码、工具、回答）永不进入持久化。
 - 生命周期记录（G2.4）：每个**到达上游**的请求在 `request_usage_records` 打开 `IN_FLIGHT` 行并恰好 finalize 一次——包括客户端取消、上游错误与超时（状态见 usage-accounting §2）；鉴权失败与缓存命中不打开记录。usage 从 SSE 事件或非流式 JSON 正文解析（仅计数）；SUCCEEDED 但无 usage 时 `usage_missing=true`，绝不静默记零。
 - 上游目标门控（G2.6 SSRF）：仅转发路由快照提供的 Base URL；`https` 是硬要求（除非目标命中 `MIQROKEY_UPSTREAM_ALLOWED_CIDRS`），URL 携带 `userinfo` 一律拒绝，DNS 解析后的每个地址必须是公网地址（环回、链路本地、RFC1918、CGNAT `100.64/10`、组播、any-local、IPv6 ULA `fc00::/7` 均拒绝，除非命中 allowlist）。被拒绝时返回 `502 route_unavailable`，错误体、日志与审计**不包含目标 URL 或主机名**（`UpstreamTargetValidator` 的拒绝原因只有稳定类别 token）。
+- 上游传输失败与网关自有截止（#1375）：上游不可达（连接失败/首字节前连接中断）、首字节超时（reactor-netty `ReadTimeoutException`，来源是 `MIQROKEY_UPSTREAM_FIRST_BYTE_TIMEOUT`——`ProxyConfig#proxyWebClient` 把它接成 WebClient 的 `responseTimeout`，因此**响应头已到达、但正文首字节迟迟不来**时也会到点，#1375 修的就是这条路径逃出类型化子句链）以及网关自己的两个截止——整体 `MIQROKEY_UPSTREAM_RESPONSE_TIMEOUT` 与流式空闲 `MIQROKEY_UPSTREAM_STREAM_IDLE_TIMEOUT`——在**响应尚未提交**（尚无正文字节下发）时统一返回 `502 upstream_unavailable` 协议兼容信封（Anthropic/OpenAI 各自形状）；错误体不回显上游正文，也不含目标 URL/主机名。**响应已提交后不再追写信封**（已发出的字节保持完整，连接以中断告终），此时生命周期按 `architecture.md` 的请求生命周期记录记为 `STREAM_INTERRUPTED`（已出首字节）或 `TIMEOUT_BEFORE_FIRST_BYTE`（未出首字节）。信封的 `Content-Length` 描述**信封自身**的字节数，且不继承上游的 `Content-Encoding`：上游响应头可能已先一步原样复制到客户端响应上，但描述「永远不会到达的正文」的实体头必须在写信封前清除（#1416）。`X-MiQroKey-Request-Id` 的注入与「上游响应头复制」同点发生（`ProxyController#callUpstreamOnce`；缓存/合流回放见 `SseReplayEngine#replay`），因此**在上游响应头到达之前**就失败的那部分信封（连接被拒、首字节前连接中断）**不带**该 Header——这些请求的 ID 只出现在用量记录、生命周期记录与网关日志中。四个超时之间不做启动期量级校验：`response-timeout` 短于 `first-byte-timeout` 时后者不可达，属运维配置责任（客户端仍得到同一 `502` 信封）。
 - 路径白名单：数据面只暴露 `POST /v1/messages`、`POST /v1/responses`、`POST /v1/chat/completions`。正确方法之外的请求 → `405 method_not_allowed`；其他 `/v1/**` 路径 → `404 unsupported_path`；两者都不连接上游。嵌入式 `..` 段按字面处理（`/v1/**` 之外不匹配）；`//` 由服务器归一化为规范路径后按正常请求处理，不构成走私。
 - 输入上限：入站 Header 超过 `MIQROKEY_MAX_INBOUND_HEADER_BYTES`（默认 `32KB`）由 Netty 在路由前拒绝 → `431`；请求体超过 `MIQROKEY_MAX_PROXY_BUFFER_BYTES`（默认 `256KB`）→ `413 payload_too_large`。超限请求不连接上游。
 - 请求前置预检（#553）：鉴权与模型授权通过后、缓存查询与上游调用之前，按 **UTF-8 码点**统计整个已缓冲 body（含 JSON 结构、工具 schema、base64）的字符数；超过 `MIQROKEY_GATEWAY_CONTEXT_LIMIT_THRESHOLD_CHARS`（默认 `200000`）→ `413`，错误码 `context_limit_exceeded`（Anthropic/OpenAI 各自协议兼容的错误体，`message` 只回报实测字符数与阈值，**不含请求内容**）。该预检**只读**：通过时转发字节与无预检时完全一致，不 tokenize、不重排、不补写；拒绝时不连接上游、不查缓存、不产生用量与生命周期记录。`MIQROKEY_GATEWAY_CONTEXT_LIMIT_ENABLED=false` 时完全关闭（行为与引入前一致）。裁决顺序为 鉴权 → 模型授权 → 体量预检，因此超限 body 不构成绕过或探测手段。阈值是**字符数**而非 token 数：对合法 UTF-8，整个序列化 body（含 JSON 结构与 base64 膨胀）都计入，是该 body 的字符上界；**非法 UTF-8 字节序列按字节长度计**（严格 UTF-8 校验不通过即整段回退为字节数），字符数不会超过字节数，因此计数**整体不低估**——不会低于任何宽松解码器解出的字符数（已有 1–2 字节穷举与定种子模糊测试固定）。这类 body 本身不是合法 JSON，且仍受缓冲上限约束。由此引入本预检后，**200001–262144 字符的请求由「缓冲上限放行」变为 413**（256KB 缓冲上限可容纳约 262144 字节）——这是刻意收紧，会同时挡掉同尺寸但上游本可接受的合法请求，运维可用 `enabled` / `threshold-chars` 调整。阈值高于缓冲上限时后者先拒绝；每 Key 阈值不在本版本范围内。覆盖范围限于 LLM 数据面三个 `/v1/**` 路径；MCP 数据面（`/mcpservers/{service}/mcp`、`/mcpservers/{service}/message`）本版本仍只有既有缓冲上限（`payload_too_large`），套用同一预检为后续项。合规留存旁路（ADR-0014，默认关闭）在预检**之前**捕获入站 body，因此开启留存时被 413 拒绝的请求仍可能已按留存策略入库；预检自身不写任何持久化。
@@ -1352,5 +1357,6 @@ NULL scope = 全量（存量兼容）。强制层按「开放面路径 → 能�
 **鉴权规则（批 1b 硬化）**
 - 机器密钥：无效/吊销/过期 → 401 `ADMIN_API_KEY_INVALID`；密钥身份租户化，跨租户不可见。
 - 门户会话：仅 SYSTEM_ADMIN 可访问开放面（403 `ADMIN_API_FORBIDDEN`，其他角色）；会话租户即开放面租户。
-- 安全红线不变：密钥只存摘要、吊销即时、机器调用走审计（操作审计沿用既有链）、正文不落库、导出文件字节
-  不上机器面。批 3 作用域/频控可选。
+- 安全红线不变：密钥只存摘要、吊销即时、机器**写**调用走审计（操作审计沿用既有链；口径见
+  `docs/security.md` §11——成功的只读调用、401 凭据无效、403 非管理员会话有意不留痕）、正文不落库、
+  导出文件字节不上机器面。批 3 作用域/频控可选。
