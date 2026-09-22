@@ -324,11 +324,11 @@ CAA 逐请求上下文证据审计（append-only）：`id`、`tenant_id`、`requ
 
 ### `webhook_endpoints` (V12，G4.5 实现)
 
-URL（创建时经控制面 SSRF 门控：默认仅公网 https，`MIQROKEY_CONTROL_PROVIDER_CLIENT_ALLOWED_CIDRS` 可扩展）、HMAC 签名 Secret（AES-GCM 加密，AAD 绑定 tenant + endpoint）、启停、超时、version。Secret 明文永不返回。
+URL（创建时经控制面 SSRF 门控：默认仅公网 https，`MIQROKEY_CONTROL_PROVIDER_CLIENT_ALLOWED_CIDRS` 可扩展）、HMAC 签名 Secret（AES-GCM 加密，AAD 绑定 tenant + endpoint）、启停、超时、version。Secret 明文永不返回。V74 起另有唯一约束 `uq_webhook_endpoints_tenant_id (tenant_id, id)`——`id` 已是主键，该约束不改变合法数据，只为给 `alert_rules` 的复合外键提供被引用列的唯一定位（见下）。
 
 ### `alert_rules` / `alert_events` / `webhook_delivery_attempts` (V12/V15/V24，G4.5/G8.3/配额告警实现)
 
-规则：`type`（`USAGE_MISSING_RATE|UPSTREAM_ERROR_RATE|BALANCE_UNAVAILABLE|USAGE_SURGE|BUDGET_THRESHOLD|QUOTA_THRESHOLD|MODEL_APPROVAL_SUBMITTED|MODEL_APPROVAL_APPROVED|MODEL_APPROVAL_REJECTED|ADMIN_API_KEY_EXPIRING|CONSUMER_KEY_EXPIRING|USAGE_QUEUE_SATURATION`，V15/V24/V27/V36/V39/V60 扩展 CHECK 约束）、`threshold`、`dedupe_minutes`、`enabled`、可选 `webhook_endpoint_id`（null = 仅记录事件）、`scope_json jsonb`（`BUDGET_THRESHOLD` 必填：`{"projectId": "…"}`；`QUOTA_THRESHOLD` 必填：`{"quotaRuleId": "…"}`）。事件：`dedupe_key`（type + 小时桶；`BUDGET_THRESHOLD` 为 type + 月份；`QUOTA_THRESHOLD` 为 type + 配额重置窗口起点 epoch；审批通知型为 type + approvalId）唯一约束 `(tenant_id, rule_id, dedupe_key)` 实现去重；`value` 为指标实际值（审批通知型恒为 1 = 一次发生）；`payload_json` 存事件明细（审批通知型 = 通知字段原样，重试投递时随信封带出），不含正文/密钥。投递表：事件 × 端点 × 尝试次数唯一；`next_retry_at` 指数退避（2^attempt × 1min，最多 3 次）、`http_status`、脱敏错误。评估调度：`@Scheduled` 固定延迟（`miqrokey.alerts.evaluation-interval-ms` 默认 5min）；指标基于滚动 1 小时、**按规则自身 `tenant_id` 过滤**（V60 起四条周期指标 SQL 显式带 `tenant_id = :tenantId`：事实表都带租户列，规则不得读别的租户的行；单租户部署每个事实行都属同一 seed 租户，语义与旧「单租户全局聚合」一致）；`BUDGET_THRESHOLD` 由 `AlertEvaluator` 复用 `AdminBudgetService` 水位（当月分摊成本/预算 × 100），`QUOTA_THRESHOLD` 复用 `AdminQuotaRuleService` 水位（当前窗口用量/限额 × 100；规则 DISABLED 不评估）。**投递/重试/退避原语抽取为 `AlertEventDispatcher`**（G4.5 机制），周期型由 `AlertEvaluator` 经它投递；`MODEL_APPROVAL_*` 事件型不评估、由审批工作流（`ModelApprovalService` 迁移瞬间）直接触发。
+规则：`type`（`USAGE_MISSING_RATE|UPSTREAM_ERROR_RATE|BALANCE_UNAVAILABLE|USAGE_SURGE|BUDGET_THRESHOLD|QUOTA_THRESHOLD|MODEL_APPROVAL_SUBMITTED|MODEL_APPROVAL_APPROVED|MODEL_APPROVAL_REJECTED|ADMIN_API_KEY_EXPIRING|CONSUMER_KEY_EXPIRING|USAGE_QUEUE_SATURATION`，V15/V24/V27/V36/V39/V60 扩展 CHECK 约束）、`threshold`、`dedupe_minutes`、`enabled`、可选 `webhook_endpoint_id`（null = 仅记录事件；**V74 起外键是复合的** `(tenant_id, webhook_endpoint_id) → webhook_endpoints (tenant_id, id)`、`ON DELETE SET NULL (webhook_endpoint_id)`——引用必须指向**规则自己租户**的端点，跨租户引用在数据库层不可写；删除端点只清 `webhook_endpoint_id` 而不动 `tenant_id`，列清单形式要求 PostgreSQL 15+。V74 迁移会把存量跨租户引用一次性清空并 `version + 1`，被清空引用的规则不再投递 Webhook（事件仍照常记录），需人工重新指向本租户端点）、`scope_json jsonb`（`BUDGET_THRESHOLD` 必填：`{"projectId": "…"}`；`QUOTA_THRESHOLD` 必填：`{"quotaRuleId": "…"}`）。事件：`dedupe_key`（type + 小时桶；`BUDGET_THRESHOLD` 为 type + 月份；`QUOTA_THRESHOLD` 为 type + 配额重置窗口起点 epoch；审批通知型为 type + approvalId）唯一约束 `(tenant_id, rule_id, dedupe_key)` 实现去重；`value` 为指标实际值（审批通知型恒为 1 = 一次发生）；`payload_json` 存事件明细（审批通知型 = 通知字段原样，重试投递时随信封带出），不含正文/密钥。投递表：事件 × 端点 × 尝试次数唯一；`next_retry_at` 指数退避（2^attempt × 1min，最多 3 次）、`http_status`、脱敏错误。评估调度：`@Scheduled` 固定延迟（`miqrokey.alerts.evaluation-interval-ms` 默认 5min）；指标基于滚动 1 小时、**按规则自身 `tenant_id` 过滤**（V60 起四条周期指标 SQL 显式带 `tenant_id = :tenantId`：事实表都带租户列，规则不得读别的租户的行；单租户部署每个事实行都属同一 seed 租户，语义与旧「单租户全局聚合」一致）；`BUDGET_THRESHOLD` 由 `AlertEvaluator` 复用 `AdminBudgetService` 水位（当月分摊成本/预算 × 100），`QUOTA_THRESHOLD` 复用 `AdminQuotaRuleService` 水位（当前窗口用量/限额 × 100；规则 DISABLED 不评估）。**投递/重试/退避原语抽取为 `AlertEventDispatcher`**（G4.5 机制），周期型由 `AlertEvaluator` 经它投递；`MODEL_APPROVAL_*` 事件型不评估、由审批工作流（`ModelApprovalService` 迁移瞬间）直接触发。
 
 ### `gateway_queue_signal` (V60，F07/#245)
 
@@ -448,7 +448,7 @@ MCP Tools 管理：`tool_name`（AI Agent 调用唯一标识，snake_case）、`
 
 ### `mcp_service_access` / `mcp_access_grants` (V25，MCP 两级访问控制)
 
-腾讯 doc 134890 语义：`mcp_service_access` 每服务一行——`mode`（`NONE|ALLOW|DENY`，缺行 = NONE）、唯一 `mcp_service_id`（ON DELETE CASCADE）；`mcp_access_grants` 名单行——`service_access_id`（CASCADE）、`tool_id`（可空：NULL=服务级名单，非 NULL=该工具覆盖）、`consumer_id`（引用 `api_consumers`，CASCADE）、`mode`（`ALLOW|DENY`）。唯一 `(service_access_id, tool_id, consumer_id)`。模式约束由 API 层保证：服务名单仅 ALLOW/DENY 模式存在（NONE 时清空）；工具覆盖仅服务 NONE 时可配置；服务模式切 NONE 自动清服务名单。判定在调用侧用 `McpAccessPolicy`（domain 纯函数：服务层判定 + 工具层收窄，工具只能进一步限制）。
+腾讯 doc 134890 语义：`mcp_service_access` 每服务一行——`mode`（`NONE|ALLOW|DENY`，缺行 = NONE）、唯一 `mcp_service_id`（ON DELETE CASCADE）；`mcp_access_grants` 名单行——`service_access_id`（CASCADE）、`tool_id`（可空：NULL=服务级名单，非 NULL=该工具覆盖）、`consumer_id`（引用 `api_consumers`，CASCADE）、`mode`（`ALLOW|DENY`）。唯一 `(service_access_id, tool_id, consumer_id)`——注意该约束**管不到服务级名单**：那里的 `tool_id` 是 NULL，而 PostgreSQL 认为 NULL 之间互不相等，所以同一个消费者能在服务级名单里重复落行（#1339）。V75 补了部分唯一索引 `uq_mcp_access_grant_server_list (service_access_id, consumer_id) WHERE tool_id IS NULL` 守住这一半，并在建索引前把存量重复行收敛各留一条；服务层 `AdminMcpAccessService.replaceGrants` 同步按 `LinkedHashSet` 去重。模式约束由 API 层保证：服务名单仅 ALLOW/DENY 模式存在（NONE 时清空）；工具覆盖仅服务 NONE 时可配置；服务模式切 NONE 自动清服务名单。判定在调用侧用 `McpAccessPolicy`（domain 纯函数：服务层判定 + 工具层收窄，工具只能进一步限制）。
 
 ### `mcp_route_rule` (V28，F11 MCP 路由规则)
 
@@ -493,11 +493,13 @@ MCP Tools 管理：`tool_name`（AI Agent 调用唯一标识，snake_case）、`
 
 ### `webhook_endpoints`
 
-URL、加密签名 Secret、启停、超时、version。URL 必须通过 SSRF 校验。
+URL、加密签名 Secret、启停、超时、version。URL 必须通过 SSRF 校验。唯一约束 `(tenant_id, id)`（V74）供 `alert_rules` 复合外键引用。
 
 ### `alert_rules` / `alert_events` / `webhook_delivery_attempts`
 
 规则保存 type、scope、threshold JSON Schema、去重窗口。事件保存实际值、对象、dedupe key 和状态；投递表保存 HTTP 状态、次数、下次重试和脱敏错误。
+
+`alert_rules.webhook_endpoint_id` 的租户归属由复合外键 `(tenant_id, webhook_endpoint_id)` 保证（V74）：跨租户引用不可写，端点删除只解绑引用、不改变规则的租户。
 
 ### `export_jobs`
 

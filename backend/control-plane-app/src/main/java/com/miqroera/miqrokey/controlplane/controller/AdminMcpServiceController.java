@@ -73,8 +73,8 @@ public class AdminMcpServiceController {
 
     /** Updates the health check configuration. */
     @PostMapping("/{serviceId}/health-config")
-    public McpService updateHealthConfig(@PathVariable UUID serviceId, @RequestBody McpServiceHealthConfigRequest body,
-            HttpServletRequest httpReq) {
+    public McpService updateHealthConfig(@PathVariable UUID serviceId,
+            @Valid @RequestBody McpServiceHealthConfigRequest body, HttpServletRequest httpReq) {
         var user = userContext.getUser();
         return mcpService.updateHealthConfig(user.tenantId(), user.id(), serviceId, body.checkIntervalSeconds(),
                 body.checkTimeoutSeconds(), body.failThreshold(), body.recoverThreshold(), body.checkPath(),
