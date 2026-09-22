@@ -69,6 +69,13 @@ public class AuditServiceImpl implements AuditService {
     private static final Logger LOG = LoggerFactory.getLogger(AuditServiceImpl.class);
     private static final byte[] GENESIS_HASH = new byte[32]; // all-zero genesis
 
+    /**
+     * Width of {@code admin_audit_events.admin_request_id}
+     * ({@code V1__core_tables.sql:476}). PostgreSQL counts characters — code points
+     * — so the bound below is applied in code points, not UTF-16 units.
+     */
+    static final int REQUEST_ID_MAX_CODE_POINTS = 64;
+
     private final AdminAuditEventRepository repository;
     private final Clock clock;
 
@@ -116,6 +123,10 @@ public class AuditServiceImpl implements AuditService {
         // verification for non-scalar summaries.
         String normalizedSummary = repository.normalizeChangeSummary(changeSummary);
 
+        // #1328: bound the caller-supplied correlation id to the column width
+        // BEFORE hashing — see boundRequestId.
+        String boundedRequestId = boundRequestId(requestId);
+
         // Acquire PostgreSQL transaction-scoped advisory lock to serialise chain-link
         // construction across concurrent writers and JVM instances. The lock is
         // released when the current transaction commits.
@@ -134,10 +145,10 @@ public class AuditServiceImpl implements AuditService {
 
         // Compute hash over all security-relevant immutable event fields
         byte[] currentHash = computeEventHash(id, tenantId, actorId, action, targetType, targetId, normalizedSummary,
-                requestId, now, previousHash);
+                boundedRequestId, now, previousHash);
 
         AdminAuditEvent event = new AdminAuditEvent(id, tenantId, actorId, action, targetType, targetId,
-                normalizedSummary, null, requestId, previousHash, currentHash, now, 0L);
+                normalizedSummary, null, boundedRequestId, previousHash, currentHash, now, 0L);
         // chainPosition == 0 is a placeholder — the database assigns the real
         // value via DEFAULT nextval('admin_audit_events_chain_seq') on INSERT.
         repository.insert(event);
@@ -145,6 +156,49 @@ public class AuditServiceImpl implements AuditService {
         // Zero-fill temporary arrays. previousHash is always a fresh array
         // (either a clone from currentEventHash() or a clone of GENESIS_HASH).
         Arrays.fill(previousHash, (byte) 0);
+    }
+
+    /**
+     * Bound a caller-supplied correlation id to the width of
+     * {@code admin_audit_events.admin_request_id} (#1328).
+     *
+     * <p>
+     * The id is decoration: it is not an input to the audited operation and appears
+     * in no validation contract. Its length must therefore never decide whether an
+     * administrative action succeeds, and never decide whether that action leaves
+     * an audit trail. Before this bound existed, an over-long {@code X-Request-Id}
+     * made the audit INSERT raise {@code DataIntegrityViolationException} ("value
+     * too long for type character varying(64)"): callers inside a transaction were
+     * rolled back entirely while callers outside one (e.g.
+     * {@code AlertRuleService.create}) had already committed — the action landed
+     * with no audit row, and the response claimed a {@code 409 RESOURCE_CONFLICT}
+     * about a configuration conflict that did not exist.
+     * </p>
+     *
+     * <p>
+     * Runs <b>before</b> {@link #computeEventHash}, so the stored hash still
+     * reproduces from the stored row — {@code AuditChainIntegrityTest} recomputes
+     * every link from genesis. Truncating at INSERT time instead would leave the
+     * value and the hash disagreeing and make the whole chain unverifiable, which
+     * would be worse than the defect.
+     * </p>
+     */
+    static String boundRequestId(String requestId) {
+        if (requestId == null || requestId.codePointCount(0, requestId.length()) <= REQUEST_ID_MAX_CODE_POINTS) {
+            return requestId;
+        }
+        // offsetByCodePoints cannot land inside a surrogate pair, so the result
+        // is always well-formed UTF-16 (a split pair would not survive the
+        // UTF-8 encode in computeEventHash).
+        String bounded = requestId.substring(0, requestId.offsetByCodePoints(0, REQUEST_ID_MAX_CODE_POINTS));
+        // Lengths only: the value is caller-supplied and must not reach a log line
+        // unescaped (#1303 / #1313).
+        LOG.warn(
+                "Bound the caller-supplied admin_request_id to the {}-character audit column: {} code points"
+                        + " supplied, {} stored",
+                REQUEST_ID_MAX_CODE_POINTS, requestId.codePointCount(0, requestId.length()),
+                bounded.codePointCount(0, bounded.length()));
+        return bounded;
     }
 
     /**

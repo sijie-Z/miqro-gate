@@ -694,4 +694,63 @@ describe('NextUsageView', () => {
     expect(wrapper.findAll('[data-testid="my-quota-row"]')).toHaveLength(1);
     expect(panel.find('[data-testid="my-quota-error"]').exists()).toBe(false);
   });
+
+  it('#PH69: a failed page change must not be silent while the pager claims the new page', async () => {
+    mockApi.usageRecords.mockResolvedValue({ ...records, total: 45 });
+    const wrapper = mountView();
+    await flushPromises();
+
+    mockApi.usageRecords.mockRejectedValueOnce(
+      new (await import('@/api/http')).ApiError({
+        type: 'about:blank',
+        status: 500,
+        code: 'INTERNAL',
+        detail: '数据库不可用',
+        requestId: 'req-records',
+        title: 'Error',
+      }),
+    );
+    await wrapper.find('[data-testid="records-next"]').trigger('click');
+    await flushPromises();
+
+    // The pager has already moved on …
+    expect(wrapper.text()).toContain('第 2 / 3 页');
+    // … while the rows on screen are still page 1's. Those two facts together are
+    // the misleading part: the panel presents page 1's rows as page 2's answer.
+    expect(wrapper.find('[data-testid="records-table"]').text()).toContain('deepseek-v4-flash');
+    // So the failure has to be legible somewhere. `recordsError` is already wired to
+    // the table's :error for exactly this, but Table.vue renders rows ahead of errors
+    // so that block is unreachable while stale rows exist — hence the page-level
+    // banner. The detail must reach the user either way.
+    const banner = wrapper.find('[data-testid="records-load-error"]');
+    expect(banner.exists()).toBe(true);
+    expect(banner.text()).toContain('数据库不可用');
+    expect(banner.text()).toContain('req-records');
+  });
+
+  it('#PH69: a failed window change must surface the summary failure too', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    mockApi.usageSummary.mockRejectedValueOnce(
+      new (await import('@/api/http')).ApiError({
+        type: 'about:blank',
+        status: 503,
+        code: 'UNAVAILABLE',
+        detail: '汇总服务暂时不可用',
+        requestId: 'req-summary',
+        title: 'Error',
+      }),
+    );
+    await wrapper.find('[data-testid="usage-range-7"]').trigger('click');
+    await flushPromises();
+
+    // The old window's totals are still on screen — that is deliberate (#643 keeps
+    // data visible across reloads), so the failure has to say so.
+    expect(wrapper.find('[data-testid="summary-table"]').text()).toContain('Core AI');
+    const banner = wrapper.find('[data-testid="summary-load-error"]');
+    expect(banner.exists()).toBe(true);
+    expect(banner.text()).toContain('汇总服务暂时不可用');
+    expect(banner.text()).toContain('req-summary');
+  });
 });

@@ -21,8 +21,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -121,7 +123,12 @@ public class AdminMcpAccessService {
             throw new ApiException(HttpStatus.CONFLICT, "SERVER_LIST_UNSUPPORTED",
                     "An open server (NONE) has no server-level list; set ALLOW or DENY first");
         }
-        List<UUID> validated = new ArrayList<>(consumerIds.size());
+        // A LinkedHashSet, not a list: consumerIds is caller-supplied and the column
+        // UNIQUE cannot dedupe the server-level rows at all — tool_id is NULL there and
+        // PostgreSQL treats NULLs as distinct, so uq_mcp_access_grant never fires
+        // (#1339). Deduplicating here keeps request order, so the stored rows, the view
+        // and the audit count all agree with what the admin actually gets.
+        Set<UUID> validated = new LinkedHashSet<>(consumerIds.size());
         for (UUID consumerId : consumerIds) {
             ApiConsumer consumer = consumerRepository.findByIdAndTenantId(consumerId, tenantId)
                     .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "CONSUMER_NOT_FOUND",

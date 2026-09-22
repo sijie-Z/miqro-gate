@@ -12,6 +12,7 @@ import com.miqroera.miqrokey.domain.model.McpResiliencePolicy;
 import com.miqroera.miqrokey.domain.model.McpRetryPolicy;
 import com.miqroera.miqrokey.domain.route.RouteSnapshot;
 import com.miqroera.miqrokey.gateway.mcplog.McpAccessLogSink;
+import com.miqroera.miqrokey.gateway.observability.LogValues;
 import com.miqroera.miqrokey.route.RouteSnapshotProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -107,6 +108,17 @@ public class McpProxyController {
     private static final Duration MCP_TIMEOUT = Duration.ofSeconds(60);
     /** SSE keep-alive comment cadence (issue #356). */
     private static final Duration SSE_KEEP_ALIVE = Duration.ofSeconds(15);
+
+    /**
+     * Storage widths of the caller-controlled {@code mcp_access_log} columns (V29
+     * {@code rpc_method}/{@code tool_name}, V45 {@code session_id}). An unbounded
+     * value makes the INSERT fail with SQLSTATE 22001 and — before #1346 — took the
+     * whole batch (and every later row) down with it, so the audit copy is bounded
+     * here, at the single point where the entry is built.
+     */
+    private static final int MAX_RPC_METHOD_CHARS = 64;
+    private static final int MAX_TOOL_NAME_CHARS = 128;
+    private static final int MAX_SESSION_ID_CHARS = 128;
 
     private final RouteSnapshotProvider routeSnapshotProvider;
     private final WebClient proxyWebClient;
@@ -317,9 +329,11 @@ public class McpProxyController {
                             "Consumer is not allowed to call tool: " + toolName);
                 }
             }
+            // #1303: rpcMethod/toolName come straight out of the caller's JSON —
+            // flatten them so a line break cannot forge a second log line.
             log.info("aigw.mcp.call requestId={} service={} consumer={} rpcMethod={} tool={}", gatewayRequestId,
-                    service.name(), consumer.name(), rpcMethod == null ? "-" : rpcMethod,
-                    toolName == null ? "-" : toolName);
+                    service.name(), consumer.name(), rpcMethod == null ? "-" : LogValues.forLog(rpcMethod),
+                    toolName == null ? "-" : LogValues.forLog(toolName));
             McpResiliencePolicy servicePolicy = service.resilience() == null
                     ? McpResiliencePolicy.disabled()
                     : service.resilience();
@@ -354,14 +368,21 @@ public class McpProxyController {
                 }
             }).subscribeOn(credentialDecryptScheduler).flatMap(bearer -> forward(exchange, target, service.endpoint(),
                     body, context, rpcMethod, toolName, toolHttpMethod, policy, bearer)).onErrorResume(decryptError -> {
-                        log.warn("aigw.mcp.backend_auth_failed service={}: {}", service.name(),
-                                decryptError.getMessage());
+                        // requestId keeps the failure correlatable with the caller's
+                        // receipt (#1341): the neighbouring log lines carry it too.
+                        log.warn("aigw.mcp.backend_auth_failed requestId={} service={}: {}", gatewayRequestId,
+                                service.name(), decryptError.getMessage());
                         record(context, rpcMethod, toolName, McpAccessStatus.UPSTREAM_FAILURE, 502);
                         return target.errorResponse(HttpStatus.BAD_GATEWAY, "backend_auth_unavailable",
                                 "MCP upstream credential could not be decrypted");
                     });
         } catch (Exception e) {
-            log.warn("aigw.mcp.invalid envelope service={}: {}", service.name(), e.getMessage());
+            // Body-free failure summary (#1341): the Jackson message quotes the
+            // offending token, which is caller-supplied request-body content —
+            // same rule as ContentFilterShadow: "Only the exception type is
+            // logged - a message could echo the body."
+            log.warn("aigw.mcp.invalid envelope requestId={} service={}: {}", gatewayRequestId, service.name(),
+                    e.getClass().getSimpleName());
             record(context, null, null, McpAccessStatus.INVALID_ENVELOPE, 400);
             return target.errorResponse(HttpStatus.BAD_REQUEST, "invalid_jsonrpc", "Invalid JSON-RPC body");
         }
@@ -415,7 +436,7 @@ public class McpProxyController {
                 record(context, rpcMethod, toolName, McpAccessStatus.CIRCUIT_OPEN, 503);
                 rowRecorded[0] = true;
                 log.info("aigw.mcp.circuit_open requestId={} service={} bucket={}", context.gatewayRequestId,
-                        context.service.name(), toolName == null ? rpcMethod : toolName);
+                        context.service.name(), LogValues.forLog(toolName == null ? rpcMethod : toolName));
                 return target.errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "circuit_open",
                         "MCP upstream circuit is open");
             }
@@ -509,12 +530,29 @@ public class McpProxyController {
     /**
      * FORWARDED rows carry the upstream first-byte latency (#358); others pass
      * null.
+     *
+     * <p>
+     * The three caller-controlled values are truncated to their column widths
+     * (#1346): an oversize value used to fail the INSERT (SQLSTATE 22001), which
+     * made the queue requeue the batch forever and silently stop writing
+     * <em>every</em> access-log row. Truncating keeps the row — a lossy audit line
+     * still answers "who called what, when, and how was it answered" — where
+     * rejecting it would grow a new caller-visible failure mode on the data plane.
+     * </p>
      */
     private void record(CallContext context, String rpcMethod, String toolName, McpAccessStatus status,
             Integer httpStatus, Long ttfbMs) {
         accessLogSink.record(new McpAccessLogEntry(UUID.randomUUID(), context.service.tenantId(), context.service.id(),
-                context.service.name(), context.consumer.id(), context.consumer.name(), rpcMethod, toolName, status,
-                httpStatus, context.gatewayRequestId, Instant.now(), context.sessionId, ttfbMs));
+                context.service.name(), context.consumer.id(), context.consumer.name(),
+                bounded(rpcMethod, MAX_RPC_METHOD_CHARS), bounded(toolName, MAX_TOOL_NAME_CHARS), status, httpStatus,
+                context.gatewayRequestId, Instant.now(), bounded(context.sessionId, MAX_SESSION_ID_CHARS), ttfbMs));
+    }
+
+    /**
+     * Truncates to a {@code varchar(n)} column; short and null values pass through.
+     */
+    private static String bounded(String value, int maxChars) {
+        return value == null || value.length() <= maxChars ? value : value.substring(0, maxChars);
     }
 
     private static final class CallContext {

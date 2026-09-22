@@ -37,6 +37,11 @@ const memberOpen = ref(false);
 const memberTeam = ref<Team | null>(null);
 const memberUsers = ref<MemberView[]>([]);
 const memberLoading = ref(false);
+// #1356: a failed member read has to survive on screen. The toast below is gone
+// after DURATION_ERROR (7 s) while the drawer stays open, so without this the
+// only thing left is `empty-title="还没有成员"` — an assertion about the team
+// that the failed read never established.
+const memberError = ref('');
 
 // #551: add-member picker (mirrors the users-page quick-join pattern)
 const allUsers = ref<AdminUser[]>([]);
@@ -140,6 +145,7 @@ async function openMembers(team: Team) {
   memberTeam.value = team;
   memberOpen.value = true;
   memberLoading.value = true;
+  memberError.value = '';
   pickUserId.value = '';
   if (!usersLoaded.value) {
     void loadUsers();
@@ -150,16 +156,27 @@ async function openMembers(team: Team) {
       return; // a newer drawer target won — this response is stale
     }
     memberUsers.value = rows;
-  } catch {
+  } catch (error) {
     if (seq === membersRequestSeq) {
       memberUsers.value = [];
-      toast.error('加载成员失败');
+      // #1356: keep the failure, not a toast — and keep the backend's message.
+      // The bare `catch {` here threw the ApiError away, so all the user got was
+      // four characters of generic copy with no requestId to quote.
+      memberError.value =
+        error instanceof ApiError
+          ? `${error.message}（requestId: ${error.requestId ?? '-'}）`
+          : '加载成员失败。';
     }
   } finally {
     if (seq === membersRequestSeq) {
       memberLoading.value = false;
     }
   }
+}
+
+/** #1356: the members table's retry entry — same loader, so it also clears the error. */
+function retryMembers() {
+  if (memberTeam.value) void openMembers(memberTeam.value);
 }
 
 async function addMember() {
@@ -174,6 +191,7 @@ async function addMember() {
     const rows = await api.listTeamMembers(team.id!); // list rows always carry ids
     if (seq === membersRequestSeq) {
       memberUsers.value = rows;
+      memberError.value = ''; // a fresh read supersedes the old failure
     }
   } catch (error) {
     if (error instanceof ApiError) {
@@ -200,6 +218,7 @@ function requestRemove(user: MemberView) {
         const rows = await api.listTeamMembers(team.id!); // list rows always carry ids
         if (seq === membersRequestSeq) {
           memberUsers.value = rows;
+          memberError.value = ''; // a fresh read supersedes the old failure
         }
       } catch (error) {
         if (error instanceof ApiError) {
@@ -362,13 +381,18 @@ onMounted(load);
         没有可加入的 ACTIVE 用户。
       </p>
 
+      <!-- #1356: `memberError` is what makes the failure outlive the toast. Table.vue
+           renders rows ahead of `error`, so this only shows when the read came back
+           empty-handed — which is exactly the case that used to read as 「还没有成员」. -->
       <UiTable
         :columns="memberColumns"
         :data="memberUsers"
         :loading="memberLoading"
+        :error="memberError"
         row-key="userId"
         empty-title="还没有成员"
         data-testid="team-members-table"
+        @retry="retryMembers"
       >
         <template #username="{ row }">
           <div class="next-teams__member-name">{{ (row as MemberView).username }}</div>

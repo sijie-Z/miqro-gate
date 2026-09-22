@@ -624,7 +624,7 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `GET /api/v1/admin/subscriptions/{subscriptionId}/cost-allocation?from&to` | 已持久化的分摊行（不重算） |
 | `POST /api/v1/admin/subscriptions/{subscriptionId}/cost-allocation/allocate?from&to` | 计算并持久化分摊，返回行 |
 
-行字段：`targetType`（当前 `PROJECT`）、`targetId`、`fixedCost`（订阅价按窗口/周期天数比例折算）、`usageCost`（本地 usage × 最新价格快照，每百万 token 单价）、`weightTokens`、`allocatedAmount`、`currency`、`algorithmVersion`（当前 `1`）、`generatedAt`。
+行字段：`targetType`（当前 `PROJECT`）、`targetId`、`fixedCost`（订阅价按窗口时长占订阅周期的份额折算，毫秒精度、不截断到整天；订阅无账期或 PAYG 时为 0）、`usageCost`（本地 usage × 最新价格快照，每百万 token 单价）、`weightTokens`、`allocatedAmount`、`currency`、`algorithmVersion`（当前 `1`）、`generatedAt`。
 
 语义：
 
@@ -956,7 +956,7 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 | `GET /api/v1/admin/mcp-services` / `/{id}` | 列表/详情（含健康状态与检查配置） |
 | `POST /api/v1/admin/mcp-services` | 注册：`{ "name", "description"?, "endpoint", "transport"?, "checkIntervalSeconds"?, "checkTimeoutSeconds"?, "failThreshold"?, "recoverThreshold"?, "checkPath"?, "upstreamTimeoutMs"? }`（默认 STREAMABLE_HTTP / 30s / 5s / 3 / 1 / `/health` / 60000ms；注册即自动生成 default 路由，见 5.23） |
 | `POST /api/v1/admin/mcp-services/{id}/status?status=ONLINE\|OFFLINE` | 手动上下线（重复切换 `409 MCP_STATUS_UNCHANGED`；并发编辑乐观锁竞争 → `409 CONCURRENT_MODIFICATION`，#415） |
-| `POST /api/v1/admin/mcp-services/{id}/health-config` | 健康探测配置部分更新：`{ "checkIntervalSeconds"?, "checkTimeoutSeconds"?, "failThreshold"?, "recoverThreshold"?, "checkPath"?, "checkMode"? }`。**#387 探测方式**：`HEALTH_PATH`（默认，GET `endpoint + checkPath` 2xx 健康）| `JSONRPC_INITIALIZE`（标准 MCP 服务无 HTTP 健康路径时使用：POST `endpoint` JSON-RPC 2.0 `initialize` 信封，2xx 且响应体含 `"jsonrpc"` 健康——兼容 SSE 帧包裹；API_KEY 后端自动携带解密 Bearer，凭证不可用 fail-closed）。非法值 `400 MCP_CHECK_MODE_INVALID` |
+| `POST /api/v1/admin/mcp-services/{id}/health-config` | 健康探测配置部分更新：`{ "checkIntervalSeconds"?, "checkTimeoutSeconds"?, "failThreshold"?, "recoverThreshold"?, "checkPath"?, "checkMode"? }`。**#387 探测方式**：`HEALTH_PATH`（默认，GET `endpoint + checkPath` 2xx 健康）| `JSONRPC_INITIALIZE`（标准 MCP 服务无 HTTP 健康路径时使用：POST `endpoint` JSON-RPC 2.0 `initialize` 信封，2xx 且响应体含 `"jsonrpc"` 健康——兼容 SSE 帧包裹；API_KEY 后端自动携带解密 Bearer，凭证不可用 fail-closed）。非法值 `400 MCP_CHECK_MODE_INVALID`。数值/长度与注册端点同口径：`checkIntervalSeconds` ∈ [5,3600]、`checkTimeoutSeconds` ∈ [1,60]、`failThreshold`/`recoverThreshold` ∈ [1,20]、`checkPath` ≤ 512 字符；越界 → `400 VALIDATION_FAILED`（`fieldErrors` 指明字段，#1348） |
 | `PUT /api/v1/admin/mcp-services/{id}/backend-auth` | 上游后端鉴权（#320，腾讯 raw 03）：body `{"mode":"VISITOR\|API_KEY","secret"?}`——
   `VISITOR` 清除已存密钥；`API_KEY` 必填 `secret`（≤4096）。密钥**只写不读**：任何读面（列表/详情/审计）永不返回；
   存储 AES-GCM 加密（AAD 绑定 tenant+service）；网关向上游注入固定 `Authorization: Bearer <secret>`；变更即时生效（快照刷新）。
@@ -1277,7 +1277,8 @@ Gateway 生成 `X-MiQroKey-Request-Id`。若供应商已有 request ID，两个 
 
 ## 8. OpenAPI 与兼容性
 
-- Control Plane 生成 **OpenAPI 3.1**（F09 已实现）：`GET /v3/api-docs`（springdoc，无 swagger-ui；`springdoc.api-docs.version=OPENAPI_3_1`）。机器可读基线提交于 `docs/openapi/openapi-3.1.json`；CI（backend-integration job）对每次生成结果跑破坏性 diff（`deploy/openapi/check-openapi-breaking.py`：删除 path/operation/response code/参数、属性变 required 即失败）。本文仍是业务语义事实源；生成物是机器可读镜像，OpenAPI 不得改变本文语义。
+- Control Plane 生成 **OpenAPI 3.1**（F09 已实现）：`GET /v3/api-docs`（springdoc，无 swagger-ui；`springdoc.api-docs.version=OPENAPI_3_1`）。机器可读基线提交于 `docs/openapi/openapi-3.1.json`；CI（backend-integration job）对每次生成结果跑破坏性 diff（`deploy/openapi/check-openapi-breaking.py`）。判定为破坏的改动：删除 path/operation/response code/参数，属性变 required 或从 required 消失，属性或 schema 被删，类型/格式变化（按类型集合比较，拓宽到接受 `null` 视为放宽），枚举值减少，约束收紧（下界抬高、上界压低、`pattern` 新增或改变），默认值变化，可空性丢失。新增与放宽一律放行并只打印摘要。该 diff 的每条判定由 `deploy/tests/openapi_breaking_regression.py` 固定（CI `openapi-guard` job），因此门禁本身被改松时会红。
+  门禁比较的是**生成的 head** 与**提交的基线**：同一 commit 里既改 DTO 又刷新基线时 base == head，门禁必然通过（实测 34/45 个 DTO 提交属此类，见 #1315）。它挡的是「忘记刷新基线」，不是「有意破坏」——有意破坏需要新的 major 与一条显式豁免通路，后者尚未实现。本文仍是业务语义事实源；生成物是机器可读镜像，OpenAPI 不得改变本文语义。
 - 前端 TypeScript client **目前由手写 `frontend/src/api` + `types/api` 维护**（未从 OpenAPI 生成——规格愿景；codegen 迁移列为发布前候选，届时删除手写 DTO）。
 - 同一 major 版本只允许新增可选字段和新端点；删除、改名、改变含义必须进入下一 major。
 - 推理入口不进入管理 API 的 DTO 生成流程，以透明代理契约和 fixtures 验证。

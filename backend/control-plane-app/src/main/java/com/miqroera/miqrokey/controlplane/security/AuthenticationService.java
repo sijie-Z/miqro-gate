@@ -73,6 +73,15 @@ public class AuthenticationService {
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     /**
+     * Cap on the exponential lockout backoff: {@code 2^10 == 1024} multiples of
+     * {@code loginLockBase}, i.e. ~17 hours at the default 1-minute base
+     * (documented in {@code api-contract.md}). Bounding the shift keeps
+     * {@code 1L << shift} inside the positive long range for every reachable
+     * failure count (#1327).
+     */
+    private static final int MAX_LOCK_MULTIPLIER_SHIFT = 10;
+
+    /**
      * User-facing auth messages are Simplified Chinese — the console language
      * (frontend-design.md). Keep 401 login failures to ONE generic message so the
      * response never reveals which credential was wrong.
@@ -175,23 +184,25 @@ public class AuthenticationService {
         }
 
         // --- Success ---
-        boolean wasLocked = user.status() == UserStatus.LOCKED;
-        UserStatus newStatus = wasLocked ? UserStatus.ACTIVE : user.status();
-
-        // Reset counters, record login time
-        User afterSuccess = new User(user.id(), user.tenantId(), user.username(), user.displayName(),
-                user.passwordHash(), user.role(), newStatus, user.mustChangePassword(), 0, null, now,
-                user.version() + 1, user.createdAt(), now);
-        userRepository.update(afterSuccess);
-
-        // Rehash
-        if (passwordHasher.needsRehash(user.passwordHash())) {
-            byte[] newHash = passwordHasher.hash(password);
-            User rehashed = new User(user.id(), user.tenantId(), user.username(), user.displayName(), newHash,
-                    user.role(), newStatus, user.mustChangePassword(), 0, null, now, user.version() + 2,
-                    user.createdAt(), now);
-            userRepository.update(rehashed);
-        }
+        // #1334: the read at the top of this method is a plain snapshot with no row
+        // lock.
+        // Writing it back with its version predicate made any two logins that
+        // overlapped in the
+        // Argon2 window collide — the loser's version-guarded UPDATE matched 0 rows and
+        // a
+        // *correct* password was answered with 409 CONCURRENT_MODIFICATION. Re-read the
+        // row
+        // FOR UPDATE and write it back in one short transaction, the pattern
+        // recordFailedLogin
+        // already uses for the failure path. The Argon2 rehash (the slow part) is
+        // computed
+        // before the lock is taken, so the row is never locked across hashing.
+        byte[] validatedHash = user.passwordHash();
+        byte[] rehashedHash = passwordHasher.needsRehash(validatedHash) ? passwordHasher.hash(password) : null;
+        User afterSuccess = self != null
+                ? self.applySuccessfulLogin(user.id(), validatedHash, now, rehashedHash)
+                : applySuccessfulLogin(user.id(), validatedHash, now, rehashedHash);
+        UserStatus newStatus = afterSuccess.status();
 
         SessionToken tokens = sessionService.createSession(afterSuccess);
         Instant sessionExpires = now.plus(authProperties.getSessionAbsoluteTimeout());
@@ -201,6 +212,60 @@ public class AuthenticationService {
 
         LOG.info("User {} logged in successfully", user.username());
         return new LoginResult(enrichWithView(afterSuccess, newStatus), tokens, sessionExpires);
+    }
+
+    /**
+     * Apply the successful-login bookkeeping — counter reset, lock release and
+     * last-login timestamp — against a freshly locked copy of the user row.
+     *
+     * <p>
+     * The caller verified the password against an unlocked snapshot. Writing that
+     * snapshot back with its version predicate made concurrent logins mutually
+     * exclusive the hard way: the loser's {@code UPDATE ... WHERE version = ?}
+     * matched no row and a <em>correct</em> password was answered with 409
+     * CONCURRENT_MODIFICATION (#1334). Reading {@code FOR UPDATE} in this short
+     * {@code REQUIRES_NEW} transaction serialises them instead.
+     * </p>
+     *
+     * <p>
+     * The account gates are re-evaluated on the locked row, so a disable or a fresh
+     * lockout that lands while this login was hashing its password cannot be
+     * laundered into a session. An expired lock is still cleared, unchanged.
+     * </p>
+     *
+     * @param validatedPasswordHash
+     *            the hash the password was verified against before the lock was
+     *            taken; a row whose hash no longer equals it was changed under us
+     * @param rehashedPassword
+     *            the upgraded password hash to write, or {@code null} to keep the
+     *            stored one
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public User applySuccessfulLogin(UUID userId, byte[] validatedPasswordHash, Instant now, byte[] rehashedPassword) {
+        User fresh = userRepository.findByIdForUpdate(userId)
+                .orElseThrow(() -> new IllegalStateException("User disappeared: " + userId));
+
+        boolean stillLocked = fresh.status() == UserStatus.LOCKED
+                && (fresh.lockedUntil() == null || now.isBefore(fresh.lockedUntil()));
+        if (fresh.status() == UserStatus.DISABLED || stillLocked) {
+            throw new AuthenticationException(LOGIN_FAILED);
+        }
+
+        // Only upgrade the hash we actually verified the password against. If the
+        // stored hash changed while we were hashing (another request rehashed it, or
+        // the user changed their password), writing ours would silently revert that
+        // change — keep the fresh one and let the next login re-evaluate it.
+        byte[] passwordHash = rehashedPassword != null && validatedPasswordHash != null
+                && MessageDigest.isEqual(fresh.passwordHash(), validatedPasswordHash)
+                        ? rehashedPassword
+                        : fresh.passwordHash();
+
+        UserStatus newStatus = fresh.status() == UserStatus.LOCKED ? UserStatus.ACTIVE : fresh.status();
+        User updated = new User(fresh.id(), fresh.tenantId(), fresh.username(), fresh.displayName(), passwordHash,
+                fresh.role(), newStatus, fresh.mustChangePassword(), 0, null, now, fresh.version() + 1,
+                fresh.createdAt(), now);
+        userRepository.update(updated);
+        return updated;
     }
 
     /**
@@ -228,8 +293,21 @@ public class AuthenticationService {
         UserStatus newStatus = fresh.status();
 
         if (newFailCount >= authProperties.getLoginMaxFailures()) {
-            long multiplier = 1L << Math.max(0, newFailCount - authProperties.getLoginMaxFailures());
-            Duration lockDuration = authProperties.getLoginLockBase().multipliedBy(Math.min(multiplier, 1024));
+            // #1327: clamp the SHIFT, not just the product. Clamping only the multiplier
+            // left
+            // the shift free to reach 63 (1L << 63 == Long.MIN_VALUE) at the 68th failure
+            // with
+            // the default loginMaxFailures=5; the negative value survived Math.min and made
+            // Duration.multipliedBy throw, rolling back this REQUIRES_NEW transaction so
+            // the
+            // counter never advanced past 67 — every later attempt re-overflowed, and the
+            // LOGIN_FAILED/ACCOUNT_LOCKED audit rows below were discarded with it. 2^10 is
+            // the
+            // documented ~17h cap, so behaviour below the cap is unchanged.
+            long shift = Math.min(Math.max(0, newFailCount - authProperties.getLoginMaxFailures()),
+                    MAX_LOCK_MULTIPLIER_SHIFT);
+            long multiplier = 1L << shift;
+            Duration lockDuration = authProperties.getLoginLockBase().multipliedBy(multiplier);
             lockedUntil = now.plus(lockDuration);
             newStatus = UserStatus.LOCKED;
             LOG.warn("User {} locked until {} after {} failures", fresh.username(), lockedUntil, newFailCount);

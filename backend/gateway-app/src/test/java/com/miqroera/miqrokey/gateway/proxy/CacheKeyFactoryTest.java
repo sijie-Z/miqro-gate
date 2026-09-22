@@ -355,6 +355,15 @@ class CacheKeyFactoryTest {
      * output-shaping generation parameters and the Anthropic/Responses top-level
      * system prompt must be explicit key dimensions — otherwise two requests with
      * different sampling or system prompts would replay each other's responses.
+     *
+     * <p>
+     * Second wave (#1302 follow-up, PH64 adversarial review): the same rule has to
+     * hold one level down. The OpenAI Responses protocol spells several of these
+     * knobs as nested objects ({@code text.format} ≈ {@code response_format},
+     * {@code text.verbosity} ≈ {@code verbosity}, {@code reasoning.effort} ≈
+     * {@code reasoning_effort}), and a Responses body with an extractable scope
+     * never falls back to the full body — so a nested spelling that is not picked
+     * collides exactly like the unlisted flat names of #1302.
      */
     @Nested
     @DisplayName("Key identity hardening")
@@ -421,6 +430,153 @@ class CacheKeyFactoryTest {
             byte[] a = json("{\"model\":\"gpt-5.2\",\"instructions\":\"answer briefly\",\"input\":[\"hi\"]}");
             byte[] b = json("{\"model\":\"gpt-5.2\",\"instructions\":\"answer verbosely\",\"input\":[\"hi\"]}");
             assertThat(factory.compute(ctx, "gpt-5.2", a)).isNotEqualTo(factory.compute(ctx, "gpt-5.2", b));
+        }
+
+        @Test
+        @DisplayName("Anthropic stop_sequences is a key dimension")
+        void anthropicStopSequencesSplit() {
+            byte[] unbounded = json("{\"model\":\"claude-3-7-sonnet\",\"max_tokens\":256,"
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            byte[] bounded = json("{\"model\":\"claude-3-7-sonnet\",\"max_tokens\":256,"
+                    + "\"stop_sequences\":[\"\\n\\nHuman:\"],\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+
+            // Anthropic names this parameter "stop_sequences"; "stop" (OpenAI's
+            // name) is already a dimension, so an Anthropic client that bounds the
+            // generation must not replay an unbounded response.
+            assertThat(factory.compute(ctx, "claude-3-7-sonnet", unbounded))
+                    .isNotEqualTo(factory.compute(ctx, "claude-3-7-sonnet", bounded));
+        }
+
+        @Test
+        @DisplayName("max_completion_tokens is a key dimension (current OpenAI name)")
+        void maxCompletionTokensSplit() {
+            byte[] tiny = json("{\"model\":\"gpt-4o-mini\",\"max_completion_tokens\":16,"
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            byte[] large = json("{\"model\":\"gpt-4o-mini\",\"max_completion_tokens\":4096,"
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+
+            // max_tokens (the legacy name) is a dimension; max_completion_tokens is
+            // the name current OpenAI models require, and must split identically.
+            assertThat(factory.compute(ctx, "gpt-4o-mini", tiny))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", large));
+        }
+
+        @Test
+        @DisplayName("logprobs / top_logprobs are key dimensions")
+        void logprobsSplit() {
+            byte[] plain = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            byte[] withLogprobs = json("{\"model\":\"gpt-4o-mini\",\"logprobs\":true,\"top_logprobs\":5,"
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+
+            // A client that asked for token-level probabilities must not receive a
+            // cached response that carries none.
+            assertThat(factory.compute(ctx, "gpt-4o-mini", plain))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", withLogprobs));
+        }
+
+        @Test
+        @DisplayName("stream_options.include_usage is a key dimension")
+        void streamOptionsIncludeUsageSplits() {
+            byte[] withoutUsage = json("{\"model\":\"gpt-4o-mini\",\"stream\":true,"
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            byte[] withUsage = json("{\"model\":\"gpt-4o-mini\",\"stream\":true,"
+                    + "\"stream_options\":{\"include_usage\":true},\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+
+            // include_usage makes the upstream append a final usage chunk; replaying
+            // a stream that lacks it violates the client's stream contract.
+            assertThat(factory.compute(ctx, "gpt-4o-mini", withoutUsage))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", withUsage));
+        }
+
+        @Test
+        @DisplayName("Responses nested text knobs are key dimensions (text.format / text.verbosity)")
+        void responsesNestedTextKnobsSplit() {
+            String base = "{\"model\":\"gpt-5.2\",\"instructions\":\"answer briefly\",\"input\":[\"hi\"],";
+            byte[] plainText = json(base + "\"text\":{\"format\":{\"type\":\"text\"}}}");
+            byte[] jsonSchema = json(base + "\"text\":{\"format\":{\"type\":\"json_schema\",\"name\":\"out\","
+                    + "\"schema\":{\"type\":\"object\"}}}}");
+            byte[] terse = json(base + "\"text\":{\"verbosity\":\"low\"}}");
+            byte[] chatty = json(base + "\"text\":{\"verbosity\":\"high\"}}");
+
+            // Responses spells response_format/verbosity as a nested object, and this
+            // body has an extractable scope, so an unpicked nested field is invisible
+            // to the key: a client that demanded a JSON schema would be served a
+            // cached plain-text answer.
+            assertThat(factory.compute(ctx, "gpt-5.2", plainText))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-5.2", jsonSchema));
+            assertThat(factory.compute(ctx, "gpt-5.2", terse)).isNotEqualTo(factory.compute(ctx, "gpt-5.2", chatty));
+            // Key order inside the nested object is normalized away, so an
+            // equivalent body stays a stable hit.
+            byte[] schemaReordered = json(
+                    base + "\"text\":{\"format\":{\"schema\":{\"type\":\"object\"},\"name\":\"out\","
+                            + "\"type\":\"json_schema\"}}}");
+            assertThat(factory.compute(ctx, "gpt-5.2", jsonSchema))
+                    .isEqualTo(factory.compute(ctx, "gpt-5.2", schemaReordered));
+        }
+
+        @Test
+        @DisplayName("Responses reasoning.effort is a key dimension")
+        void responsesNestedReasoningSplits() {
+            String base = "{\"model\":\"gpt-5.2\",\"instructions\":\"answer briefly\",\"input\":[\"hi\"],";
+            byte[] low = json(base + "\"reasoning\":{\"effort\":\"low\"}}");
+            byte[] high = json(base + "\"reasoning\":{\"effort\":\"high\"}}");
+
+            assertThat(factory.compute(ctx, "gpt-5.2", low)).isNotEqualTo(factory.compute(ctx, "gpt-5.2", high));
+        }
+
+        @Test
+        @DisplayName("Responses payload-shaping flags are key dimensions (include / truncation / background)")
+        void responsesPayloadShapingFlagsSplit() {
+            String base = "{\"model\":\"gpt-5.2\",\"instructions\":\"answer briefly\",\"input\":[\"hi\"]";
+            byte[] plain = json(base + "}");
+            byte[] withReasoningItems = json(base + ",\"include\":[\"reasoning.encrypted_content\"]}");
+            byte[] autoTruncation = json(base + ",\"truncation\":\"auto\"}");
+            byte[] disabledTruncation = json(base + ",\"truncation\":\"disabled\"}");
+            byte[] background = json(base + ",\"background\":true}");
+
+            // Each of these changes what the client receives back (extra output
+            // items, a truncated input, an in-progress envelope) without touching
+            // the scope, so a shared entry would return the wrong payload shape.
+            assertThat(factory.compute(ctx, "gpt-5.2", plain))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-5.2", withReasoningItems));
+            assertThat(factory.compute(ctx, "gpt-5.2", autoTruncation))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-5.2", disabledTruncation));
+            assertThat(factory.compute(ctx, "gpt-5.2", plain))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-5.2", background));
+        }
+
+        @Test
+        @DisplayName("chat audio output knobs are key dimensions (modalities / audio)")
+        void chatAudioOutputSplits() {
+            String base = "{\"model\":\"gpt-4o-audio-preview\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]";
+            byte[] textOnly = json(base + ",\"modalities\":[\"text\"]}");
+            byte[] withAudio = json(base + ",\"modalities\":[\"text\",\"audio\"]}");
+            byte[] alloy = json(
+                    base + ",\"modalities\":[\"text\",\"audio\"],\"audio\":{\"voice\":\"alloy\",\"format\":\"wav\"}}");
+            byte[] echo = json(
+                    base + ",\"modalities\":[\"text\",\"audio\"],\"audio\":{\"voice\":\"echo\",\"format\":\"wav\"}}");
+
+            // The response payload is audio, not text: a text-only client must not
+            // receive a base64 audio envelope, nor a client that chose a voice
+            // receive another one's audio.
+            assertThat(factory.compute(ctx, "gpt-4o-audio-preview", textOnly))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-audio-preview", withAudio));
+            assertThat(factory.compute(ctx, "gpt-4o-audio-preview", alloy))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-audio-preview", echo));
+        }
+
+        @Test
+        @DisplayName("Responses continuation pointer is a key dimension (previous_response_id)")
+        void responsesContinuationPointerSplits() {
+            String base = "{\"model\":\"gpt-5.2\",\"instructions\":\"answer briefly\",\"input\":[\"hi\"]";
+            byte[] firstConversation = json(base + ",\"previous_response_id\":\"resp_a\"}");
+            byte[] secondConversation = json(base + ",\"previous_response_id\":\"resp_b\"}");
+
+            // The referenced history is invisible to the gateway — the body carries
+            // only the new turn — so the pointer is the sole representation of the
+            // conversation and has to split the key.
+            assertThat(factory.compute(ctx, "gpt-5.2", firstConversation))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-5.2", secondConversation));
         }
     }
 }
