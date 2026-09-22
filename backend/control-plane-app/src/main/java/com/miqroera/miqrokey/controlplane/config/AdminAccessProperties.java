@@ -14,8 +14,8 @@ import java.util.List;
  * caller outside this set can never forge the header.
  */
 @ConfigurationProperties(prefix = "miqrokey.control.admin-access")
-public record AdminAccessProperties(@DefaultValue( {
-    }) List<String> ipAllowlist, @DefaultValue({}) List<String> trustedProxies){
+public record AdminAccessProperties(@DefaultValue({
+    }) List<String> ipAllowlist, @DefaultValue({}) List<String> trustedProxies) {
 
     public AdminAccessProperties {
         if (ipAllowlist == null || trustedProxies == null) {
