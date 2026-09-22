@@ -8,6 +8,7 @@ import com.miqroera.miqrokey.domain.model.AdminApiKeyCapabilities;
 import com.miqroera.miqrokey.domain.repository.AdminApiKeyRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
 import jakarta.servlet.FilterChain;
+import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -25,7 +26,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -233,6 +236,42 @@ class AdminApiKeyAuthFilterTest {
         assertThat(sessionResponse.getStatus()).isEqualTo(403);
         assertThat(sessionResponse.getContentAsString()).contains("ADMIN_API_FORBIDDEN")
                 .contains("\"requestId\":\"ph16-open-403\"");
+    }
+
+    /**
+     * #1382: {@code auditDenied} used to splice the decoded request path into the
+     * change summary with a hand-rolled escaper that handled only {@code \} and
+     * {@code "}. A percent-encoded control character survives Tomcat and
+     * {@link RequestPaths#lookupPath} in decoded form, so the summary was not a
+     * JSON document: the {@code ::jsonb} round-trip in
+     * {@code AuditServiceImpl.record} threw, no audit row was written, and the
+     * throw escaped this (non-transactional) filter before {@code forbiddenScope}
+     * could run — the caller saw a 500 instead of the 403 the denial means.
+     */
+    @Test
+    @DisplayName("a denied path carrying a control character is audited as valid JSON and still answered 403 (#1382)")
+    void denialWithControlCharacterInPathIsAudited() throws Exception {
+        UUID issuer = UUID.randomUUID();
+        AdminApiKey scoped = new AdminApiKey(keyId, tenant, "usage-only", new byte[32], "mqk_admin_", issuer, null,
+                null, Instant.now(), List.of(AdminApiKeyCapabilities.USAGE_READ));
+        when(repository.findActiveByDigest(any())).thenReturn(Optional.of(scoped));
+
+        MockHttpServletRequest denied = new MockHttpServletRequest();
+        denied.setRequestURI("/api/v1/admin-api/export-tasks/%01");
+        denied.addHeader("Authorization", "Bearer mqk_admin_usage-only-token");
+        MockHttpServletResponse deniedResponse = new MockHttpServletResponse();
+        filter.doFilter(denied, deniedResponse, chain);
+
+        assertThat(deniedResponse.getStatus()).as("the denial response must survive the audit write").isEqualTo(403);
+        assertThat(deniedResponse.getContentAsString()).contains("ADMIN_API_SCOPE_DENIED");
+        verify(chain, never()).doFilter(denied, deniedResponse);
+
+        ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
+        verify(auditService).record(eq(tenant), eq(issuer), eq("ADMIN_API_KEY_SCOPE_DENIED"), eq("ADMIN_API_KEY"),
+                eq(keyId), summary.capture(), any());
+        assertThat(summary.getValue()).as("the summary must be a JSON document PostgreSQL's jsonb parser accepts")
+                .satisfies(
+                        value -> assertThatCode(() -> new ObjectMapper().readTree(value)).doesNotThrowAnyException());
     }
 
     @Test
