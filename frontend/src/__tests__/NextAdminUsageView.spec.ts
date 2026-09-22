@@ -6,6 +6,7 @@ import { defineComponent } from 'vue';
 import NextAdminUsageView from '@/views/next/NextAdminUsageView.vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
+import { localDateTime, localDayKey, localTzOffsetMinutes } from '@/utils/datetime';
 import type {
   ModelCallTimeline,
   UsageGroup,
@@ -1261,53 +1262,75 @@ describe('NextAdminUsageView', () => {
   // sat in two different days on one screen: 请求日志 printed its local day, the
   // table above it printed the UTC one.
   //
-  // The mock mirrors the server rule (no offset ⇒ UTC buckets) so the failure shows
-  // in the rendered table, not merely in a request-parameter list. The viewer is
-  // pinned to UTC+8 rather than inheriting the runner's zone, which is UTC in CI
-  // (#1301) — there the two bucketings coincide and the test would prove nothing.
+  // Zone handling: the offset and the expected day are *derived from the runner's own
+  // zone*, never pinned. Mocking `Date.prototype.getTimezoneOffset` moves only the API
+  // parameter — `formatTime` renders through the runtime's local getters, which no such
+  // mock reaches — so a pinned offset makes the two halves of the test disagree on every
+  // runner but the pinned one. (Measured: a pinned UTC+8 version passed on the UTC+8 dev
+  // host, failed on `TZ=America/New_York`, and would have failed on the UTC CI runner.)
+  //
+  // Two kinds of assertion, both needed: the request-parameter ones hold in *every* zone
+  // (before the fix the key is simply absent, and absent ≠ any offset), while the rendered
+  // one only bites where the local day actually differs from the UTC day — never true on
+  // the UTC CI runner (#1301).
   it('#PH89 维度分解的日/月分桶用查看者本地日，与同屏请求日志一致', async () => {
-    const offset = vi.spyOn(Date.prototype, 'getTimezoneOffset').mockReturnValue(-480); // UTC+8
-    try {
-      // 2026-09-03T17:30:00Z is 09-04 01:30 at UTC+8 — a record whose local day is
-      // the next one. Real capture, container `ph89tz2-pg` / control-plane :18766:
-      //   tz unset  → [('2026-09-03', 3, 117), ...]
-      //   tz=480    → [('2026-09-03', 1, 100), ('2026-09-04', 3, 24), ...]
-      const utcDay = '2026-09-03';
-      const localDay = '2026-09-04';
-      const dayGroup = (day: string) => group(day, day, 1, 17, 28, 0.004);
-      mockApi.adminUsageSummary.mockImplementation(async (query) => ({
-        groupBy: String(query?.groupBy ?? 'project'),
-        groups: [dayGroup(query?.tzOffsetMinutes === 480 ? localDay : utcDay)],
-        totals: group('__totals__', '合计', 1, 17, 28, 0.004),
-      }));
-      mockApi.adminUsageRecords.mockResolvedValue({
-        items: [recordRow(1, { occurredAt: '2026-09-03T17:30:00Z' })],
-        page: 1,
-        size: 20,
-        total: 1,
-      });
+    const offset = localTzOffsetMinutes();
+    const utcIso = '2026-09-03T17:30:00Z';
+    const utcDay = utcIso.slice(0, 10);
+    const localDay = localDayKey(utcIso);
+    const dayGroup = (day: string) => group(day, day, 1, 17, 28, 0.004);
+    mockApi.adminUsageSummary.mockImplementation(async (query) => ({
+      groupBy: String(query?.groupBy ?? 'project'),
+      // The server rule (verified against a live control-plane: offset unset / 480 /
+      // -240 give three different bucket rows): no offset ⇒ UTC buckets, otherwise the
+      // offset decides the day.
+      groups: [dayGroup(query?.tzOffsetMinutes === offset ? localDay : utcDay)],
+      totals: group('__totals__', '合计', 1, 17, 28, 0.004),
+    }));
+    mockApi.adminUsageRecords.mockResolvedValue({
+      items: [recordRow(1, { occurredAt: utcIso })],
+      page: 1,
+      size: 20,
+      total: 1,
+    });
 
-      const wrapper = mountView();
-      await flushPromises();
+    const wrapper = mountView();
+    await flushPromises();
 
-      // The request log states the day the viewer is in.
-      expect(wrapper.find('[data-testid="usage-records-table"]').text()).toContain(
-        '2026-09-04 01:30',
-      );
+    // 查询 issues exactly two summaries — the breakdown (`groupBy: 'project'`) and the
+    // trend (`groupBy: seriesDim`, default 'day'). Both must carry the offset; before
+    // the fix only the trend did, which is the whole defect.
+    const initial = mockApi.adminUsageSummary.mock.calls;
+    expect(initial.map(([q]) => q?.groupBy).sort()).toEqual(['day', 'project']);
+    for (const [query] of initial) {
+      expect(query?.tzOffsetMinutes).toBe(offset);
+    }
 
-      // 维度分解 → 日 must agree with it.
-      await wrapper.find('[data-testid="usage-tab-breakdown"]').trigger('click');
-      await flushPromises();
-      await wrapper
-        .find('[data-testid="usage-group-by"] .stub-option[data-option="day"]')
-        .trigger('click');
-      await flushPromises();
+    // The request log states the day the viewer is in.
+    expect(wrapper.find('[data-testid="usage-records-table"]').text()).toContain(
+      localDateTime(utcIso),
+    );
 
-      const breakdown = wrapper.find('[data-testid="usage-breakdown-table"]');
-      expect(breakdown.text()).toContain(localDay);
+    // 维度分解 → 日 must agree with it.
+    await wrapper.find('[data-testid="usage-tab-breakdown"]').trigger('click');
+    await flushPromises();
+    await wrapper
+      .find('[data-testid="usage-group-by"] .stub-option[data-option="day"]')
+      .trigger('click');
+    await flushPromises();
+
+    // Re-bucketing goes through `loadBreakdown`, not `load` — every `groupBy: 'day'`
+    // call now issued must carry the offset, else the dropdown switch reintroduces it.
+    const dayCalls = mockApi.adminUsageSummary.mock.calls.filter(([q]) => q?.groupBy === 'day');
+    expect(dayCalls.length).toBeGreaterThan(1);
+    for (const [query] of dayCalls) {
+      expect(query?.tzOffsetMinutes).toBe(offset);
+    }
+
+    const breakdown = wrapper.find('[data-testid="usage-breakdown-table"]');
+    expect(breakdown.text()).toContain(localDay);
+    if (localDay !== utcDay) {
       expect(breakdown.text()).not.toContain(utcDay);
-    } finally {
-      offset.mockRestore();
     }
   });
 });
