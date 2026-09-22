@@ -1207,6 +1207,7 @@ detail_currency, detail_occurred_at, detail_status, detail_bucket_key, detail_pr
 
 - **幂等**：同 (providerCode, window, currency, uploadSha256) 重复导入返回既有报告（不重复执行）；`FAILED` 除外（可重试）。
 - 上传上限：16MB（解压 64MB / 100,000 行）；超限或 gzip 损坏 `400 RECONCILIATION_UPLOAD_INVALID`。
+- `provider_row_ref` 受列宽约束：`reconciliation_rows.provider_row_ref` 是 `varchar(256)`（#1439）。canonical 账单里该字段**超长不再让整份报告 `FAILED`**——按**码点**截断到 256（与 PostgreSQL `varchar(n)` / `length()` 同口径，不会截断代理对），该行仍参与四态计数与金额差，并记一条 `FIELD_TOO_LONG` 行错误（计入 `lineErrorCount`，detail 只含长度、不含原值）。字段级定义见 `docs/bill-reconciliation-contract.md`。
 - 校验：窗口 ≤31 天且 from<to（`RECONCILIATION_WINDOW_INVALID`）；**窗口是半开区间 `[windowFrom, windowTo)`
   ——`windowFrom` 含、`windowTo` 不含**（#1045 的实现口径，本行补记）：对账与用量统计/导出共享同一条全局窗口约定，
   边界行因此只归一份报告；按闭区间切分账单文件的调用方会让边界行从 MATCHED 翻成 UNMATCHED，而报告不会解释原因。
