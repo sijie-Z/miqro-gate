@@ -6007,3 +6007,82 @@ V73 的索引用 `WHERE status = 'PENDING'` 作部分谓词，而白名单分支
   **不动一行 SQL**：删除仍安全（同一诉求的重复提交、两份审计都独立留在 append-only 的 `admin_audit_events`），
   但结论收窄为「不要用本表行数或行内容反推谁申请过」。该迁移从未进入共享环境（`git branch -a --contains
   acecdda0` 只有本分支；`origin/develop` 最新为 V72），故不属于「禁止修改已进入共享环境的迁移」。
+
+## 2026-09-22 三处判据「等的不是被测对象」：#934 / #1163 / #1150（PR #1125 / #1164 / #1167）
+
+同一天收掉的三条独立缺陷，形状是同一个：**判据指向了一个顺手的邻居，而不是本次请求/本次响应本身**。
+三条都在合入前用「红先证明」校准，且每条都跑了全新上下文的对抗评审（评审员的改法建议另经独立复验，见下）。
+
+### ① #934 熔断集成测试把自己钉在时序上（PR #1125）
+
+`LlmCircuitBreakerIntegrationTest` 在 `Thread.sleep(1_200)` 之后断言「熔断已打开、探针已放出」，并用
+`hasSize(3)` / `hasSize(4)` 这类**绝对条数**描述「开窗期间拒绝了几次」。两者都不是在描述被测契约，而是在描述
+「这台机器上 1200ms 够不够」：慢机上 sleep 不够 → 探针未放出 → 红；快机上多跑一次 → 条数变 → 红。
+所以它不是「偶发」，而是**必然在某个速度上失败的确定性缺陷**，本机只是正好落在能过的那一档。
+
+**改动**：删掉 sleep，改有界轮询 —— `awaitRejection()` / `awaitSuccess()`（`MAX_ATTEMPTS=40`、`RETRY_PAUSE_MS=50`），
+绝对条数改相对基线（`>= contactsWhileOpen + 2`）。**步数语义**（几次失败开窗 / 探针何时放出 / 成功关闭 / 失败重开）
+**不在本类钉** —— 它 pin 在 `McpCircuitBreakerTest`（注入 `Clock`）与 `LlmCircuitBreakerRegistryTest`；本类只钉 HTTP
+形状契约。这个分工写进了 javadoc，**覆盖变化是显式标注的，不是漏的**。
+
+**验证**：
+
+- 红先证明：未修复的 `origin/develop` 上注入 300ms 滞后即复现 `expected:<200 OK> but was:<503>`；自然时序下余量
+  只有 1.88–5.88 ms（9/9 为正），所以本机从不显形。
+- 「它有牙吗」变异校准：`min-requests` → 1000（熔断永不打开）、`open-seconds` → 1e6（探针永不放出），断言
+  **必须红且响亮** —— 两处都验证为「响亮失败」，排除了「轮询把真故障掩盖成绿灯」这一最坏情形。
+- 「顺序无关性」反向实验：注入跨过阈值的滞后（300 ms / 1500 ms），期望变绿。
+
+> 一条方法学收获：本轮评审员 r2 建议「加一次不等候的调用以恢复鉴别力」并称其**顺序无关**；我照做后 r3 它自己用
+> 同一个实验反转了结论（漏洞在 #451 半开回收分支：探针 `afterCall` 滞后 ≥ `open-seconds` 时，第二次观测到的 2xx
+> 来自被回收放出的新探针，breaker 仍是 `HALF_OPEN` —— 阈值正好是 `open-seconds`，1500 ms 红 / 300 ms 绿）。
+> **评审建议分两类：「指出现有代码的问题」通常可信；「提出改法」必须自己独立验。**
+
+### ② #1163 终态屏障等的是「集合非空」而不是「本次请求的记录」（PR #1164）
+
+`ChatProxyContractTest` 的 `UsageFactGuard` 用 `awaitOrFail(bus)` 等「usage 事件集合非空」。这个屏障**任何一条**
+记录都能满足 —— 包括测试自己先前那发产生的邻居。于是「模型缺失的请求不产生 usage 事实」这条断言可能**是被邻居
+喂饱的**，与被测请求无关：断言恒真，等于没测。
+
+**改动**：屏障键在**网关自己铸的 request id** 上 —— 它由 `ProxyController` 回显在代理响应的 `X-MiQroKey-Request-Id`
+头（流式与非流式都发）。`requestIdOf(proxied)` 从响应头取；`awaitTerminal` / `awaitUsage` 按该 id 等到**属于本次
+请求的那一条**；只用 `usageFor(...)`（快照、不等待）做否定断言。`awaitOrFail` 删除。
+
+**验证**：红先证明的形态是**交叉轮次 A/B** —— 同一个变异（把「模型缺失即不记事实」改坏），**旧设计的钥匙下 GREEN、
+新钥匙下 RED**，证明旧屏障确实可以被邻居满足。
+
+> 踩过的坑：初版我**替换掉了等待本身**（把三处 `awaitOrFail` 换成快照 `usageFor`），滞后 400 ms 的写者下必然红，
+> 而「修好」的代码也红。缓存读的语义必须保留等待。
+
+### ③ #1150 更新端点把桶项目的 `system` 回显成库里的反面（PR #1167）
+
+`AdminOrgService.updateProject` 用 **11 参便捷构造器**重建 `Project` —— 那个构造器的语义是「普通项目」
+（`Project` 的 javadoc 即 "Regular (non-system) project"），`system` 取默认 `false` —— 而它 `return` 的正是这个重建对象。
+结果：同一个项目在**列表端点**是 `system:true`、在**更新端点的响应**里是 `false`，库里那行始终是 `true`。
+**响应说了一件库里不是的事。**
+
+**改动**：改用 **12 参规范构造器**并带上刚读到的 `project.system()`。**没有**改 `ProjectRepositoryImpl.update` ——
+那一列不该经本路径变成可写，这是本次唯一的语义边界（注释里写明）。
+
+**验证**：
+
+- 红先证明：`AdminOrgApiIntegrationTest.unattributedPolicyLifecycle` 先只加断言、不改 service →
+  `JSON path "$.system" expected:<true> but was:<false>`；改后 16/16 绿。删掉 `, project.system()` 复现同一句红。
+- **同族扫描**：全仓 `new Project(` 仅 3 处 —— `AdminOrgService` 的**新建**（`system=false` 正确，不动）、本次修的
+  **重建**、`ProjectRepositoryImpl` 的 `ROW_MAPPER`（**读**库、已带 `system` 列）⇒ **无第二个实例**，家族闭合。
+- 对抗评审**临时插桩打印真实响应体**（随后还原，两文件 md5 与实验前逐字节一致）确认 `create` / `PATCH` / `list`
+  三条路径的 `system` 现在一致；并核了 `createProject` 的 `system=false` 是对的（桶项目只由
+  `UnattributedPolicyService` 的裸 SQL 以 `TRUE` 建，`ProjectRepositoryImpl.insert` 根本不写该列）。
+
+### 一处与 issue 不符，如实标注
+
+#1150 的复现步骤与验收写的是 `PUT /api/v1/admin/projects/{id}`，**实际端点是 `PATCH`**
+（`AdminProjectController` `@PatchMapping("/{projectId}")`；全仓 `/projects/` 下唯一的 PUT 是预算端点）。
+现象与根因不受影响，仅动词写错。
+
+### 伴生
+
+- **#1166**（#1150 复审时的范围外发现，另立）：`BUCKET_CODE = "UNATTRIBUTED"` 不是保留字 —— `createProject` 只校验
+  「非空 + 全租户唯一」，不拒绝该 code，而 `ensureBucketProject` 按 code **收养**已存在的项目。于是「先建
+  `UNATTRIBUTED` 项目、后配置未归属策略」会让桶项目停在 `system=false`，**绕过 `VirtualKeyService` 的
+  `PROJECT_NOT_SELECTABLE` 守卫**。先于本次改动存在，不由本次引入或加重；后由 #1171 修复并合入。
