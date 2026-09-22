@@ -264,6 +264,52 @@ class ReconciliationApiIntegrationTest {
     }
 
     /**
+     * docs/bill-reconciliation-contract.md:30 declares {@code provider_row_ref} a
+     * plain string, the column is {@code varchar(256)} (V42:47), and the parser
+     * passed it through untouched: one over-long ref made the batch INSERT raise
+     * "value too long for type character varying(256)", which the caller's
+     * catch-all turned into a FAILED report — every line lost, line_error_count
+     * null, no line number in the message (#1439). Pinned at the API surface
+     * because only the report can show that the file survived.
+     */
+    @Test
+    @DisplayName("over-long provider_row_ref: report SUCCEEDS, one line error, the row and its neighbours kept")
+    void overLongRowRefDoesNotFailTheReport() throws Exception {
+        String bill = "{\"provider_request_id\":\"req-legal\",\"occurred_at\":\"" + occurred
+                + "\",\"model_id\":\"m-ghost\",\"amount\":\"1.00\",\"currency\":\"USD\",\"provider_row_ref\":\"row-1\"}\n"
+                + "{\"provider_request_id\":\"req-long\",\"occurred_at\":\"" + occurred
+                + "\",\"model_id\":\"m-ghost\",\"amount\":\"2.00\",\"currency\":\"USD\",\"provider_row_ref\":\""
+                + "R".repeat(300) + "\"}\n";
+
+        MvcResult created = postReport(bill.getBytes(StandardCharsets.UTF_8));
+        assertThat(created.getResponse().getStatus()).isEqualTo(202);
+        String reportId = objectMapper.readTree(created.getResponse().getContentAsString()).get("id").asText();
+
+        // Both lines are counted (the over-long one is an ordinary line error, not a
+        // file-level failure), and the report body carries the diagnostic.
+        assertThat(awaitSucceeded(reportId)).contains("\"SUCCEEDED\"").contains("\"totalRows\":2")
+                .contains("\"unmatchedProvider\":2").contains("\"lineErrorCount\":1");
+
+        String rows = mockMvc
+                .perform(get("/api/v1/admin/reconciliations/" + reportId + "/rows")
+                        .param("state", "UNMATCHED_PROVIDER").cookie(sessionCookie, csrfCookie))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.rows.length()").value(2)).andReturn().getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        // Both refs are readable: the neighbour untouched, the offender kept at the
+        // column width instead of dropped.
+        assertThat(rows).contains("\"providerRowRef\":\"row-1\"")
+                .contains("\"providerRowRef\":\"" + "R".repeat(256) + "\"");
+
+        // The bound is the column's own: PostgreSQL length() counts characters (code
+        // points), the same unit varchar(256) counts, and nothing above 256 was
+        // persisted. Before the fix this INSERT raised instead.
+        Integer longest = jdbc.queryForObject(
+                "SELECT max(length(provider_row_ref)) FROM reconciliation_rows WHERE report_id = :id",
+                new MapSqlParameterSource("id", UUID.fromString(reportId)), Integer.class);
+        assertThat(longest).as("longest stored provider_row_ref, in characters").isEqualTo(256);
+    }
+
+    /**
      * The report window is half-open, like every other usage window in the product:
      * {@code windowFrom} inclusive, {@code windowTo} exclusive. A usage row landing
      * exactly on the upper bound is billed by the next report, so counting it here
