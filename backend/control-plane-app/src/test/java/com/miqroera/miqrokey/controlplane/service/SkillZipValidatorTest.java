@@ -373,10 +373,43 @@ class SkillZipValidatorTest {
     }
 
     @Test
-    @DisplayName("fail-closed: bytes appended after the EOCD make the trailer unverifiable and are refused (#1242)")
-    void trailingBytesAfterEocdRejected() {
-        assertCode(bytes(rawHonestDeflate(), new byte[]{(byte) 0xDE, (byte) 0xAD, (byte) 0xBE, (byte) 0xEF}),
-                "SKILL_ZIP_INVALID");
+    @DisplayName("counter-control: trailing block padding after the EOCD (bsdtar streaming style) is accepted (#1242 H1)")
+    void trailingBlockPaddingAccepted() {
+        // bsdtar/libarchive pads its streaming output to a 10 KiB block, leaving
+        // thousands of NUL bytes after the EOCD record. python, java.util.zip
+        // .ZipFile and .NET all read such packages; the padding carries no EOCD
+        // signature, so the package stays accepted (regression found by the
+        // independent adversarial verification, fixed in the H1 round).
+        byte[] pkg = bytes(rawHonestDeflate(), new byte[9316]);
+
+        assertThat(SkillZipValidator.validate(pkg).name()).isEqualTo("web-scraper");
+    }
+
+    @Test
+    @DisplayName("fail-closed: a second EOCD (bare signature or smuggled record) in the trailing bytes is refused (#1242 H1)")
+    void secondEocdInTrailingBytesRejected() {
+        byte[] pkg = rawHonestDeflate();
+        byte[] eocdRecord = java.util.Arrays.copyOfRange(pkg, pkg.length - 22, pkg.length);
+        // Padding may not smuggle another EOCD: a bare signature ...
+        assertCode(bytes(pkg, new byte[100], le32(0x06054B50L), new byte[100]), "SKILL_ZIP_STRUCTURE_INVALID");
+        // ... or a copy of the whole record somewhere in the trailing bytes.
+        assertCode(bytes(pkg, new byte[100], eocdRecord, new byte[100]), "SKILL_ZIP_STRUCTURE_INVALID");
+    }
+
+    @Test
+    @DisplayName("fail-closed: a declared csize running past the end of the file is refused cleanly (#1242 H2)")
+    void declaredCsizePastEndRejected() {
+        // One mutated 4-byte field on an honest package. Pre-#1242 this was a
+        // clean 400; the first cut of verifyTwoViews handed the declared size
+        // straight to Inflater.setInput and leaked an uncaught
+        // ArrayIndexOutOfBoundsException, which the controller maps to a 500.
+        byte[] pkg = rawHonestDeflate();
+        pkg[18] = (byte) 0x00; // entry 0 local header csize -> 0x00F00000
+        pkg[19] = (byte) 0x00;
+        pkg[20] = (byte) 0xF0;
+        pkg[21] = (byte) 0x00;
+
+        assertCode(pkg, "SKILL_ZIP_STRUCTURE_INVALID");
     }
 
     @Test
