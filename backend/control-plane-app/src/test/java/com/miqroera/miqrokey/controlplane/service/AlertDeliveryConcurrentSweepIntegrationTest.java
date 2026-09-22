@@ -107,12 +107,21 @@ class AlertDeliveryConcurrentSweepIntegrationTest {
     private final java.util.concurrent.CountDownLatch secondRetryArrived = new java.util.concurrent.CountDownLatch(1);
     /** Off during setup, on for the concurrent sweep. */
     private volatile boolean holdDeliveries;
+    /**
+     * POSTs seen <em>while holding</em>. Counted separately from {@link #received}:
+     * the initial delivery has already happened by the time holding starts, so a
+     * counter that includes it can never reach 1 while holding — which is how this
+     * gate silently became a no-op (the first retry got {@code 2} and simply
+     * released itself).
+     */
+    private final AtomicInteger heldRetries = new AtomicInteger();
     private final Fixture fx = new Fixture();
 
     @BeforeEach
     void setUp() throws Exception {
         fx.reset();
         holdDeliveries = false;
+        heldRetries.set(0);
         mockReceiver = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         mockReceiver.createContext("/hook", this::handleHook);
         mockReceiver.start();
@@ -143,11 +152,14 @@ class AlertDeliveryConcurrentSweepIntegrationTest {
     }
 
     private void handleHook(HttpExchange exchange) throws java.io.IOException {
-        int nth = received.incrementAndGet();
+        received.incrementAndGet();
         if (holdDeliveries) {
-            if (nth == 2) {
+            // Count only the retry-phase POSTs (see heldRetries): the initial delivery is
+            // already behind us, so `received` can never be 1 here.
+            int held = heldRetries.incrementAndGet();
+            if (held == 2) {
                 secondRetryArrived.countDown();
-            } else if (nth == 1) {
+            } else if (held == 1) {
                 awaitSecondRetry();
             }
         }
