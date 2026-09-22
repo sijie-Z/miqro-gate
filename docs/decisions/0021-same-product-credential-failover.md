@@ -13,6 +13,10 @@
 
 - **首期只允许「同供应商 + 同 product/model 兼容池内」的显式回退。**
   **不**放开跨供应商语义切换（`DeepSeek → Kimi`、`DeepSeek → GLM`）—— **跨供应商 fallback 另开 ADR。**
+  > **「兼容池」的判定谓词尚未定义**（同 product 不同 model / model alias 不同 / capability 不同 /
+  > 同 `provider_product` 下多个 model —— 哪些算同一个池？）。它在**本 ADR 里只是自然语言约束**；
+  > 具体 predicate 属 **#704 实现设计**，必须在实现时形成**确定的判定函数并写入测试**，
+  > 否则这条硬条件无法被机器检验（review #1365 的 P3）。
 - `virtual_key_id`、`project_id`、`gateway_request_id` **在整条 fallback 链中不变**。
 - **每一次 credential attempt 都有自己的可追踪记录** —— 不能最后只留下「这次请求用了 credential C」。
   否则出现「第一次 credential A 已发出请求 → 上游有无计费不确定 → 第二次换 credential B 成功」时，
@@ -105,7 +109,9 @@
 
 ## 2. 决策点（逐条回答 #717 的六问）
 
-> 本节每条给出**问题 → 现状 → 建议结论 → 理由 → 备选**。所有「建议结论」待 owner 拍板。
+> 本节每条给出**问题 → 现状 → 建议结论 → 理由 → 备选**，是**提出时的论证记录**。
+> 其中的「建议结论」若与 §0 的 owner 拍板条件冲突，**一律以 §0 为准**；写成「待 owner 拍板」的地方
+> 不表示今天仍未决——**当前未决项只有 §0 末尾那一处**（`CLAUDE.md` / `architecture.md` 的修订）。
 
 ### Q1 审计锚点：`credential_id` 记首次还是最终？多次尝试要不要各记一行？
 
