@@ -178,20 +178,20 @@ public interface UsageStatsRepository {
      * Ordered by {@code (occurred_at, id)} descending, i.e. a total order. A
      * positional window is still not a stable read of a live table: usage written
      * inside the window pushes rows back (they come out twice) and usage deleted
-     * inside it pulls rows forward (they are never returned). Callers that walk
-     * the whole list must use
-     * {@link #findRecords(UsageFilter, int, Instant, UUID)} instead.
+     * inside it pulls rows forward (they are never returned). Callers that walk the
+     * whole list must use {@link #findRecords(UsageFilter, int, Instant, UUID)}
+     * instead.
      * </p>
      */
     List<AdjustedUsageRow> findRecords(UsageFilter filter, long offset, int limit);
 
     /**
-     * The same rows read through a keyset window (#1368): everything strictly
-     * older than the row the previous page ended on. Passing the last row's
-     * {@code occurredAt}/{@code id} — both {@code null} for the first page —
-     * names a <em>row</em> rather than a position, so rows written or deleted
-     * between two calls cannot shift the window: no row is handed out twice and
-     * none is skipped while it exists.
+     * The same rows read through a keyset window (#1368): everything strictly older
+     * than the row the previous page ended on. Passing the last row's
+     * {@code occurredAt}/{@code id} — both {@code null} for the first page — names
+     * a <em>row</em> rather than a position, so rows written or deleted between two
+     * calls cannot shift the window: no row is handed out twice and none is skipped
+     * while it exists.
      *
      * <p>
      * Same total order as the offset variant, and the id is what makes the window
