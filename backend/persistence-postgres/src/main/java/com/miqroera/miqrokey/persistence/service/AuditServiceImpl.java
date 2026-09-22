@@ -71,8 +71,8 @@ public class AuditServiceImpl implements AuditService {
 
     /**
      * Width of {@code admin_audit_events.admin_request_id}
-     * ({@code V1__core_tables.sql:476}). PostgreSQL counts characters — code
-     * points — so the bound below is applied in code points, not UTF-16 units.
+     * ({@code V1__core_tables.sql:476}). PostgreSQL counts characters — code points
+     * — so the bound below is applied in code points, not UTF-16 units.
      */
     static final int REQUEST_ID_MAX_CODE_POINTS = 64;
 
@@ -163,17 +163,16 @@ public class AuditServiceImpl implements AuditService {
      * {@code admin_audit_events.admin_request_id} (#1328).
      *
      * <p>
-     * The id is decoration: it is not an input to the audited operation and
-     * appears in no validation contract. Its length must therefore never decide
-     * whether an administrative action succeeds, and never decide whether that
-     * action leaves an audit trail. Before this bound existed, an over-long
-     * {@code X-Request-Id} made the audit INSERT raise
-     * {@code DataIntegrityViolationException} ("value too long for type character
-     * varying(64)"): callers inside a transaction were rolled back entirely while
-     * callers outside one (e.g. {@code AlertRuleService.create}) had already
-     * committed — the action landed with no audit row, and the response claimed a
-     * {@code 409 RESOURCE_CONFLICT} about a configuration conflict that did not
-     * exist.
+     * The id is decoration: it is not an input to the audited operation and appears
+     * in no validation contract. Its length must therefore never decide whether an
+     * administrative action succeeds, and never decide whether that action leaves
+     * an audit trail. Before this bound existed, an over-long {@code X-Request-Id}
+     * made the audit INSERT raise {@code DataIntegrityViolationException} ("value
+     * too long for type character varying(64)"): callers inside a transaction were
+     * rolled back entirely while callers outside one (e.g.
+     * {@code AlertRuleService.create}) had already committed — the action landed
+     * with no audit row, and the response claimed a {@code 409 RESOURCE_CONFLICT}
+     * about a configuration conflict that did not exist.
      * </p>
      *
      * <p>
@@ -194,8 +193,10 @@ public class AuditServiceImpl implements AuditService {
         String bounded = requestId.substring(0, requestId.offsetByCodePoints(0, REQUEST_ID_MAX_CODE_POINTS));
         // Lengths only: the value is caller-supplied and must not reach a log line
         // unescaped (#1303 / #1313).
-        LOG.warn("Bound the caller-supplied admin_request_id to the {}-character audit column: {} code points"
-                + " supplied, {} stored", REQUEST_ID_MAX_CODE_POINTS, requestId.codePointCount(0, requestId.length()),
+        LOG.warn(
+                "Bound the caller-supplied admin_request_id to the {}-character audit column: {} code points"
+                        + " supplied, {} stored",
+                REQUEST_ID_MAX_CODE_POINTS, requestId.codePointCount(0, requestId.length()),
                 bounded.codePointCount(0, bounded.length()));
         return bounded;
     }

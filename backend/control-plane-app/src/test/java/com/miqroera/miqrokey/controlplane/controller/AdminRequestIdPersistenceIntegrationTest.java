@@ -113,8 +113,8 @@ class AdminRequestIdPersistenceIntegrationTest {
     }
 
     /**
-     * Drives the audited mutation the length of {@code requestId} chars and
-     * returns the raw observation so the assertion failure prints the evidence.
+     * Drives the audited mutation the length of {@code requestId} chars and returns
+     * the raw observation so the assertion failure prints the evidence.
      */
     private String probe(int requestIdLength) throws Exception {
         // A distinctive tail proves the stored value is the HEAD of what was sent,
@@ -122,25 +122,19 @@ class AdminRequestIdPersistenceIntegrationTest {
         // thing dropped from a 65-char one.
         String requestId = "r".repeat(requestIdLength - 1) + "X";
         String name = "ph66b-" + requestIdLength;
-        MvcResult result = mockMvc
-                .perform(post("/api/v1/admin/alert-rules").contentType(MediaType.APPLICATION_JSON)
-                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                        .header("X-Request-Id", requestId)
-                        .content("{\"name\":\"" + name + "\",\"type\":\"USAGE_SURGE\",\"threshold\":100}"))
-                .andReturn();
+        MvcResult result = mockMvc.perform(post("/api/v1/admin/alert-rules").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken).header("X-Request-Id", requestId)
+                .content("{\"name\":\"" + name + "\",\"type\":\"USAGE_SURGE\",\"threshold\":100}")).andReturn();
         long auditRows = jdbc.queryForObject(
                 "SELECT count(*) FROM admin_audit_events WHERE action = 'ALERT_RULE_CREATE'",
                 new MapSqlParameterSource(), Long.class);
         long ruleRows = jdbc.queryForObject("SELECT count(*) FROM alert_rules WHERE name = :name",
                 new MapSqlParameterSource("name", name), Long.class);
-        Long storedWidth = jdbc.queryForObject(
-                "SELECT coalesce(max(length(admin_request_id)), -1) FROM admin_audit_events"
-                        + " WHERE action = 'ALERT_RULE_CREATE'",
-                new MapSqlParameterSource(), Long.class);
-        String storedValue = jdbc.queryForObject(
-                "SELECT coalesce(max(admin_request_id), '') FROM admin_audit_events"
-                        + " WHERE action = 'ALERT_RULE_CREATE'",
-                new MapSqlParameterSource(), String.class);
+        Long storedWidth = jdbc
+                .queryForObject("SELECT coalesce(max(length(admin_request_id)), -1) FROM admin_audit_events"
+                        + " WHERE action = 'ALERT_RULE_CREATE'", new MapSqlParameterSource(), Long.class);
+        String storedValue = jdbc.queryForObject("SELECT coalesce(max(admin_request_id), '') FROM admin_audit_events"
+                + " WHERE action = 'ALERT_RULE_CREATE'", new MapSqlParameterSource(), String.class);
         boolean storedIsHead = storedValue.equals(requestId.substring(0, Math.min(requestIdLength, COLUMN_WIDTH)));
         return String.format(
                 "X-Request-Id length=%d -> HTTP %d, ALERT_RULE_CREATE audit rows=%d,"
@@ -154,8 +148,9 @@ class AdminRequestIdPersistenceIntegrationTest {
     void requestIdAtColumnWidthSucceeds() throws Exception {
         String observation = probe(COLUMN_WIDTH);
         System.out.println("PH66B-RAW control " + observation);
-        assertThat(observation).contains("HTTP 200").contains("audit rows=1").contains("stored admin_request_id length=64")
-                .contains("stored is head of sent=true").contains("alert_rules rows=1");
+        assertThat(observation).contains("HTTP 200").contains("audit rows=1")
+                .contains("stored admin_request_id length=64").contains("stored is head of sent=true")
+                .contains("alert_rules rows=1");
     }
 
     @Test
@@ -163,9 +158,9 @@ class AdminRequestIdPersistenceIntegrationTest {
     void requestIdOneOverColumnWidthIsStillAccepted() throws Exception {
         String observation = probe(COLUMN_WIDTH + 1);
         System.out.println("PH66B-RAW boundary " + observation);
-        assertThat(observation).as("one character past the column width").contains("HTTP 200")
-                .contains("audit rows=1").contains("stored admin_request_id length=64")
-                .contains("stored is head of sent=true").contains("alert_rules rows=1");
+        assertThat(observation).as("one character past the column width").contains("HTTP 200").contains("audit rows=1")
+                .contains("stored admin_request_id length=64").contains("stored is head of sent=true")
+                .contains("alert_rules rows=1");
     }
 
     @Test

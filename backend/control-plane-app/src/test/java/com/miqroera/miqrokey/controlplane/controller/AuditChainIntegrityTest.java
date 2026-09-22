@@ -616,8 +616,8 @@ class AuditChainIntegrityTest {
     void oversizedRequestIdIsBoundedBeforeHashing() {
         String oversized = "r".repeat(127) + "X";
 
-        auditService.record(SEED_TENANT_ID, UUID.randomUUID(), "OVERSIZED_REQUEST_ID", "TARGET", UUID.randomUUID(),
-                "1", oversized);
+        auditService.record(SEED_TENANT_ID, UUID.randomUUID(), "OVERSIZED_REQUEST_ID", "TARGET", UUID.randomUUID(), "1",
+                oversized);
 
         // verifyFullChain() recomputes every hash from the persisted row, so this
         // passes only if the bound was applied BEFORE computeEventHash. Bounding at
@@ -631,8 +631,8 @@ class AuditChainIntegrityTest {
         // would have dropped data, and bounding by code points must not split a
         // pair (a lone surrogate would not survive the UTF-8 encode in hashing).
         String astral = new String(Character.toChars(0x1F511)).repeat(64);
-        auditService.record(SEED_TENANT_ID, UUID.randomUUID(), "ASTRAL_REQUEST_ID", "TARGET", UUID.randomUUID(),
-                "2", astral);
+        auditService.record(SEED_TENANT_ID, UUID.randomUUID(), "ASTRAL_REQUEST_ID", "TARGET", UUID.randomUUID(), "2",
+                astral);
         AdminAuditEvent astralStored = readAllByChainPosition().stream()
                 .filter(e -> "ASTRAL_REQUEST_ID".equals(e.action())).findFirst().orElseThrow();
         assertThat(astralStored.adminRequestId()).as("64 code points fit the column whole").isEqualTo(astral);
