@@ -8,6 +8,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import * as api from '@/api';
 import { countWhenLoaded } from '@/utils/load-state';
+import { localDateTime } from '@/utils/datetime';
 import { ApiError } from '@/api/http';
 import {
   UiButton,
@@ -623,12 +624,12 @@ onMounted(load);
         >
           <template v-if="probeStatus.status === 'SUCCEEDED'">
             上次探测成功：{{ probeStatus.modelCount }} 个模型（{{
-              probeStatus.probedAt.slice(0, 16).replace('T', ' ')
+              localDateTime(probeStatus.probedAt)
             }}）
           </template>
           <template v-else>
             上次探测失败：{{ probeStatus.error || '未知原因' }}（{{
-              probeStatus.probedAt.slice(0, 16).replace('T', ' ')
+              localDateTime(probeStatus.probedAt)
             }}）
           </template>
         </span>
