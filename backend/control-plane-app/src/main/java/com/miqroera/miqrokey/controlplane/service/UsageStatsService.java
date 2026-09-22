@@ -92,10 +92,10 @@ public class UsageStatsService {
     }
 
     /**
-     * The same page, continued from an opaque {@code before} cursor (#1368) —
-     * what the console's export walks with. Null/blank means "start at the newest
-     * row"; see {@link AdminUsageStatsService#records} for the paging rule, which
-     * is the same one.
+     * The same page, continued from an opaque {@code before} cursor (#1368) — what
+     * the console's export walks with. Null/blank means "start at the newest row";
+     * see {@link AdminUsageStatsService#records} for the paging rule, which is the
+     * same one.
      */
     public UsageRecordPage records(User user, Instant from, Instant to, long page, int size, String before) {
         if (page < 1) {

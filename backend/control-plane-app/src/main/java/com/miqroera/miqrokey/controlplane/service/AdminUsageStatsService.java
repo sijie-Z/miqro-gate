@@ -177,9 +177,8 @@ public class AdminUsageStatsService {
     }
 
     /**
-     * The same page, continued from an opaque {@code before} cursor (#1368) —
-     * what the console's export walks with. Null/blank means "start at the
-     * newest row".
+     * The same page, continued from an opaque {@code before} cursor (#1368) — what
+     * the console's export walks with. Null/blank means "start at the newest row".
      */
     public UsageRecordPage records(UUID tenantId, Instant from, Instant to, long page, int size, String before) {
         return records(tenantId, from, to, page, size, null, null, null, null, null, null, null, null, null, before);
@@ -235,10 +234,10 @@ public class AdminUsageStatsService {
      *
      * <p>
      * {@code total} is a separate exact {@code COUNT(*)} over the same filter, as
-     * before — it is what the console's pager shows ("共 N 条"). It is a second
-     * read, so on a table the gateway is still writing it can differ from what a
-     * walk ends up handing out; {@code nextCursor} is what says whether there is
-     * more, not the total.
+     * before — it is what the console's pager shows ("共 N 条"). It is a second read,
+     * so on a table the gateway is still writing it can differ from what a walk
+     * ends up handing out; {@code nextCursor} is what says whether there is more,
+     * not the total.
      * </p>
      *
      * <p>

@@ -18,8 +18,8 @@ import java.util.UUID;
  * PostgreSQL {@code timestamptz}, so rows of the same second routinely differ
  * below the millisecond — and the boundary is inclusive-exclusive, so rounding
  * it to the millisecond would make the next page skip every row in the same
- * millisecond that sorts after the cursor row. The encoded unit is capped at the
- * column's own precision, so nothing is lost in either direction.
+ * millisecond that sorts after the cursor row. The encoded unit is capped at
+ * the column's own precision, so nothing is lost in either direction.
  * </p>
  *
  * <p>
@@ -44,9 +44,8 @@ record UsageRecordCursor(Instant occurredAt, UUID id) {
             String raw = new String(Base64.getUrlDecoder().decode(value), StandardCharsets.US_ASCII);
             int sep = raw.indexOf(':');
             long micros = Long.parseLong(raw.substring(0, sep));
-            return new UsageRecordCursor(
-                    Instant.ofEpochSecond(Math.floorDiv(micros, 1_000_000L), Math.floorMod(micros, 1_000_000L) * 1_000L),
-                    UUID.fromString(raw.substring(sep + 1)));
+            return new UsageRecordCursor(Instant.ofEpochSecond(Math.floorDiv(micros, 1_000_000L),
+                    Math.floorMod(micros, 1_000_000L) * 1_000L), UUID.fromString(raw.substring(sep + 1)));
         } catch (RuntimeException e) {
             // Never echo the value back: it is client input and may be anything.
             throw new ApiException(HttpStatus.BAD_REQUEST, "PARAM_INVALID", "分页游标无效，请刷新列表后重试");

@@ -71,8 +71,8 @@ class UsageRecordCursorTest {
     @Test
     @DisplayName("a malformed cursor is rejected without echoing it back")
     void malformedCursorIsRejected() {
-        assertThatThrownBy(() -> UsageRecordCursor.decode("not-a-cursor!!"))
-                .isInstanceOfSatisfying(ApiException.class, e -> {
+        assertThatThrownBy(() -> UsageRecordCursor.decode("not-a-cursor!!")).isInstanceOfSatisfying(ApiException.class,
+                e -> {
                     assertThat(e.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
                     assertThat(e.getCode()).isEqualTo("PARAM_INVALID");
                     assertThat(e.getMessage()).doesNotContain("not-a-cursor!!");
