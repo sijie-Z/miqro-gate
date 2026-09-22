@@ -32,9 +32,18 @@ export PGHOST="$DB_HOST" PGPORT="$DB_PORT" PGDATABASE="$DB_NAME"
 export PGUSER="$MIQROKEY_DB_USERNAME" PGPASSWORD="$MIQROKEY_DB_PASSWORD"
 
 # Integrity gate: the manifest must exist and match the exact bytes.
+#
+# Compare the digest against the archive we were *handed*, by content. Never
+# dereference the path recorded next to it: `sha256sum -c` follows that path,
+# so a backup synced to another host or directory would be rejected as
+# "checksum mismatch" while the file it actually checked was a different one
+# (#1381).
 MANIFEST="$BACKUP_FILE.sha256"
 [ -f "$MANIFEST" ] || { echo "restore aborted: missing manifest $MANIFEST" >&2; exit 1; }
-if ! (cd "$(dirname "$BACKUP_FILE")" && sha256sum -c "$(basename "$MANIFEST")" >/dev/null 2>&1); then
+[ -f "$BACKUP_FILE" ] || { echo "restore aborted: no such backup file $BACKUP_FILE" >&2; exit 1; }
+EXPECTED=$(head -n1 "$MANIFEST" | cut -d' ' -f1)
+ACTUAL=$(sha256sum "$BACKUP_FILE" | cut -d' ' -f1)
+if [ -z "$EXPECTED" ] || [ "$EXPECTED" != "$ACTUAL" ]; then
   echo "restore aborted: checksum mismatch" >&2
   exit 1
 fi
