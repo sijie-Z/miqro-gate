@@ -177,7 +177,8 @@ The bounded queue exposes saturation metrics and fails explicitly when full.
 - 当前分支不是 `main`，首次文档基线除外。
 - Current Goal 的完成定义满足，或用户明确要求推送一个标记为 WIP 的备份分支。
 - 自动化测试和 `git diff --cached --check` 通过。
-- `docs/progress.md` 记录了真实结果。
+- **仅当本 PR 属于 progress 回流批次（`Yes`）**：`docs/progress.md` 已记录本批真实结果。
+  标 `No` 的普通 PR **不以 `progress.md` 是否更新作为 push 前置条件**（判据与批次归属见 §10）。
 - `git status --short` 中没有误提交或未知文件。
 
 首次推送 Goal 分支：
@@ -335,10 +336,14 @@ PR 描述：会同步 progress.md  →  实际：没同步  →  CI：绿色  �
 与其加一个「解析自然语言正文」的脆检查（本仓已有「检查器误报 → 不再被信任 → 门禁形同虚设」的前车之鉴），
 不如**从源头去掉这个虚假承诺**。
 
+- **§1 与 §6 的口径已统一到本节**：提交（§1）与 push（§6）都**不再**把「`progress.md` 是否更新」
+  当作**普通 PR** 的前置条件（§6 原先残留的那条要求已改）。
 - **PR 模板**不再要求勾「`docs/progress.md` records exact results」，改为声明
-  **「本 PR 是否属于 progress 回流批次：Yes / No」**（见 [`.github/PULL_REQUEST_TEMPLATE.md`](../.github/PULL_REQUEST_TEMPLATE.md)）。
-- **只有标了 `Yes` 的 PR**，才要求这一批把结果写进 `progress.md`；标 `No` 的 PR **不因「进度文档未更新」被拦下**
-  （§1 的那条已相应收紧）。
+  **「Progress 回流批次：`Yes` / `No`」**（两个互斥项、二选一；见
+  [`.github/PULL_REQUEST_TEMPLATE.md`](../.github/PULL_REQUEST_TEMPLATE.md)）。
+- **只有标了 `Yes` 的 PR**，才要求这一批把结果写进 `progress.md`；标 `No` 的 PR **不因「进度文档未更新」被拦下**。
+- **谁决定批次**：**回流批次由仓库所有者 / 授权维护者明确指定**；**未被指定的普通 PR 默认按 `No` 处理**。
+  这一条补上「谁决定哪一批是回流批次」的缺口 —— 否则会出现「**所有 PR 都填 `No`，最终没人负责回流**」。
 - 收口批次把**当批合并的 PR** 结果写进 `progress.md`。
 - **历史日志不改写**：新状态以**追加入口**的方式覆盖旧口径（例如 `progress.md` 里旧的交接结论），
   不去改过去的记录。
