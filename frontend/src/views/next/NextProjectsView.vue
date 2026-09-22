@@ -122,6 +122,15 @@ async function loadMemberCounts(list: Project[]) {
   memberCounts.value = counts;
 }
 
+/**
+ * #PH78: 行上的成员数与抽屉里的成员名单是同一实体的两份副本。增删成员后抽屉会重读
+ * 名单，同一份读数必须同时喂给行上的计数 —— 否则关掉抽屉看到的还是旧数字，用户会
+ * 以为刚才那一下没生效而重复操作。计数与名单同源，不再各读一次。
+ */
+function setMemberCount(projectId: string, count: number) {
+  memberCounts.value = { ...memberCounts.value, [projectId]: count };
+}
+
 async function load() {
   loading.value = true;
   try {
@@ -242,6 +251,8 @@ async function addMember() {
     toast.success('成员已添加');
     const seq = ++membersRequestSeq;
     const rows = await api.listProjectMembers(project.id!); // list rows always carry ids
+    // #PH78: 这一次读数同时供抽屉名单与行上的计数，两者不许各说各话。
+    setMemberCount(project.id!, rows.length);
     if (seq === membersRequestSeq) {
       memberUsers.value = rows;
       memberError.value = ''; // a fresh read supersedes the old failure
@@ -269,6 +280,8 @@ function requestRemove(user: MemberView) {
         toast.success('成员已移除');
         const seq = ++membersRequestSeq;
         const rows = await api.listProjectMembers(project.id!); // list rows always carry ids
+        // #PH78: 同一次读数同时喂抽屉名单与行上的计数。
+        setMemberCount(project.id!, rows.length);
         if (seq === membersRequestSeq) {
           memberUsers.value = rows;
           memberError.value = ''; // a fresh read supersedes the old failure
