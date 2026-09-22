@@ -5,6 +5,7 @@ import com.miqroera.miqrokey.controlplane.dto.ModelApprovalView;
 import com.miqroera.miqrokey.controlplane.dto.ReviewModelApprovalRequest;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.ApiException;
+import com.miqroera.miqrokey.controlplane.service.ModelApprovalCursor;
 import com.miqroera.miqrokey.controlplane.service.ModelApprovalService;
 import com.miqroera.miqrokey.domain.model.ModelApprovalStatus;
 import com.miqroera.miqrokey.domain.model.User;
@@ -19,9 +20,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.nio.charset.StandardCharsets;
-import java.time.Instant;
-import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
 
@@ -34,7 +32,8 @@ import java.util.UUID;
  * Pagination is a keyset cursor:
  * {@code GET ?status=PENDING&size=20&before=<cursor>} returns newest-first
  * items plus a {@code nextCursor} for the next page. The cursor encodes the
- * last item's {@code (created_at, id)} — opaque to clients.
+ * last item's {@code (created_at, id)} at full microsecond precision — see
+ * {@link ModelApprovalCursor} — and is opaque to clients.
  * </p>
  */
 @RestController
@@ -58,12 +57,12 @@ public class AdminModelApprovalController {
         if (size < 1 || size > MAX_SIZE) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "PARAM_INVALID", "size 必须在 1 到 " + MAX_SIZE + " 之间");
         }
-        Cursor cursor = before == null || before.isBlank() ? Cursor.start() : Cursor.decode(before);
+        ModelApprovalCursor cursor = ModelApprovalCursor.of(before);
         // Fetch one extra row to learn whether another page exists.
-        List<ModelApprovalView> items = modelApprovalService.listQueue(user(), status, size + 1, cursor.createdAt,
-                cursor.id);
+        List<ModelApprovalView> items = modelApprovalService.listQueue(user(), status, size + 1, cursor.createdAt(),
+                cursor.id());
         String nextCursor = items.size() > size
-                ? Cursor.encode(items.get(size - 1).createdAt(), items.get(size - 1).id())
+                ? ModelApprovalCursor.encode(items.get(size - 1).createdAt(), items.get(size - 1).id())
                 : null;
         return new ModelApprovalPage(items.size() > size ? items.subList(0, size) : items, nextCursor);
     }
@@ -89,29 +88,5 @@ public class AdminModelApprovalController {
     private static String requestId(HttpServletRequest request) {
         String header = request.getHeader("X-Request-Id");
         return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
-    }
-
-    /** Opaque keyset cursor: base64("{createdAtEpochMillis}:{id}"). */
-    private record Cursor(Instant createdAt, UUID id) {
-
-        static Cursor start() {
-            return new Cursor(null, null);
-        }
-
-        static Cursor decode(String value) {
-            try {
-                String raw = new String(Base64.getUrlDecoder().decode(value), StandardCharsets.US_ASCII);
-                int sep = raw.indexOf(':');
-                return new Cursor(Instant.ofEpochMilli(Long.parseLong(raw.substring(0, sep))),
-                        UUID.fromString(raw.substring(sep + 1)));
-            } catch (RuntimeException e) {
-                throw new ApiException(HttpStatus.BAD_REQUEST, "PARAM_INVALID", "分页游标无效，请刷新列表后重试");
-            }
-        }
-
-        static String encode(Instant createdAt, UUID id) {
-            String raw = createdAt.toEpochMilli() + ":" + id;
-            return Base64.getUrlEncoder().withoutPadding().encodeToString(raw.getBytes(StandardCharsets.US_ASCII));
-        }
     }
 }
