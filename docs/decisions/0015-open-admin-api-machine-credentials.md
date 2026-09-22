@@ -4,6 +4,10 @@
 - 状态：Accepted（owner 2026-09-07「都做」拍板；批 1 已实现 #200，批 1b 读面已实现
   （audit/api-keys/quota-rules/export-tasks/mcp-access-logs 机器端点 + 会话 SYSTEM_ADMIN
   硬化），写面待 ADR-0016（Proposed）拍板）
+- 后续（2026-09-22 补记，**不改本 ADR 决策正文**）：ADR-0016 已于 2026-09-08
+  Accepted，写面按批 2 v1 开放（issue #1409）。下方「安全红线」第 5 条的审计口径
+  以 ADR-0016 + `docs/security.md` §11 为准——可追溯性承诺的范围是**机器写操作**，
+  成功的只读调用、401 凭据无效、403 非管理员会话留在审计之外。
 - 关联：ADR-0010/0011（api_consumers/JWT 机器通道先例）、F60（backlog）、
   docs/open-admin-api-plan.md（三批拆解）
 
@@ -28,6 +32,7 @@ OpenAPI 3.1 + CI breaking-check，但管理面认证面向“人”（会话 + C
 4. **治理默认**：批 1 不限频（与 F05 默认不限制一致），仅登记日志；作用域
    （只读/写/端点白名单）列入批 3 可选。
 5. **安全红线**：密钥只存摘要；展示仅 prefix；吊销即时；机器调用全部进审计
+   （范围以状态行的 2026-09-22 补记为准：**写**操作）
    （`ADMIN_API_KEY_*` + 操作审计沿用既有链）；正文依旧不落库；与
    api_consumers（外部平台账单通道）语义分离登记，不混用。
 
