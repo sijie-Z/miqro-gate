@@ -113,4 +113,41 @@ describe('NextSkillsView', () => {
     // Four tags render as three chips plus a remainder badge.
     expect(card.text()).toContain('+1');
   });
+
+  // PH58: load() had no response-sequence guard, so a slow answer for an older
+  // keyword could land after a newer search and repaint the grid with rows that
+  // no longer match the search box. Neither the search button nor the tag chips
+  // are disabled while a request is in flight, so two answers really can be
+  // outstanding at once.
+  it('drops a skills response that a newer search has already superseded', async () => {
+    const pending: Array<{ q: string; resolve: (v: SkillView[]) => void }> = [];
+    mockApi.listSkills.mockImplementation(
+      (q?: string) =>
+        new Promise<SkillView[]>((resolve) => {
+          pending.push({ q: String(q ?? ''), resolve });
+        }),
+    );
+
+    const wrapper = mountView();
+    await flushPromises();
+    expect(pending).toHaveLength(1); // the mount request is still open
+
+    // the user types a new keyword and searches again while the first is in flight
+    await wrapper.find('[data-testid="skill-search"]').setValue('SECOND');
+    await wrapper.find('[data-testid="skill-search-submit"]').trigger('click');
+    expect(pending).toHaveLength(2);
+    expect(pending.map((p) => p.q)).toEqual(['', 'SECOND']);
+
+    // the newer request answers first …
+    pending[1]!.resolve([skill({ id: 'new', name: '新窗口技能' })]);
+    await flushPromises();
+    expect(wrapper.find('[data-testid="skill-grid"]').text()).toContain('新窗口技能');
+
+    // … then the abandoned one dribbles in and must not win
+    pending[0]!.resolve([skill({ id: 'old', name: '旧窗口技能' })]);
+    await flushPromises();
+    const grid = wrapper.find('[data-testid="skill-grid"]').text();
+    expect(grid).toContain('新窗口技能');
+    expect(grid, 'the abandoned first search repainted the grid').not.toContain('旧窗口技能');
+  });
 });
