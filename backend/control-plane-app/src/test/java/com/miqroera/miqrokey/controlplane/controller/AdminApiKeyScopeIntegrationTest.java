@@ -306,8 +306,17 @@ class AdminApiKeyScopeIntegrationTest {
         assertThat(countAudit("ADMIN_API_KEY_SCOPE_DENIED")).as("every denial must leave exactly one audit row")
                 .isEqualTo(5);
 
-        // The summary is a JSON document, and the control character survives as an
-        // escape (jsonb normalizes it to ) rather than as a raw byte.
+        // #1382: every stored summary must come back as a well-formed JSON document -
+        // before the fix the raw control character made the whole write fail. jsonb
+        // normalizes the escape on storage, so parsing the column yields the decoded
+        // path; an unescaped byte would make this readTree throw instead.
+        List<String> summaries = auditedSummaries();
+        assertThat(summaries).as("one readable summary per denial").hasSize(5);
+        for (String summary : summaries) {
+            assertThat(objectMapper.readTree(summary).get("path").asText())
+                    .as("summary parses as JSON and carries the decoded path: %s", summary)
+                    .startsWith("/api/v1/admin-api/export-tasks");
+        }
     }
 
     /**
@@ -318,6 +327,16 @@ class AdminApiKeyScopeIntegrationTest {
     private List<String> auditedPaths() {
         return jdbc.queryForList(
                 "SELECT change_summary ->> 'path' FROM admin_audit_events"
+                        + " WHERE action = 'ADMIN_API_KEY_SCOPE_DENIED' ORDER BY chain_position",
+                new MapSqlParameterSource(), String.class);
+    }
+
+    /**
+     * Raw {@code change_summary} JSON text for every recorded denial, oldest first.
+     */
+    private List<String> auditedSummaries() {
+        return jdbc.queryForList(
+                "SELECT change_summary::text FROM admin_audit_events"
                         + " WHERE action = 'ADMIN_API_KEY_SCOPE_DENIED' ORDER BY chain_position",
                 new MapSqlParameterSource(), String.class);
     }
