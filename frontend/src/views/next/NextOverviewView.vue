@@ -26,6 +26,7 @@ import {
 import { UiButton, UiDonut, UiStatusBadge, UiTooltip } from '@/ui';
 import { CHART_OTHER_COLOR, CHART_PALETTE } from '@/lib/chart-palette';
 import {
+  monthlyRange,
   usedInputOutputTokens,
   windowRanges,
   type QuotaWindowRange,
@@ -494,9 +495,15 @@ async function load() {
     // Admin home shows the tenant-wide usage; regular users see their own.
     // usageSummary takes positional args, adminUsageSummary takes an object —
     // passing an object to usageSummary broke groupBy parsing on the backend.
+    //
+    // #PH89: 卡片写的是「本月」，就得要本月的窗口。省略 from/to 时后端按
+    // MAX_WINDOW = 93 天解析（UsageStatsService.java:127），这三个卡片会比下面的
+    // 账本 本月 行多出两个月的量——同一页、同一个词、两个区间。这里用的就是账本
+    // 自己那份 本月 窗口（@/lib/quota-window-usage）。
+    const month = monthlyRange(new Date());
     const summaryPromise = isAdmin.value
-      ? api.adminUsageSummary({ groupBy: 'project' })
-      : api.usageSummary('project');
+      ? api.adminUsageSummary({ groupBy: 'project', from: month.from, to: month.to })
+      : api.usageSummary('project', month.from, month.to);
     // #1138: started here so it rides the same wave as the summary instead of waiting
     // behind it — but awaited in loadFeed, not in the Promise.all below: an approval
     // read that fails may empty that panel and nothing else. Admins do not read

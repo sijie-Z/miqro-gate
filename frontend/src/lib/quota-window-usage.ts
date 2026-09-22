@@ -42,6 +42,22 @@ function monthStart(now: Date): Date {
 }
 
 /**
+ * 单一「本月」窗口（当月 1 日 00:00:00Z 起），给所有自称「本月」的汇总用。
+ *
+ * 省略 from/to 不是「本月」：后端把缺省窗口解析成 MAX_WINDOW = 93 天
+ * （`UsageStatsService.java:127`、`AdminUsageStatsService.java:296`），画出来的是近三个月。
+ * `windowRanges` 的第三项就是这一份，一个定义两处引用。
+ */
+export function monthlyRange(now: Date): QuotaWindowRange {
+  return {
+    key: 'MONTHLY',
+    label: '本月',
+    from: isoSeconds(monthStart(now)),
+    to: isoSeconds(now),
+  };
+}
+
+/**
  * The three ledger windows for a given instant, in display order.
  * Pure: the caller passes `now` so tests can freeze it.
  */
@@ -55,7 +71,7 @@ export function windowRanges(now: Date): QuotaWindowRange[] {
       to,
     },
     { key: 'WEEKLY', label: '本周', from: isoSeconds(mondayStart(now)), to },
-    { key: 'MONTHLY', label: '本月', from: isoSeconds(monthStart(now)), to },
+    monthlyRange(now),
   ];
 }
 
