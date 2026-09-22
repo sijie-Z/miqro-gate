@@ -7,8 +7,12 @@ import org.yaml.snakeyaml.constructor.SafeConstructor;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.CRC32;
+import java.util.zip.DataFormatException;
+import java.util.zip.Inflater;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -22,7 +26,11 @@ import java.util.zip.ZipInputStream;
  * paths and drive letters are rejected (#1233, zip-slip). Bounds guard
  * oversized packages and zip bombs — nothing is ever extracted to disk;
  * SKILL.md is the only content read into memory, the rest is inflated and
- * discarded to charge the decompressed-volume cap.
+ * discarded to charge the decompressed-volume cap. Since #1242 the local-header
+ * stream is cross-checked against the central directory first (see
+ * {@link #verifyTwoViews}): the charged volume always matches what mainstream
+ * extractors — which read the central directory — will produce, and any package
+ * whose two views disagree is refused fail-closed.
  */
 public final class SkillZipValidator {
 
@@ -59,6 +67,11 @@ public final class SkillZipValidator {
         if (zip.length > MAX_ZIP_BYTES) {
             throw invalid("SKILL_TOO_LARGE", "技能包超过 %d MB 上限。".formatted(MAX_ZIP_BYTES / 1024 / 1024));
         }
+        // #1242: the stream walk below is only the validator's own view of the
+        // package. Verify it against the central directory — what ZipFile,
+        // python's zipfile, .NET and PowerShell extractors follow — before
+        // anything is charged, so the caps always cover what will be extracted.
+        verifyTwoViews(zip);
         String rootDir = null;
         String skillMdText = null;
         int entries = 0;
@@ -184,6 +197,344 @@ public final class SkillZipValidator {
     private static SkillValidationException decompressedTooLarge() {
         return invalid("SKILL_DECOMPRESSED_TOO_LARGE",
                 "技能包解压后总体积超过 %d MB 上限。".formatted(MAX_TOTAL_DECOMPRESSED_BYTES / 1024 / 1024));
+    }
+
+    // ------------------------------------------------------------------
+    // #1242: two-view structure verification
+    //
+    // A zip can be read through two views that need not agree: the sequential
+    // local-header chain (what ZipInputStream walks, and what the caps below
+    // are charged through) and the central directory (what java.util.zip
+    // .ZipFile, python's zipfile, .NET and PowerShell follow when extracting).
+    // A crafted package whose central directory describes different data than
+    // its local headers lets the validator see a small package while an
+    // extractor inflates hundreds of megabytes. The checks below accept a
+    // package only when the two views describe the same entries — same count,
+    // names, flags, methods, sizes, CRCs and file offsets — and the file is
+    // exactly tiled by [local chain][central directory][EOCD(+comment)] with no
+    // unaccounted bytes; everything else is refused fail-closed.
+    // ------------------------------------------------------------------
+
+    private static final long LOC_SIG = 0x04034B50L;
+    private static final long CEN_SIG = 0x02014B50L;
+    private static final long EOCD_SIG = 0x06054B50L;
+    private static final long EXTSIG = 0x08074B50L;
+    private static final long ZIP64_EOCD_LOCATOR_SIG = 0x07064B50L;
+    private static final int ZIP64_EXTRA_ID = 0x0001;
+    /**
+     * Entry flag bits that change how an entry is interpreted. Bits 1–2 (the
+     * deflate compression-level hints) are excluded: they are pure hints whose
+     * spelling in the two views may differ without changing the data.
+     */
+    private static final int SEMANTIC_FLAGS = 0xFFF9;
+
+    /** A central-directory record, as the directory-based readers see it. */
+    private record CdEntry(byte[] name, int flags, int method, long crc, long csize, long usize, long offset) {
+    }
+
+    /** The actual span of a deflated entry, measured by inflating it. */
+    private record Inflated(long csize, long usize, long crc, long end) {
+    }
+
+    private static void verifyTwoViews(byte[] zip) {
+        int eocd = findEocd(zip);
+        if (eocd < 0) {
+            throw zipInvalid();
+        }
+        int diskNumber = u16(zip, eocd + 4);
+        int cdStartDisk = u16(zip, eocd + 6);
+        int entriesThisDisk = u16(zip, eocd + 8);
+        int totalEntries = u16(zip, eocd + 10);
+        long cdSize = u32(zip, eocd + 12);
+        long cdOffset = u32(zip, eocd + 16);
+        // zip64 markers: sentinel field values, or the zip64 EOCD locator that
+        // a zip64 archive carries right before the EOCD record.
+        boolean zip64 = entriesThisDisk == 0xFFFF || totalEntries == 0xFFFF || cdSize == 0xFFFFFFFFL
+                || cdOffset == 0xFFFFFFFFL || (eocd >= 20 && u32(zip, eocd - 20) == ZIP64_EOCD_LOCATOR_SIG);
+        if (zip64) {
+            throw invalid("SKILL_ZIP64_UNSUPPORTED", "技能包使用了不支持的 zip64 结构。");
+        }
+        if (diskNumber != 0 || cdStartDisk != 0 || entriesThisDisk != totalEntries) {
+            throw structureInvalid();
+        }
+        if (totalEntries > MAX_ENTRIES) {
+            throw invalid("SKILL_TOO_MANY_ENTRIES", "技能包条目数超过上限。");
+        }
+        if (cdOffset + cdSize != eocd) {
+            // The central directory must abut the EOCD record: a gap (a second,
+            // extractor-visible directory, as in #1242 form C, or concatenated
+            // data) or an overlap makes the layout ambiguous.
+            throw structureInvalid();
+        }
+        for (int at = eocd + 1; at + 4 <= zip.length; at++) {
+            // Only one EOCD may exist: readers that scan backwards must land on
+            // the same record this validator just read.
+            if (u32(zip, at) == EOCD_SIG) {
+                throw structureInvalid();
+            }
+        }
+        CdEntry[] cd = parseCentralDirectory(zip, eocd, totalEntries, cdOffset, cdSize);
+        int at = 0;
+        long decompressed = 0;
+        for (int i = 0; i < totalEntries; i++) {
+            if (at + 30 > cdOffset) {
+                throw structureInvalid();
+            }
+            if (u32(zip, at) != LOC_SIG) {
+                throw i == 0 ? zipInvalid() : structureInvalid();
+            }
+            int flags = u16(zip, at + 6);
+            int method = u16(zip, at + 8);
+            long declaredCrc = u32(zip, at + 14);
+            long declaredCsize = u32(zip, at + 18);
+            long declaredUsize = u32(zip, at + 22);
+            int nameLen = u16(zip, at + 26);
+            int extraLen = u16(zip, at + 28);
+            long dataStart = at + 30L + nameLen + extraLen;
+            if (dataStart > cdOffset) {
+                throw structureInvalid();
+            }
+            byte[] name = Arrays.copyOfRange(zip, at + 30, at + 30 + nameLen);
+            requireNoZip64Extra(zip, at + 30 + nameLen, extraLen);
+            if ((flags & 1) != 0) {
+                throw zipInvalid(); // encrypted entries: the streaming reader refuses them too
+            }
+            long csize;
+            long usize;
+            long crc;
+            long next;
+            if (method == 0) {
+                if ((flags & 8) != 0) {
+                    // Where a stored entry's data ends is knowable only from the
+                    // very sizes the descriptor is supposed to verify — nothing
+                    // about this entry can be cross-checked.
+                    throw structureInvalid();
+                }
+                if (declaredCsize != declaredUsize || dataStart + declaredCsize > cdOffset) {
+                    throw structureInvalid();
+                }
+                csize = declaredCsize;
+                usize = declaredUsize;
+                crc = crc32(zip, (int) dataStart, (int) declaredCsize);
+                if (crc != declaredCrc) {
+                    throw structureInvalid();
+                }
+                next = dataStart + declaredCsize;
+            } else if (method == 8) {
+                boolean viaDescriptor = (flags & 8) != 0;
+                Inflated inflated = inflateEntry(zip, dataStart,
+                        viaDescriptor ? cdOffset - dataStart : declaredCsize, decompressed);
+                if (viaDescriptor) {
+                    // #1242 direction 2: the descriptor is what a streaming
+                    // reader uses for sizes; it must match the bytes actually
+                    // inflated (and so take part in the directory comparison).
+                    next = readDescriptor(zip, inflated.end(), inflated, cdOffset);
+                } else {
+                    if (inflated.csize() != declaredCsize || inflated.usize() != declaredUsize
+                            || inflated.crc() != declaredCrc) {
+                        throw structureInvalid();
+                    }
+                    next = dataStart + declaredCsize;
+                }
+                csize = inflated.csize();
+                usize = inflated.usize();
+                crc = inflated.crc();
+            } else {
+                throw zipInvalid(); // unsupported compression method, refused as before
+            }
+            decompressed += usize;
+            if (decompressed > MAX_TOTAL_DECOMPRESSED_BYTES) {
+                throw decompressedTooLarge();
+            }
+            CdEntry entry = cd[i];
+            if (!Arrays.equals(name, entry.name()) || (flags & SEMANTIC_FLAGS) != (entry.flags() & SEMANTIC_FLAGS)
+                    || method != entry.method() || at != entry.offset() || csize != entry.csize()
+                    || usize != entry.usize() || crc != entry.crc()) {
+                throw structureInvalid();
+            }
+            at = (int) next;
+        }
+        if (at != cdOffset) {
+            // Bytes between the last local entry and the central directory are
+            // attributable to neither view.
+            throw structureInvalid();
+        }
+    }
+
+    private static CdEntry[] parseCentralDirectory(byte[] zip, int eocd, int totalEntries, long cdOffset,
+            long cdSize) {
+        CdEntry[] entries = new CdEntry[totalEntries];
+        int at = (int) cdOffset;
+        for (int i = 0; i < totalEntries; i++) {
+            if (at + 46 > eocd || u32(zip, at) != CEN_SIG) {
+                throw structureInvalid();
+            }
+            int flags = u16(zip, at + 8);
+            int method = u16(zip, at + 10);
+            long crc = u32(zip, at + 16);
+            long csize = u32(zip, at + 20);
+            long usize = u32(zip, at + 24);
+            int nameLen = u16(zip, at + 28);
+            int extraLen = u16(zip, at + 30);
+            int commentLen = u16(zip, at + 32);
+            int diskStart = u16(zip, at + 34);
+            long offset = u32(zip, at + 42);
+            if (diskStart != 0 || at + 46L + nameLen + extraLen + commentLen > eocd) {
+                throw structureInvalid();
+            }
+            byte[] name = Arrays.copyOfRange(zip, at + 46, at + 46 + nameLen);
+            requireNoZip64Extra(zip, at + 46 + nameLen, extraLen);
+            entries[i] = new CdEntry(name, flags, method, crc, csize, usize, offset);
+            at += 46 + nameLen + extraLen + commentLen;
+        }
+        if (at != cdOffset + cdSize) {
+            throw structureInvalid();
+        }
+        return entries;
+    }
+
+    /**
+     * Inflates one deflated entry within {@code inputBound} bytes and returns the
+     * compressed span the stream actually consumed, its actual inflated size and
+     * CRC — all measured from the data, never taken from declared header fields.
+     */
+    private static Inflated inflateEntry(byte[] zip, long dataStart, long inputBound, long alreadyCounted) {
+        Inflater inflater = new Inflater(true);
+        try {
+            CRC32 crc = new CRC32();
+            byte[] out = new byte[8192];
+            long pushed = 0;
+            long total = 0;
+            int at = (int) dataStart;
+            long available = inputBound;
+            while (!inflater.finished()) {
+                if (inflater.needsInput()) {
+                    if (available <= 0) {
+                        throw structureInvalid(); // the deflate stream runs past its declared span
+                    }
+                    int n = (int) Math.min(available, 1 << 20);
+                    inflater.setInput(zip, at, n);
+                    at += n;
+                    pushed += n;
+                    available -= n;
+                }
+                int n = inflater.inflate(out);
+                if (n > 0) {
+                    crc.update(out, 0, n);
+                    total += n;
+                    if (alreadyCounted + total > MAX_TOTAL_DECOMPRESSED_BYTES) {
+                        throw decompressedTooLarge();
+                    }
+                } else if (!inflater.finished()) {
+                    if (inflater.needsDictionary() || !inflater.needsInput()) {
+                        throw structureInvalid(); // malformed deflate data: no forward progress
+                    }
+                }
+            }
+            long consumed = pushed - inflater.getRemaining();
+            return new Inflated(consumed, total, crc.getValue(), dataStart + consumed);
+        } catch (DataFormatException e) {
+            // Same verdict a streaming reader reaches for corrupt deflate data.
+            throw zipInvalid();
+        } finally {
+            inflater.end();
+        }
+    }
+
+    /**
+     * Reads the data descriptor after a bit-3 entry's deflated data and requires
+     * it to describe the bytes that were actually inflated (the conventional
+     * 0x08074b50 signature is optional per APPNOTE; both spellings are read).
+     */
+    private static long readDescriptor(byte[] zip, long at, Inflated inflated, long limit) {
+        if (at + 12 > limit) {
+            throw structureInvalid();
+        }
+        long crc = u32(zip, (int) at);
+        long csize = u32(zip, (int) at + 4);
+        long usize = u32(zip, (int) at + 8);
+        long end = at + 12;
+        if (crc == EXTSIG) {
+            if (at + 16 > limit) {
+                throw structureInvalid();
+            }
+            crc = u32(zip, (int) at + 4);
+            csize = u32(zip, (int) at + 8);
+            usize = u32(zip, (int) at + 12);
+            end = at + 16;
+        }
+        if (crc != inflated.crc() || csize != inflated.csize() || usize != inflated.usize()) {
+            throw structureInvalid();
+        }
+        return end;
+    }
+
+    /**
+     * Locates the end-of-central-directory record the way the directory-based
+     * readers do: the last occurrence of the signature whose comment length
+     * reaches exactly to the end of the file.
+     */
+    private static int findEocd(byte[] zip) {
+        if (zip.length < 22) {
+            return -1;
+        }
+        for (int at = zip.length - 22; at >= Math.max(0, zip.length - 22 - 0xFFFF); at--) {
+            if (u32(zip, at) == EOCD_SIG && at + 22 + u16(zip, at + 20) == zip.length) {
+                return at;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Scans an extra-field block and refuses zip64 markers: they carry
+     * alternative sizes that some readers honour, which is precisely the kind of
+     * second description this validator must not accept unverified. A malformed
+     * block is refused as well.
+     */
+    private static void requireNoZip64Extra(byte[] zip, int at, int length) {
+        int end = at + length;
+        if (end > zip.length) {
+            throw structureInvalid();
+        }
+        int pos = at;
+        while (pos < end) {
+            if (pos + 4 > end) {
+                throw structureInvalid();
+            }
+            int id = u16(zip, pos);
+            int size = u16(zip, pos + 2);
+            if (pos + 4 + size > end) {
+                throw structureInvalid();
+            }
+            if (id == ZIP64_EXTRA_ID) {
+                throw invalid("SKILL_ZIP64_UNSUPPORTED", "技能包使用了不支持的 zip64 结构。");
+            }
+            pos += 4 + size;
+        }
+    }
+
+    private static long crc32(byte[] zip, int at, int length) {
+        CRC32 crc = new CRC32();
+        crc.update(zip, at, length);
+        return crc.getValue();
+    }
+
+    private static int u16(byte[] zip, int at) {
+        return (zip[at] & 0xFF) | ((zip[at + 1] & 0xFF) << 8);
+    }
+
+    private static long u32(byte[] zip, int at) {
+        return (zip[at] & 0xFFL) | ((zip[at + 1] & 0xFFL) << 8) | ((zip[at + 2] & 0xFFL) << 16)
+                | ((zip[at + 3] & 0xFFL) << 24);
+    }
+
+    private static SkillValidationException zipInvalid() {
+        return invalid("SKILL_ZIP_INVALID", "技能包不是有效的 zip 文件。");
+    }
+
+    private static SkillValidationException structureInvalid() {
+        return invalid("SKILL_ZIP_STRUCTURE_INVALID", "技能包内部结构不一致（条目流与中央目录无法相互核对）。");
     }
 
     private static SkillMetadata parseFrontmatter(String rootDir, String skillMd) {
