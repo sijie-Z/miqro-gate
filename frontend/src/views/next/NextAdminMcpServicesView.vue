@@ -533,7 +533,14 @@ async function confirmAndRun() {
   const state = confirmState.value;
   if (!state) return;
   confirmState.value = null;
-  await state.run();
+  // #1308：弹窗已经关掉了，没有任何 UI 在等这个 promise。run() 里逃出来的
+  // 异常会变成 unhandled rejection——屏幕上看就是"点了确认，什么也没发生"。
+  // 这里是最后一道兜底，保证任何操作失败都有可见反馈。
+  try {
+    await state.run();
+  } catch (error) {
+    toast.error(errorText(error, '操作失败，请稍后重试。'));
+  }
 }
 
 // ---- health config ----
@@ -799,10 +806,23 @@ async function rollbackToolRevision(tool: McpToolView, revision: McpToolRevision
     confirmLabel: '回滚',
     tone: 'primary',
     run: async () => {
-      await api.adminActivateToolRevision(serviceId, toolId, revision.revision!);
+      try {
+        await api.adminActivateToolRevision(serviceId, toolId, revision.revision!);
+      } catch (error) {
+        // #1308: 回滚本身就是那个动作。失败被吞掉时，弹窗已经关闭、工具表
+        // 也没变化，屏幕上留下的唯一证据是"什么都没发生"——操作者会当成
+        // 回滚成功。这里必须说出来，且不打印"已回滚"。
+        toast.error(errorText(error, '回滚失败，请稍后重试。'));
+        return;
+      }
       toast.success(`已回滚到修订 #${revision.revision}`);
-      await refreshRevisions();
-      await refreshTools();
+      // 回滚已经生效，刷新只是取回新状态：刷新失败不得被讲成回滚失败。
+      try {
+        await refreshRevisions();
+        await refreshTools();
+      } catch (error) {
+        toast.error(errorText(error, '回滚已生效，但列表刷新失败，请手动刷新页面。'));
+      }
     },
   };
 }
@@ -1305,7 +1325,12 @@ async function routeConfirmAndRun() {
   const state = routeConfirm.value;
   if (!state) return;
   routeConfirm.value = null;
-  await state.run();
+  // #1308：与 confirmAndRun 同因——路由弹窗也已在等待之前关闭。
+  try {
+    await state.run();
+  } catch (error) {
+    toast.error(errorText(error, '操作失败，请稍后重试。'));
+  }
 }
 
 onMounted(load);
