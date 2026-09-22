@@ -517,6 +517,30 @@ class VirtualKeyAuthContractTest {
         }
 
         @Test
+        @DisplayName("same endpoint still hits: the protocol dimension does not disable the cache (#1236)")
+        void sameProtocolStillHits() throws InterruptedException {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
+
+            String body = """
+                    {"model":"gpt-4o-mini","messages":[{"role":"user","content":"cache probe 1236 same protocol"}]}""";
+            webTestClient.post().uri("/v1/messages").header(CacheEligibility.CACHEABLE_HEADER, "1").bodyValue(body)
+                    .exchange().expectStatus().isOk().expectHeader()
+                    .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss");
+            awaitCacheFill();
+
+            // The same bytes to the same endpoint: still an L1 hit — the new
+            // key dimension must not cost the cache its hits (#1236 guard).
+            webTestClient.post().uri("/v1/messages").header(CacheEligibility.CACHEABLE_HEADER, "1").bodyValue(body)
+                    .exchange().expectStatus().isOk().expectHeader()
+                    .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "L1");
+
+            // Exactly one upstream exchange: the second request was served from
+            // the cache.
+            assertThat(mockProvider.getCapturedRequests()).hasSize(1);
+        }
+
+        @Test
         @DisplayName("cache I/O runs on the bounded scheduler, never on the event loop (#444)")
         void cacheIoRunsOffTheEventLoop() throws Exception {
             mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
