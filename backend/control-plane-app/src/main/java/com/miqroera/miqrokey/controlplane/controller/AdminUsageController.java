@@ -84,6 +84,13 @@ public class AdminUsageController {
      * {@code GET /api/v1/admin/usage/records?from=...&to=...&page=1&size=50&projectId=...}.
      * The window is capped at
      * {@value com.miqroera.miqrokey.controlplane.service.UsageStatsService#MAX_WINDOW}.
+     *
+     * <p>
+     * {@code page} is jump-to-page; pass {@code before} instead to walk the list
+     * and get every row exactly once (#1368), taking it from the previous
+     * response's {@code nextCursor} and stopping when it comes back null. The
+     * cursor wins if both are given.
+     * </p>
      */
     @GetMapping("/records")
     public UsageRecordPage records(
@@ -94,9 +101,10 @@ public class AdminUsageController {
             @RequestParam(required = false) UUID projectId, @RequestParam(required = false) UUID virtualKeyId,
             @RequestParam(required = false) UUID credentialId, @RequestParam(required = false) UUID subscriptionId,
             @RequestParam(required = false) UUID providerProductId, @RequestParam(required = false) String modelId,
-            @RequestParam(required = false) String clientIp, @RequestParam(required = false) UUID teamId) {
+            @RequestParam(required = false) String clientIp, @RequestParam(required = false) UUID teamId,
+            @RequestParam(required = false) String before) {
         return usageStatsService.records(userContext.getUser(), from, to, page, size, userId, projectId, virtualKeyId,
-                credentialId, subscriptionId, providerProductId, modelId, clientIp, teamId);
+                credentialId, subscriptionId, providerProductId, modelId, clientIp, teamId, before);
     }
 
     /**

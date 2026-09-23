@@ -88,6 +88,16 @@ public class UsageStatsService {
 
     /** Paged raw usage records for the caller's own keys, newest first. */
     public UsageRecordPage records(User user, Instant from, Instant to, long page, int size) {
+        return records(user, from, to, page, size, null);
+    }
+
+    /**
+     * The same page, continued from an opaque {@code before} cursor (#1368) — what
+     * the console's export walks with. Null/blank means "start at the newest row";
+     * see {@link AdminUsageStatsService#records} for the paging rule, which is the
+     * same one.
+     */
+    public UsageRecordPage records(User user, Instant from, Instant to, long page, int size, String before) {
         if (page < 1) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "PAGE_INVALID", "page must be >= 1");
         }
@@ -96,19 +106,29 @@ public class UsageStatsService {
                     "size must be between 1 and " + MAX_PAGE_SIZE);
         }
         validateTimeRange(from, to);
+        UsageRecordCursor cursor = UsageRecordCursor.of(before);
         Set<UUID> keyIds = ownKeyIds(user);
         if (keyIds.isEmpty()) {
-            return new UsageRecordPage(List.of(), page, size, 0L);
+            return new UsageRecordPage(List.of(), page, size, 0L, null);
         }
         UsageStatsRepository.UsageFilter filter = filter(user, keyIds, from, to);
 
         long total = usageStatsRepository.countRecords(filter);
-        List<AdjustedUsageRow> events = usageStatsRepository.findRecords(filter, (page - 1) * size, size);
-        List<UsageRecordPage.UsageRecordView> items = new ArrayList<>(events.size());
-        for (AdjustedUsageRow row : events) {
-            items.add(view(row));
+        boolean keyset = cursor.occurredAt() != null || page == 1;
+        List<AdjustedUsageRow> events = keyset
+                ? usageStatsRepository.findRecords(filter, size + 1, cursor.occurredAt(), cursor.id())
+                : usageStatsRepository.findRecords(filter, (page - 1) * size, size);
+        int returned = Math.min(events.size(), size);
+        List<UsageRecordPage.UsageRecordView> items = new ArrayList<>(returned);
+        for (int i = 0; i < returned; i++) {
+            items.add(view(events.get(i)));
         }
-        return new UsageRecordPage(items, page, size, total);
+        boolean hasMore = keyset ? events.size() > size : events.size() == size;
+        AdjustedUsageRow last = returned == 0 ? null : events.get(returned - 1);
+        String nextCursor = hasMore && last != null
+                ? UsageRecordCursor.encode(last.observed().occurredAt(), last.observed().id())
+                : null;
+        return new UsageRecordPage(items, page, size, total, nextCursor);
     }
 
     // -------------------------------------------------------------------

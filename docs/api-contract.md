@@ -268,7 +268,9 @@
 
 ### 4.5 用量明细 `GET /api/v1/me/usage/records`
 
-参数：`from`、`to`（ISO-8601）、`page`（默认 1，≥1）、`size`（默认 50，1–200）。按时间倒序。
+参数：`from`、`to`（ISO-8601）、`page`（默认 1，≥1）、`size`（默认 50，1–200）、`before`（不透明游标，可选）。按时间倒序。
+
+**翻页语义（#1368）**：`page`/`offset` 是**跳页**——数据在两次请求之间变动时它不保证覆盖；响应另带 `nextCursor`（无下一页时为 `null`），把它作为下一次请求的 `before` 传回，即按 `(occurredAt, id)` 键集逐页推进，**每行恰好返回一次**，写入/删除不影响尚未读取的部分。要读完整列表（导出、对账、脚本）必须走 `before`，**不要**数页数；两者同时给出时以 `before` 为准。`nextCursor` 是服务端产出的不透明串，客户端不得解析其内容。`total` 是对同一过滤条件的独立 `COUNT(*)`，与 `items` 出自两次读取，写入并发时二者可能来自不同快照。
 
 **归属（#1128，CAA V54；#1139 增候选基数）**：每行带四个**可空**字段——
 
@@ -313,7 +315,8 @@
   ],
   "page": 1,
   "size": 50,
-  "total": 12
+  "total": 12,
+  "nextCursor": "MTc2MDk5NzM0NTAwMDAwMDowMTkwZmY..."
 }
 ```
 
@@ -585,7 +588,7 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 
 `summary` 参数：`groupBy`（`project` | `virtual_key` | `cache_level` | `day` | `user` | `team` | `model` | `month` | `product`，默认 `project`；I15 新增后三者；2026-09-15 增 `team`，同用户多团队按团队分别计入；#758 增 `product`=供应商产品，label=产品显示名；**#1050**：`day`/`month` 按调用方给定的固定偏移分桶——`tzOffsetMinutes`（分钟，[-1080, 1080]，缺省 0=UTC；与小时报表同一参数与校验，越界 400 `TZ_OFFSET_INVALID`），与会话/服务器 TimeZone 无关）、`from`、`to`（同个人端 93 天窗口规则）、可选过滤 `userId`、`projectId`、`virtualKeyId`、`credentialId`、`subscriptionId`（Plan）、`providerProductId`（供应商产品）、`modelId`。明细与汇总的响应结构、`outcomes`（成功率/平均延迟/平均首字）与富集列口径同 §4.4/§4.5（#758）。
 
-`records` 参数：`from`、`to`、`page`（默认 1）、`size`（默认 50，1–200）及与 `summary` 相同的可选过滤，另支持 `clientIp`（#605，精确匹配调用方地址，用于盗用排查「这个来源都调了什么」）。
+`records` 参数：`from`、`to`、`page`（默认 1）、`size`（默认 50，1–200）、`before`（不透明游标，可选）及与 `summary` 相同的可选过滤，另支持 `clientIp`（#605，精确匹配调用方地址，用于盗用排查「这个来源都调了什么」）。翻页语义与 `nextCursor` 同 §4.5（#1368）。
 
 `hourly` 参数（#634）：`date`（`YYYY-MM-DD`，默认 `tzOffsetMinutes` 时区下的今天）、`days`（1–7，默认 1，自 `date` 向前连排）、`dimension`（`NONE` | `USER` | `TEAM`，默认 `NONE`；每行 = 小时 × 项目，`USER`/`TEAM` 再乘以所选维度——多团队用户按团队分别计入，口径与 `summary` 的 `team` 维度一致）、`tzOffsetMinutes`（默认 0=UTC；前端传本地偏移，上海=480）、可选过滤 `userId`、`projectId`。返回 `{ date, days, dimension, tzOffsetMinutes, rows: [{ hourStart, projectId, projectLabel, dimensionId, dimensionLabel, requests, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, totalTokens }] }`：`hourStart` 是小时桶边界的 UTC 瞬时（UTC+8 下 14:00 桶 = `06:00Z`，由客户端按本地时区格式化），仅返回有用量的桶，`totalTokens` = 四类 Token 之和（与汇总口径一致）。错误码 `DAYS_INVALID` / `DIMENSION_INVALID` / `DATE_INVALID` / `TZ_OFFSET_INVALID`（400），访问控制与租户隔离同 `summary`/`records`。
 
@@ -815,7 +818,7 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | 方法与路径 | 用途 |
 |---|---|
 | `GET /api/v1/billing/summary?from&to&groupBy` | 全租户用量/成本汇总 |
-| `GET /api/v1/billing/records?from&to&page&size` | 全租户分页明细 |
+| `GET /api/v1/billing/records?from&to&page&size&before` | 全租户分页明细（翻页语义同 §4.5，#1368） |
 | `GET /api/v1/billing/quota` | 全租户配额状态：按订阅分组的最近快照 |
 
 **`GET /api/v1/billing/quota` 响应**（按订阅名排序；无快照的订阅以空列表出现）：
@@ -1316,7 +1319,7 @@ NULL scope = 全量（存量兼容）。强制层按「开放面路径 → 能�
 
 **只读开放面（机器凭据 `Authorization: Bearer mqk_admin_…`，租户级）**
 - `GET /api/v1/admin-api/usage/summary?groupBy&from&to` — 租户级汇总（与 §5 管理员用量口径一致）。
-- `GET /api/v1/admin-api/usage/records?from&to&page&size` — 租户级明细（窗口/分页校验同管理端点）。
+- `GET /api/v1/admin-api/usage/records?from&to&page&size&before` — 租户级明细（窗口/分页校验同管理端点；翻页语义同 §4.5，#1368——脚本读全量走 `before`）。
 - `GET /api/v1/admin-api/audit-events?size&action&targetType&actorId&from&to&beforePosition` — 审计
   链尾（因果序倒排；可选精确筛选：资源类型 `targetType`、操作人 `actorId`、时间窗 `from`/`to`
   ISO-8601 UTC，非法值 400 `PARAM_INVALID`、from>to 400 `TIME_RANGE_INVALID`；cursor 语义同

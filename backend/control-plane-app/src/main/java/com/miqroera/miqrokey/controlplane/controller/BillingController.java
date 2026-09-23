@@ -46,12 +46,19 @@ public class BillingController {
         return usageStatsService.summary(tenantId, groupBy, iso(from), iso(to), tzOffsetMinutes);
     }
 
+    /**
+     * Records for the tenant's billing channel. {@code page} is jump-to-page;
+     * {@code before} is the opaque cursor from the previous response's
+     * {@code nextCursor} and walks the list without repeating or skipping rows
+     * (#1368). The cursor wins if both are given.
+     */
     @GetMapping("/records")
     public UsageRecordPage records(@RequestParam(required = false) String from,
             @RequestParam(required = false) String to, @RequestParam(defaultValue = "1") long page,
-            @RequestParam(defaultValue = "50") int size, HttpServletRequest request) {
+            @RequestParam(defaultValue = "50") int size, @RequestParam(required = false) String before,
+            HttpServletRequest request) {
         UUID tenantId = tenant(request);
-        return usageStatsService.records(tenantId, iso(from), iso(to), page, size);
+        return usageStatsService.records(tenantId, iso(from), iso(to), page, size, before);
     }
 
     /** Latest quota status per subscription (tenant-wide, metadata only). */

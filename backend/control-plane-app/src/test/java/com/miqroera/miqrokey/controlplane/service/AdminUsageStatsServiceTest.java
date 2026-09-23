@@ -33,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -175,7 +176,10 @@ class AdminUsageStatsServiceTest {
                 CREDENTIAL_ID, MODEL, CacheLevel.UPSTREAM, new TokenBucket(10L, 5L, 0L, 0L, null, null, null, null),
                 100L, 200, null, true, false, "gw-1", Instant.now(), "203.0.113.7", null);
         when(usageStatsRepository.countRecords(any())).thenReturn(1L);
-        when(usageStatsRepository.findRecords(any(), eq(0L), eq(50))).thenReturn(List.of(unadjusted(event)));
+        // Page 1 starts a fresh keyset walk (#1368), so it asks for one row past the
+        // page instead of an offset.
+        when(usageStatsRepository.findRecords(any(), eq(51), isNull(), isNull()))
+                .thenReturn(List.of(unadjusted(event)));
 
         UsageRecordPage page = service.records(admin, null, null, 1, 50, USER_ID, PROJECT_ID, KEY_ID, CREDENTIAL_ID,
                 SUBSCRIPTION_ID, PRODUCT_ID, MODEL, "203.0.113.7", TEAM_ID);
@@ -188,7 +192,7 @@ class AdminUsageStatsServiceTest {
         assertThat(page.items().get(0).clientIp()).isEqualTo("203.0.113.7");
         ArgumentCaptor<UsageStatsRepository.UsageFilter> captor = ArgumentCaptor
                 .forClass(UsageStatsRepository.UsageFilter.class);
-        verify(usageStatsRepository).findRecords(captor.capture(), eq(0L), eq(50));
+        verify(usageStatsRepository).findRecords(captor.capture(), eq(51), isNull(), isNull());
         assertThat(captor.getValue().userId()).isEqualTo(USER_ID);
         assertThat(captor.getValue().modelId()).isEqualTo(MODEL);
         assertThat(captor.getValue().clientIp()).isEqualTo("203.0.113.7");
@@ -206,7 +210,8 @@ class AdminUsageStatsServiceTest {
                 Instant.now(), null, null);
         when(usageStatsRepository.countRecords(any())).thenReturn(1L);
         RowPriceBasis basis = new RowPriceBasis(new BigDecimal("1.00"), new BigDecimal("2.00"), null, null);
-        when(usageStatsRepository.findRecords(any(), eq(0L), eq(50))).thenReturn(List.of(unadjusted(event, basis)));
+        when(usageStatsRepository.findRecords(any(), eq(51), isNull(), isNull()))
+                .thenReturn(List.of(unadjusted(event, basis)));
 
         UsageRecordPage page = service.records(admin, null, null, 1, 50, null, null, null, null, null, null, null, null,
                 null);

@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -767,6 +768,44 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
     public List<AdjustedUsageRow> findRecords(UsageFilter filter, long offset, int limit) {
         WhereBuilder wb = new WhereBuilder(filter, "ue").usageEventColumns();
         MapSqlParameterSource params = wb.params().addValue("offset", offset).addValue("limit", limit);
+        // Offset paging still drifts when the table changes under it (#1368) — it
+        // stays for jump-to-page, where the reader asked for "roughly here"; the
+        // tiebreaker below at least makes the order a total one, so the same page
+        // of an unchanged table cannot hand out different rows between two calls.
+        return jdbc.query(recordsSql(wb, "", "LIMIT :limit OFFSET :offset"), params, ADJUSTED_ROW_MAPPER);
+    }
+
+    @Override
+    public List<AdjustedUsageRow> findRecords(UsageFilter filter, int limit, Instant beforeOccurredAt, UUID beforeId) {
+        WhereBuilder wb = new WhereBuilder(filter, "ue").usageEventColumns();
+        // Keyset window (#1368): the cursor names a row, not a position, so usage
+        // written or deleted between two pages cannot shift the window the way
+        // OFFSET does. Explicit casts: PostgreSQL cannot infer a type for a null
+        // parameter that appears in both "? IS NULL" and the row-wise comparison
+        // — same shape as ModelApprovalRepositoryImpl#findPage.
+        String before = " AND (:beforeOccurredAt::timestamptz IS NULL"
+                + " OR (ue.occurred_at, ue.id) < (:beforeOccurredAt::timestamptz, :beforeId::uuid))";
+        MapSqlParameterSource params = wb.params().addValue("limit", limit)
+                .addValue("beforeOccurredAt", beforeOccurredAt == null ? null : Timestamp.from(beforeOccurredAt))
+                .addValue("beforeId", beforeId);
+        return jdbc.query(recordsSql(wb, before, "LIMIT :limit"), params, ADJUSTED_ROW_MAPPER);
+    }
+
+    /**
+     * The one records projection, shared by both paging flavours so they cannot
+     * disagree about what a row is (#1368): they differ only in the extra WHERE
+     * predicate and the tail.
+     *
+     * <p>
+     * {@code ORDER BY ue.occurred_at DESC, ue.id DESC} — the id is the tiebreaker
+     * that makes "newest first" a total order. Without it, rows written in the same
+     * second (the normal case for a gateway: a batch of calls lands with one
+     * timestamp granularity) come back in whatever order the plan happens to
+     * produce, and a page boundary that falls inside a tie group is not stable
+     * across two calls.
+     * </p>
+     */
+    private String recordsSql(WhereBuilder wb, String extraWhere, String tail) {
         String netInput = UsageAdjustmentSql.netInput();
         String netOutput = UsageAdjustmentSql.netOutput();
         String netCacheRead = UsageAdjustmentSql.netCacheRead();
@@ -784,34 +823,32 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                 "ue.provider_product_id", "ue.model_id", "ue.occurred_at");
         String basisCacheCreation = PriceSnapshotSql.frozenOrAsOf("ue.price_cache_creation",
                 PriceTokenType.CACHE_CREATION, "ue.provider_product_id", "ue.model_id", "ue.occurred_at");
-        return jdbc.query(
-                """
-                        SELECT ue.*,
-                               %s AS net_input_tokens,
-                               %s AS net_output_tokens,
-                               %s AS net_cache_read_tokens,
-                               %s AS net_cache_creation_tokens,
-                               %s AS adjusted,
-                               %s AS basis_price_input,
-                               %s AS basis_price_output,
-                               %s AS basis_price_cache_read,
-                               %s AS basis_price_cache_creation,
-                               -- Enrichment (#758): the provider product's display name for the
-                               -- 供应商 column, plus the lifecycle trail for 首字/协议/终态.
-                               COALESCE(pp.display_name, pp.product_code) AS provider_product_name,
-                               rur.wire_protocol,
-                               rur.time_to_first_byte_ms,
-                               rur.request_status
-                          FROM usage_event ue
-                          LEFT JOIN provider_products pp ON pp.id = ue.provider_product_id%s%s
-                        %s
-                        %s
-                        ORDER BY ue.occurred_at DESC
-                        LIMIT :limit OFFSET :offset
-                        """.formatted(netInput, netOutput, netCacheRead, netCacheCreation,
-                        UsageAdjustmentSql.ADJUSTED_FLAG, basisInput, basisOutput, basisCacheRead, basisCacheCreation,
-                        wb.joins(), UsageAdjustmentSql.ADJUSTMENT_TOTALS, LIFECYCLE_JOIN, wb.where()),
-                params, ADJUSTED_ROW_MAPPER);
+        return """
+                SELECT ue.*,
+                       %s AS net_input_tokens,
+                       %s AS net_output_tokens,
+                       %s AS net_cache_read_tokens,
+                       %s AS net_cache_creation_tokens,
+                       %s AS adjusted,
+                       %s AS basis_price_input,
+                       %s AS basis_price_output,
+                       %s AS basis_price_cache_read,
+                       %s AS basis_price_cache_creation,
+                       -- Enrichment (#758): the provider product's display name for the
+                       -- 供应商 column, plus the lifecycle trail for 首字/协议/终态.
+                       COALESCE(pp.display_name, pp.product_code) AS provider_product_name,
+                       rur.wire_protocol,
+                       rur.time_to_first_byte_ms,
+                       rur.request_status
+                  FROM usage_event ue
+                  LEFT JOIN provider_products pp ON pp.id = ue.provider_product_id%s%s
+                %s
+                %s
+                ORDER BY ue.occurred_at DESC, ue.id DESC
+                %s
+                """.formatted(netInput, netOutput, netCacheRead, netCacheCreation, UsageAdjustmentSql.ADJUSTED_FLAG,
+                basisInput, basisOutput, basisCacheRead, basisCacheCreation, wb.joins(),
+                UsageAdjustmentSql.ADJUSTMENT_TOTALS, LIFECYCLE_JOIN, wb.where() + extraWhere, tail);
     }
 
     private TokenBucket parseUsage(String metaJson) {

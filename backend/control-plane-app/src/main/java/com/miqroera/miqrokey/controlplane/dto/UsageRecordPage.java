@@ -10,8 +10,30 @@ import java.util.UUID;
 /**
  * Paged usage records for one user ({@code GET /api/v1/me/usage/records}). Only
  * counts and metadata — never prompt, code, or model content.
+ *
+ * <p>
+ * Two paging flavours share this shape (#1368). {@code page}/{@code size} is
+ * jump-to-page: the window is an offset, so it is only approximate while the
+ * gateway keeps writing — a reader who needs every row exactly once must not
+ * walk it that way. {@code nextCursor} is the stable alternative: pass it back
+ * as {@code before} to get the next slice, and stop when it is null. That walk
+ * is keyset paging — the slice boundary is a row, not a position — so usage
+ * written or deleted in between cannot make a row come out twice or be skipped.
+ * </p>
+ *
+ * <p>
+ * {@code total} is an exact {@code COUNT(*)} over the same filter, but it is a
+ * separate read from {@code items}: it is the count at some instant during the
+ * request, not the size of a frozen result set, so it can legitimately differ
+ * from what a walk ends up handing out on a live table. A cursor walk does not
+ * need it — {@code nextCursor} is what says whether there is more.
+ * </p>
+ *
+ * @param nextCursor
+ *            opaque cursor for the slice after {@code items}, null when this is
+ *            the last one. Never build or parse it on the client.
  */
-public record UsageRecordPage(List<UsageRecordView> items, long page, long size, long total) {
+public record UsageRecordPage(List<UsageRecordView> items, long page, long size, long total, String nextCursor) {
 
     /**
      * One usage row as shown to a caller.

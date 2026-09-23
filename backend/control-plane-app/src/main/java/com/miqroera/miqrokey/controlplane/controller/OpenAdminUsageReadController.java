@@ -39,13 +39,21 @@ public class OpenAdminUsageReadController {
         return usageStatsService.summary(tenantId(request), groupBy, from, to, tzOffsetMinutes);
     }
 
+    /**
+     * Records for scripts reading this endpoint with an API key. {@code page} is
+     * jump-to-page; {@code before} is the opaque cursor from the previous
+     * response's {@code nextCursor} and walks the list without repeating or
+     * skipping rows (#1368) — the safe way to consume the whole list. The cursor
+     * wins if both are given.
+     */
     @GetMapping("/records")
     public UsageRecordPage records(HttpServletRequest request,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
             @RequestParam(required = false, defaultValue = "1") long page,
-            @RequestParam(required = false, defaultValue = "50") int size) {
-        return usageStatsService.records(tenantId(request), from, to, page, size);
+            @RequestParam(required = false, defaultValue = "50") int size,
+            @RequestParam(required = false) String before) {
+        return usageStatsService.records(tenantId(request), from, to, page, size, before);
     }
 
     private static UUID tenantId(HttpServletRequest request) {

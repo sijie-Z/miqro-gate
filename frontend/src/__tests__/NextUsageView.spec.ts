@@ -754,6 +754,94 @@ describe('NextUsageView', () => {
     expect(banner.text()).toContain('req-summary');
   });
 
+  // #1368: the CSV export reads the whole filtered list, so it is the one place on
+  // this screen where counting pages costs the user rows. Paging by number assumes
+  // the table holds still: an insert above the reader during the walk shifts every
+  // later page down, handing one row out twice and never reaching another — and a
+  // delete does the mirror image. The cursor is a position in the sort order, so it
+  // survives both.
+  it('#1368: the export walks nextCursor to the end instead of counting pages', async () => {
+    // jsdom's Blob has no .text(); capture the source string at construction.
+    const parts: string[] = [];
+    const RealBlob = globalThis.Blob;
+    class CapturingBlob extends RealBlob {
+      constructor(partList: BlobPart[], options?: BlobPropertyBag) {
+        super(partList, options);
+        parts.push(partList.join(''));
+      }
+    }
+    vi.stubGlobal('Blob', CapturingBlob);
+    Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() });
+
+    const exportRow = (providerRequestId: string, occurredAt: string) => ({
+      ...records.items![0]!,
+      occurredAt,
+      providerRequestId,
+    });
+    // The table and the trend above it read the same endpoint at mount (the trend
+    // at the same size 200 the export uses), so the walk is recorded only once the
+    // export button has been pressed.
+    let exporting = false;
+    const exportCalls: Array<{ size?: number; page?: number; before?: string }> = [];
+    const exportPages: UsageRecordPage[] = [
+      {
+        items: [
+          exportRow('req-a', '2026-09-03T08:00:00Z'),
+          exportRow('req-b', '2026-09-03T07:00:00Z'),
+        ],
+        page: 1,
+        size: 200,
+        total: 5,
+        nextCursor: 'cur-1',
+      },
+      {
+        items: [
+          exportRow('req-c', '2026-09-03T06:00:00Z'),
+          exportRow('req-d', '2026-09-03T05:00:00Z'),
+        ],
+        page: 1,
+        size: 200,
+        total: 5,
+        nextCursor: 'cur-2',
+      },
+      {
+        items: [exportRow('req-e', '2026-09-03T04:00:00Z')],
+        page: 1,
+        size: 200,
+        total: 5,
+        nextCursor: undefined,
+      },
+    ];
+    mockApi.usageRecords.mockImplementation(async (opts = {}) => {
+      if (!exporting) return records;
+      exportCalls.push(opts);
+      return exportPages.shift() ?? { items: [], page: 1, size: 200, total: 5 };
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    exporting = true;
+    await wrapper.find('[data-testid="usage-export"]').trigger('click');
+    await flushPromises();
+    vi.unstubAllGlobals();
+
+    // Three reads for five rows, each carrying the previous response's cursor back
+    // as `before`, and stopping because that cursor ran out — not because a page
+    // count said so.
+    expect(exportCalls.map((call) => call.before)).toEqual([undefined, 'cur-1', 'cur-2']);
+    // No page number on the walk: the page number is precisely the thing that moves
+    // under a concurrent write.
+    expect(exportCalls.every((call) => call.page === undefined)).toBe(true);
+
+    // And every row of every page lands in the file, exactly once — a duplicated or
+    // dropped row is what a page-counting export produced under load.
+    const text = parts[0]!.replace(/^﻿/, '');
+    const lines = text.split('\n');
+    expect(lines).toHaveLength(6); // header + five rows
+    for (const id of ['req-a', 'req-b', 'req-c', 'req-d', 'req-e']) {
+      expect(text.split(id)).toHaveLength(2);
+    }
+  });
   // #PH89: the CSV is the table, in a file — every other column is copied
   // verbatim, so the 时间 column has to be the time the exporter read on screen.
   // `occurredAt` arrives as a UTC ISO string; writing it raw means the same
