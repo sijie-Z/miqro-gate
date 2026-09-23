@@ -529,7 +529,7 @@ public class ProxyController {
         // per-protocol base URL applies (/v1/messages may target the provider's
         // Anthropic entry while chat targets its OpenAI one); products without
         // an adapter keep the credential's single base and a verbatim splice.
-        String wireProtocol = wireProtocolOf(exchange);
+        String wireProtocol = wireProtocolOf(exchange).name();
         ResolvedTarget target = resolveTarget(exchange, ctx, cred, wireProtocol);
         URI upstreamUri = target.uri();
         HttpHeaders filteredHeaders;
@@ -925,12 +925,12 @@ public class ProxyController {
     }
 
     /** Maps the proxied path to the wire protocol family. */
-    private static String wireProtocolOf(ServerWebExchange exchange) {
+    private static ProtocolFamily wireProtocolOf(ServerWebExchange exchange) {
         return switch (exchange.getRequest().getURI().getPath()) {
-            case "/v1/messages" -> ProtocolFamily.ANTHROPIC_MESSAGES.name();
-            case "/v1/responses" -> ProtocolFamily.OPENAI_RESPONSES.name();
-            case "/v1/chat/completions" -> ProtocolFamily.OPENAI_CHAT_COMPLETIONS.name();
-            default -> ProtocolFamily.OPENAI_COMPATIBLE.name();
+            case "/v1/messages" -> ProtocolFamily.ANTHROPIC_MESSAGES;
+            case "/v1/responses" -> ProtocolFamily.OPENAI_RESPONSES;
+            case "/v1/chat/completions" -> ProtocolFamily.OPENAI_CHAT_COMPLETIONS;
+            default -> ProtocolFamily.OPENAI_COMPATIBLE;
         };
     }
 

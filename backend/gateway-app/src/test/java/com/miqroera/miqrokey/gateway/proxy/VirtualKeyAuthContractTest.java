@@ -517,6 +517,40 @@ class VirtualKeyAuthContractTest {
         }
 
         @Test
+        @DisplayName("wire protocol is part of the key for /v1/responses: a responses-cached answer never replays into chat (#1421)")
+        void responsesProtocolIsPartOfTheKey() throws InterruptedException {
+            // Prime the cache through /v1/responses — the third production
+            // mapping (#1236) previously had no HTTP-level assertion. The body
+            // is not a chat shape, so the key falls back to the full normalized
+            // body; only the family dimension separates it from the chat key.
+            String responsesShaped = "{\"id\":\"resp_1421\",\"object\":\"response\",\"status\":\"completed\","
+                    + "\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":"
+                    + "[{\"type\":\"output_text\",\"text\":\"pong\"}]}]}";
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(responsesShaped).build());
+            String body = """
+                    {"model":"gpt-4o-mini","input":"cache probe 1421 responses cross protocol"}""";
+            webTestClient.post().uri("/v1/responses").header(CacheEligibility.CACHEABLE_HEADER, "1").bodyValue(body)
+                    .exchange().expectStatus().isOk().expectHeader()
+                    .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss");
+            awaitCacheFill();
+
+            // The same bytes through the OpenAI chat endpoint: the wire protocol
+            // decides the response shape, so this must MISS and fetch its own
+            // chat-shaped answer. Replaying the Responses-shaped first response
+            // would hand a chat client a body it cannot parse.
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
+            byte[] second = webTestClient.post().uri("/v1/chat/completions")
+                    .header(CacheEligibility.CACHEABLE_HEADER, "1").bodyValue(body).exchange().expectStatus().isOk()
+                    .expectHeader().valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss").expectBody().returnResult()
+                    .getResponseBody();
+
+            assertThat(new String(second, StandardCharsets.UTF_8)).isEqualTo(ChatFixtures.RESPONSE_BASIC);
+            assertThat(mockProvider.getCapturedRequests()).hasSize(2);
+        }
+
+        @Test
         @DisplayName("same endpoint still hits: the protocol dimension does not disable the cache (#1236)")
         void sameProtocolStillHits() throws InterruptedException {
             mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
@@ -532,6 +566,31 @@ class VirtualKeyAuthContractTest {
             // The same bytes to the same endpoint: still an L1 hit — the new
             // key dimension must not cost the cache its hits (#1236 guard).
             webTestClient.post().uri("/v1/messages").header(CacheEligibility.CACHEABLE_HEADER, "1").bodyValue(body)
+                    .exchange().expectStatus().isOk().expectHeader()
+                    .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "L1");
+
+            // Exactly one upstream exchange: the second request was served from
+            // the cache.
+            assertThat(mockProvider.getCapturedRequests()).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("same /v1/responses endpoint still hits: the protocol dimension does not disable the cache there (#1421)")
+        void responsesSameProtocolStillHits() throws InterruptedException {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
+
+            String body = """
+                    {"model":"gpt-4o-mini","input":"cache probe 1421 responses same protocol"}""";
+            webTestClient.post().uri("/v1/responses").header(CacheEligibility.CACHEABLE_HEADER, "1").bodyValue(body)
+                    .exchange().expectStatus().isOk().expectHeader()
+                    .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss");
+            awaitCacheFill();
+
+            // The same bytes to the same endpoint: still an L1 hit — the family
+            // dimension must not cost the responses endpoint its cache hits
+            // (the #1236 guard, now proven on the third mapping too).
+            webTestClient.post().uri("/v1/responses").header(CacheEligibility.CACHEABLE_HEADER, "1").bodyValue(body)
                     .exchange().expectStatus().isOk().expectHeader()
                     .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "L1");
 
