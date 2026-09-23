@@ -231,8 +231,13 @@ public class ProxyController {
     public Mono<Void> rejectUnsupported(ServerWebExchange exchange) {
         ServerHttpResponse response = exchange.getResponse();
         String path = exchange.getRequest().getURI().getPath();
+        // #1447: this rejection opens no usage and no lifecycle row either, so the
+        // envelope itself has to carry the id the operator will grep for.
+        String requestId = UUID.randomUUID().toString();
+        response.getHeaders().set(SseReplayEngine.X_MIQROKEY_REQUEST_ID, requestId);
 
         if (ALLOWED_PATHS.contains(path)) {
+            log.info("Gateway envelope: requestId={}, status=405, code=method_not_allowed, path={}", requestId, path);
             response.setStatusCode(HttpStatus.METHOD_NOT_ALLOWED);
             response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
             boolean isAnthropic = "/v1/messages".equals(path);
@@ -240,6 +245,7 @@ public class ProxyController {
             return response.writeWith(Mono.just(response.bufferFactory().wrap(body)));
         }
 
+        log.info("Gateway envelope: requestId={}, status=404, code=unsupported_path, path={}", requestId, path);
         response.setStatusCode(HttpStatus.NOT_FOUND);
         response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
         return response.writeWith(Mono.just(response.bufferFactory().wrap(OPENAI_UNSUPPORTED_PATH_BODY)));
@@ -257,7 +263,7 @@ public class ProxyController {
             QuotaGate.requireNotExceeded(ctx); // #684: 429 before any body work
             return handleAuthenticated(exchange, ctx, requestId, startMillis);
         } catch (AuthFailureException e) {
-            return writeError(exchange, e);
+            return writeError(exchange, e, requestId);
         }
     }
 
@@ -312,7 +318,7 @@ public class ProxyController {
             }
             if (modelName != null && !allowed.contains(modelName)) {
                 return writeError(exchange, new AuthFailureException(HttpStatus.FORBIDDEN, "model_not_allowed",
-                        "Model '" + modelName + "' is not allowed for this virtual key"));
+                        "Model '" + modelName + "' is not allowed for this virtual key"), requestId);
             }
 
             // #553: context-limit pre-check. Runs after authentication and model
@@ -323,7 +329,7 @@ public class ProxyController {
             AuthFailureException contextLimit = contextLimitGuard.check(body, exchange.getRequest().getURI().getPath(),
                     requestId);
             if (contextLimit != null) {
-                return writeError(exchange, contextLimit);
+                return writeError(exchange, contextLimit, requestId);
             }
 
             boolean cacheable = CacheEligibility.isCacheable(ctx,
@@ -360,12 +366,14 @@ public class ProxyController {
             // deliberately typed (no catch-all) so that control-plane errors keep
             // their own mapping; a premature close after the status line matched
             // none of them and leaked as a 500.
-            return pipeline.onErrorResume(AuthFailureException.class, e -> writeError(exchange, e))
+            return pipeline.onErrorResume(AuthFailureException.class, e -> writeError(exchange, e, requestId))
                     .onErrorResume(WebClientRequestException.class,
                             e -> writeError(exchange,
                                     new AuthFailureException(HttpStatus.BAD_GATEWAY, "upstream_unavailable",
-                                            "Upstream provider is unreachable")))
-                    .onErrorResume(PrematureCloseException.class, e -> upstreamClosedBeforeFirstByte(exchange, e))
+                                            "Upstream provider is unreachable"),
+                                    requestId))
+                    .onErrorResume(PrematureCloseException.class,
+                            e -> upstreamClosedBeforeFirstByte(exchange, e, requestId))
                     // #1375: the same leak, one operator further out. The two
                     // gateway-owned deadlines (responseTimeout at the overall
                     // level, streamIdleTimeout on the observed body) are plain
@@ -374,7 +382,7 @@ public class ProxyController {
                     // WebClientRequestException nor a PrematureCloseException, so
                     // it matched none of the clauses above and a gateway-side
                     // deadline rendered as the container's 500 document.
-                    .onErrorResume(TimeoutException.class, e -> upstreamDeadlineExceeded(exchange, e))
+                    .onErrorResume(TimeoutException.class, e -> upstreamDeadlineExceeded(exchange, e, requestId))
                     // And the fourth deadline, which is the gateway's too: the
                     // upstream first-byte timeout is reactor-netty's own
                     // ReadTimeoutException (io.netty.handler.timeout — no ancestor
@@ -388,10 +396,10 @@ public class ProxyController {
                     // default: it is armed between reads, so at the shipped
                     // PT120S it preempts both gateway-owned caps (PT5M idle,
                     // PT10M overall).
-                    .onErrorResume(ReadTimeoutException.class, e -> upstreamDeadlineExceeded(exchange, e));
+                    .onErrorResume(ReadTimeoutException.class, e -> upstreamDeadlineExceeded(exchange, e, requestId));
         }).onErrorResume(DataBufferLimitException.class,
                 e -> writeError(exchange, new AuthFailureException(HttpStatus.PAYLOAD_TOO_LARGE, "payload_too_large",
-                        "Request body exceeds the gateway buffer limit")));
+                        "Request body exceeds the gateway buffer limit"), requestId));
     }
 
     private Mono<byte[]> bufferBody(ServerWebExchange exchange) {
@@ -758,7 +766,16 @@ public class ProxyController {
      * resolved once for all attempts (no cross-credential failover).
      */
     private static boolean retryableConnectionFailure(Throwable error, UpstreamAttempt attempt) {
-        if (attempt == null || attempt.ttfb.firstByteMillisRaw() > 0) {
+        return retryableConnectionFailure(error, attempt != null && attempt.ttfb.firstByteMillisRaw() > 0);
+    }
+
+    /**
+     * The rule itself, free of the per-attempt recorder so it can be pinned
+     * directly (#1447): a connect deadline is a timeout like any other and must not
+     * take the retry path — one round of resolved addresses is the bound, not two.
+     */
+    static boolean retryableConnectionFailure(Throwable error, boolean firstByteObserved) {
+        if (firstByteObserved) {
             return false;
         }
         if (!(error instanceof WebClientRequestException)) {
@@ -912,12 +929,28 @@ public class ProxyController {
      * True when the error chain contains a timeout: reactor-netty's first-byte
      * deadline ({@link io.netty.handler.timeout.ReadTimeoutException}), reactor's
      * stream-idle/overall {@code Flux/Mono.timeout} (JDK
-     * {@link java.util.concurrent.TimeoutException}), or a JDK timeout.
+     * {@link java.util.concurrent.TimeoutException}), reactor-netty's connect
+     * deadline ({@link io.netty.channel.ConnectTimeoutException}, armed by
+     * {@code ChannelOption.CONNECT_TIMEOUT_MILLIS} in {@code ProxyConfig}), or a
+     * JDK socket timeout.
+     *
+     * <p>
+     * #1447: the connect deadline used to be missing here, so a blackholed upstream
+     * — where <em>every</em> attempt ends in exactly this exception — took the
+     * retry branch and the client waited two full rounds of resolved addresses
+     * (measured on the demo stack: 12 × connect-timeout = 120.15s at PT10S, 24.9s
+     * at PT2S). That contradicts the retry boundary in
+     * {@code docs/provider-adapter-contract.md} §8: one safe retry is allowed for a
+     * connection-phase failure that is "非任何超时" — a timeout of any kind follows the
+     * deadline semantics instead, never the retry path.
+     * </p>
      */
     private static boolean isTimeout(Throwable error) {
         for (Throwable t = error; t != null; t = t.getCause()) {
             if (t instanceof java.util.concurrent.TimeoutException
-                    || t instanceof io.netty.handler.timeout.ReadTimeoutException) {
+                    || t instanceof io.netty.handler.timeout.ReadTimeoutException
+                    || t instanceof io.netty.channel.ConnectTimeoutException
+                    || t instanceof java.net.SocketTimeoutException) {
                 return true;
             }
         }
@@ -1019,12 +1052,13 @@ public class ProxyController {
      * signal, so the failure is propagated unchanged.
      * </p>
      */
-    private Mono<Void> upstreamClosedBeforeFirstByte(ServerWebExchange exchange, PrematureCloseException error) {
+    private Mono<Void> upstreamClosedBeforeFirstByte(ServerWebExchange exchange, PrematureCloseException error,
+            String requestId) {
         if (exchange.getResponse().isCommitted()) {
             return Mono.error(error);
         }
         return writeError(exchange, new AuthFailureException(HttpStatus.BAD_GATEWAY, "upstream_unavailable",
-                "Upstream provider closed the connection before sending a response body"));
+                "Upstream provider closed the connection before sending a response body"), requestId);
     }
 
     /**
@@ -1054,12 +1088,12 @@ public class ProxyController {
      * {@link #upstreamClosedBeforeFirstByte}.
      * </p>
      */
-    private Mono<Void> upstreamDeadlineExceeded(ServerWebExchange exchange, Throwable error) {
+    private Mono<Void> upstreamDeadlineExceeded(ServerWebExchange exchange, Throwable error, String requestId) {
         if (exchange.getResponse().isCommitted()) {
             return Mono.error(error);
         }
         return writeError(exchange, new AuthFailureException(HttpStatus.BAD_GATEWAY, "upstream_unavailable",
-                "Upstream provider did not respond before the gateway deadline"));
+                "Upstream provider did not respond before the gateway deadline"), requestId);
     }
 
     /**
@@ -1070,18 +1104,38 @@ public class ProxyController {
      * envelope does not have, leaving the client to wait for bytes no one will send
      * (#1416), and a {@code Content-Encoding} would have it decode plain UTF-8
      * JSON.
+     *
+     * <p>
+     * #1447: every gateway-authored envelope carries {@code X-MiqroKey-Request-Id}
+     * — the same id that appears in the gateway logs and (where a record exists at
+     * all) in the usage/lifecycle rows. A local rejection never reaches the
+     * upstream, so the envelope is the client's only handle on the request; before
+     * this it carried no id anywhere ({@code /v1} rejections open no usage and no
+     * lifecycle row).
+     * </p>
      */
-    private Mono<Void> writeError(ServerWebExchange exchange, AuthFailureException e) {
+    private Mono<Void> writeError(ServerWebExchange exchange, AuthFailureException e, String requestId) {
         ServerHttpResponse response = exchange.getResponse();
         response.setStatusCode(HttpStatusCode.valueOf(e.status()));
         response.getHeaders().remove(HttpHeaders.CONTENT_LENGTH);
         response.getHeaders().remove(HttpHeaders.CONTENT_ENCODING);
         response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
+        if (requestId != null) {
+            // set (not add): an upstream head copied above may already have set the
+            // same header for this request — the value must stay this request's id.
+            response.getHeaders().set(SseReplayEngine.X_MIQROKEY_REQUEST_ID, requestId);
+        }
         if (e.retryAfterSeconds() != null) {
             response.getHeaders().set(HttpHeaders.RETRY_AFTER, String.valueOf(e.retryAfterSeconds()));
         }
         byte[] bytes = ErrorEnvelopes.body(e, exchange.getRequest().getURI().getPath())
                 .getBytes(StandardCharsets.UTF_8);
+        // #1447: the id the client is about to receive has to be findable here —
+        // a rejection writes no usage and no lifecycle row, so this line is the
+        // only server-side trace of the request. Nothing sensitive is logged
+        // (stable code + path, never a credential or a body).
+        log.info("Gateway envelope: requestId={}, status={}, code={}, path={}", requestId, e.status(), e.code(),
+                exchange.getRequest().getURI().getPath());
         return response.writeWith(Mono.just(response.bufferFactory().wrap(bytes)));
     }
 

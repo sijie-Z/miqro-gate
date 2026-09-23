@@ -9,6 +9,8 @@ import com.miqroera.miqrokey.gateway.vkey.QuotaGate;
 import com.miqroera.miqrokey.gateway.vkey.AuthFailureException;
 import com.miqroera.miqrokey.gateway.vkey.VirtualKeyResolver;
 import tools.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -20,6 +22,7 @@ import reactor.core.publisher.Mono;
 import java.nio.charset.StandardCharsets;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.UUID;
 
 /**
  * {@code GET /v1/models} — returns the models the presented virtual key is
@@ -43,6 +46,8 @@ import java.util.TreeSet;
 @RestController
 public class ModelsController {
 
+    private static final Logger log = LoggerFactory.getLogger(ModelsController.class);
+
     private final VirtualKeyResolver keyResolver;
     private final ObjectMapper objectMapper;
     private final ProviderCatalog providerCatalog;
@@ -56,6 +61,9 @@ public class ModelsController {
 
     @GetMapping("/v1/models")
     public Mono<Void> listModels(ServerWebExchange exchange) {
+        // #1447: a rejection here opens no usage and no lifecycle row, so the
+        // envelope has to carry the id that appears in the gateway log.
+        String requestId = UUID.randomUUID().toString();
         try {
             AuthContext ctx = keyResolver.resolve(exchange.getRequest());
             QuotaGate.requireNotExceeded(ctx); // #684: blocked scopes get no model list either
@@ -65,7 +73,7 @@ public class ModelsController {
             return exchange.getResponse().writeWith(
                     Mono.just(exchange.getResponse().bufferFactory().wrap(body.getBytes(StandardCharsets.UTF_8))));
         } catch (AuthFailureException e) {
-            return writeError(exchange, e);
+            return writeError(exchange, e, requestId);
         }
     }
 
@@ -112,9 +120,12 @@ public class ModelsController {
         return allowed;
     }
 
-    private Mono<Void> writeError(ServerWebExchange exchange, AuthFailureException e) {
+    private Mono<Void> writeError(ServerWebExchange exchange, AuthFailureException e, String requestId) {
         exchange.getResponse().setStatusCode(HttpStatus.valueOf(e.status()));
         exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
+        // #1447: the same id the client receives is logged here — for a rejected
+        // request this line is the only server-side trace.
+        exchange.getResponse().getHeaders().set(SseReplayEngine.X_MIQROKEY_REQUEST_ID, requestId);
         if (e.retryAfterSeconds() != null) {
             exchange.getResponse().getHeaders().set(HttpHeaders.RETRY_AFTER, String.valueOf(e.retryAfterSeconds()));
         }
@@ -122,6 +133,8 @@ public class ModelsController {
         // endpoint fails with the uniform {"error":{"type":...,...}} shape.
         byte[] bytes = ErrorEnvelopes.body(e, exchange.getRequest().getURI().getPath())
                 .getBytes(StandardCharsets.UTF_8);
+        log.info("Gateway envelope: requestId={}, status={}, code={}, path={}", requestId, e.status(), e.code(),
+                exchange.getRequest().getURI().getPath());
         return exchange.getResponse().writeWith(Mono.just(exchange.getResponse().bufferFactory().wrap(bytes)));
     }
 }
