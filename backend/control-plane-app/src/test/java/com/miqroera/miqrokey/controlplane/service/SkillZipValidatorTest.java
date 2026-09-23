@@ -7,6 +7,8 @@ import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.zip.CRC32;
+import java.util.zip.Deflater;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -301,6 +303,644 @@ class SkillZipValidatorTest {
         }
 
         assertThat(SkillZipValidator.validate(out.toByteArray()).name()).isEqualTo("web-scraper");
+    }
+
+    // ------------------------------------------------------------------
+    // #1242: the local-header stream and the central directory must describe
+    // the same entries. The three forms below are hand-assembled zips whose
+    // two views disagree; mainstream extractors (python zipfile, .NET,
+    // PowerShell Expand-Archive) follow the central directory and inflate
+    // ~640 MiB from a ~650 KB package, while a local-header walker (the
+    // pre-#1242 validator) sees ~650 KB and accepts. Each must be refused
+    // fail-closed; the raw honest controls (sizes upfront, no data
+    // descriptor — what python's zipfile writes) must still be accepted.
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("form A: local STORED / central directory DEFLATED divergence is rejected (#1242)")
+    void formARejected() {
+        assertStructureRejected(formA(), "form A (views disagree on method/size)");
+    }
+
+    @Test
+    @DisplayName("form B: central directory offset into an embedded fake local header is rejected (#1242)")
+    void formBRejected() {
+        assertStructureRejected(formB(), "form B (ghost local header inside carrier data)");
+    }
+
+    @Test
+    @DisplayName("form C: a second (evil) central directory next to the EOCD is rejected (#1242)")
+    void formCRejected() {
+        assertStructureRejected(formC(), "form C (double central directory)");
+    }
+
+    @Test
+    @DisplayName("fail-closed: zip64 markers are refused (#1242)")
+    void zip64Rejected() {
+        // (a) a zip64 EOCD locator (20 bytes: sig, disk, 8-byte offset, disk count)
+        // right before the EOCD, as a zip64 archive would carry it.
+        byte[] base = rawHonestDeflate();
+        byte[] upToEocd = java.util.Arrays.copyOf(base, base.length - 22);
+        byte[] eocd = java.util.Arrays.copyOfRange(base, base.length - 22, base.length);
+        byte[] locator = bytes(le32(0x07064B50L), le32(0), le32(8), le32(0), le32(1));
+        assertCode(bytes(upToEocd, locator, eocd), "SKILL_ZIP64_UNSUPPORTED");
+
+        // (b) zip64 sentinel values in the EOCD entry count.
+        byte[] sentinel = rawHonestDeflate();
+        sentinel[sentinel.length - 22 + 8] = (byte) 0xFF;
+        sentinel[sentinel.length - 22 + 9] = (byte) 0xFF;
+        assertCode(sentinel, "SKILL_ZIP64_UNSUPPORTED");
+    }
+
+    @Test
+    @DisplayName("fail-closed: a multi-disk archive is refused (#1242)")
+    void multiDiskRejected() {
+        byte[] pkg = rawHonestDeflate();
+        pkg[pkg.length - 22 + 4] = 1; // EOCD disk number
+        assertCode(pkg, "SKILL_ZIP_STRUCTURE_INVALID");
+    }
+
+    @Test
+    @DisplayName("fail-closed: a STORED entry with a data descriptor is refused (#1242)")
+    void storedWithDescriptorRejected() {
+        // Impossible to locate where a stored entry's data ends without trusting
+        // the very fields the descriptor is supposed to verify.
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] local = rawLocal("web-scraper/SKILL.md", 0, 8, 0, 0, 0);
+        byte[] cd = rawCd("web-scraper/SKILL.md", 0, 8, crc32(md), md.length, md.length, 0);
+        assertCode(bytes(local, md, rawDescriptor(crc32(md), md.length, md.length), cd,
+                rawEocd(1, cd.length, local.length + md.length + 16)), "SKILL_ZIP_STRUCTURE_INVALID");
+    }
+
+    @Test
+    @DisplayName("counter-control: trailing block padding after the EOCD (bsdtar streaming style) is accepted (#1242 H1)")
+    void trailingBlockPaddingAccepted() {
+        // bsdtar/libarchive pads its streaming output to a 10 KiB block, leaving
+        // thousands of NUL bytes after the EOCD record. python, java.util.zip
+        // .ZipFile and .NET all read such packages; the padding carries no EOCD
+        // signature, so the package stays accepted (regression found by the
+        // independent adversarial verification, fixed in the H1 round).
+        byte[] pkg = bytes(rawHonestDeflate(), new byte[9316]);
+
+        assertThat(SkillZipValidator.validate(pkg).name()).isEqualTo("web-scraper");
+    }
+
+    @Test
+    @DisplayName("fail-closed: a second EOCD (bare signature or smuggled record) in the trailing bytes is refused (#1242 H1)")
+    void secondEocdInTrailingBytesRejected() {
+        byte[] pkg = rawHonestDeflate();
+        byte[] eocdRecord = java.util.Arrays.copyOfRange(pkg, pkg.length - 22, pkg.length);
+        // Padding may not smuggle another EOCD: a bare signature ...
+        assertCode(bytes(pkg, new byte[100], le32(0x06054B50L), new byte[100]), "SKILL_ZIP_STRUCTURE_INVALID");
+        // ... or a copy of the whole record somewhere in the trailing bytes.
+        assertCode(bytes(pkg, new byte[100], eocdRecord, new byte[100]), "SKILL_ZIP_STRUCTURE_INVALID");
+    }
+
+    @Test
+    @DisplayName("fail-closed: a declared csize running past the end of the file is refused cleanly (#1242 H2)")
+    void declaredCsizePastEndRejected() {
+        // One mutated 4-byte field on an honest package. Pre-#1242 this was a
+        // clean 400; the first cut of verifyTwoViews handed the declared size
+        // straight to Inflater.setInput and leaked an uncaught
+        // ArrayIndexOutOfBoundsException, which the controller maps to a 500.
+        byte[] pkg = rawHonestDeflate();
+        pkg[18] = (byte) 0x00; // entry 0 local header csize -> 0x00F00000
+        pkg[19] = (byte) 0x00;
+        pkg[20] = (byte) 0xF0;
+        pkg[21] = (byte) 0x00;
+
+        assertCode(pkg, "SKILL_ZIP_STRUCTURE_INVALID");
+    }
+
+    @Test
+    @DisplayName("fail-closed: a central directory that lies about an entry's size is rejected (#1242)")
+    void cdSizeLieRejected() {
+        // The local header is honest (and so is the data), but the directory
+        // under-reports the inflated size. The streaming view never reads the
+        // directory, so pre-#1242 the package was accepted while a
+        // directory-based reader saw a different entry description.
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
+        byte[] second = bytes(rawLocal("web-scraper/note.txt", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
+        byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
+                rawCd("web-scraper/note.txt", 8, 0, crc32(md), mdDef.length, 1, first.length));
+        assertCode(bytes(first, second, cd, rawEocd(2, cd.length, first.length + second.length)),
+                "SKILL_ZIP_STRUCTURE_INVALID");
+    }
+
+    @Test
+    @DisplayName("counter-control: an honest bit-3 package whose descriptor has no signature is accepted (#1242)")
+    void rawHonestDescriptorWithoutSignatureAccepted() {
+        // APPNOTE makes the 0x08074b50 signature marking a data descriptor
+        // optional; both spellings occur in the wild and must stay accepted.
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] bareDescriptor = bytes(le32(crc32(md)), le32(mdDef.length), le32(md.length));
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 8, 0, 0, 0), mdDef, bareDescriptor);
+        byte[] cd = rawCd("web-scraper/SKILL.md", 8, 8, crc32(md), mdDef.length, md.length, 0);
+        assertThat(SkillZipValidator.validate(bytes(first, cd, rawEocd(1, cd.length, first.length))).name())
+                .isEqualTo("web-scraper");
+    }
+
+    @Test
+    @DisplayName("fail-closed: a GBK (non-UTF-8) entry name is refused cleanly, not as a 500 (#1242 review round)")
+    void nonUtf8EntryNameRejected() {
+        // bsdtar on a zh-CN box writes entry names in the platform encoding with the
+        // UTF-8 flag unset; the streaming reader's strict decode throws an
+        // IllegalArgumentException where a malformed-package verdict belongs.
+        // Pre-existing since develop (a 500 before #1242 too) — fixed alongside this
+        // review round, not a regression of it.
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
+        // 笔=B1CA 记=BCC7 in GBK: not a valid UTF-8 sequence.
+        byte[] gbkName = bytes("web-scraper/".getBytes(StandardCharsets.UTF_8),
+                new byte[]{(byte) 0xB1, (byte) 0xCA, (byte) 0xBC, (byte) 0xC7, '.', 'm', 'd'});
+        byte[] payload = "gbk named entry\n".getBytes(StandardCharsets.UTF_8);
+        byte[] second = bytes(rawLocal(gbkName, 0, 0, crc32(payload), payload.length, payload.length), payload);
+        byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
+                rawCd(gbkName, 0, 0, crc32(payload), payload.length, payload.length, first.length));
+
+        assertCode(bytes(first, second, cd, rawEocd(2, cd.length, first.length + second.length)), "SKILL_ZIP_INVALID");
+    }
+
+    @Test
+    @DisplayName("counter-control: CD records order-reversed (offsets intact) are accepted (#1242 r2 P1)")
+    void counterControlReversedCentralDirectoryAccepted() {
+        // Extractors resolve each directory record through its relative local
+        // header offset, never through record position: python's zipfile,
+        // java.util.zip.ZipFile and .NET all read this package, and the old
+        // index-based pairing refused it (regression found in review r2).
+        assertThat(SkillZipValidator.validate(rawHonestDeflateReversedCd()).name()).isEqualTo("web-scraper");
+    }
+
+    @Test
+    @DisplayName("fail-closed: reversed CD order with a broken offset is still rejected (#1242 r2 P1)")
+    void reversedCentralDirectoryBrokenOffsetRejected() {
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] asset = "hello asset\n".repeat(100).getBytes(StandardCharsets.UTF_8);
+        byte[] assetDef = deflate(asset);
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
+        byte[] second = bytes(
+                rawLocal("web-scraper/assets/note.txt", 8, 0, crc32(asset), assetDef.length, asset.length), assetDef);
+        // The record that describes note.txt points at SKILL.md's header (offset 0):
+        // pairing by offset must refuse it on the field comparison.
+        byte[] cd = bytes(rawCd("web-scraper/assets/note.txt", 8, 0, crc32(asset), assetDef.length, asset.length, 0),
+                rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, first.length));
+        assertCode(bytes(first, second, cd, rawEocd(2, cd.length, first.length + second.length)),
+                "SKILL_ZIP_STRUCTURE_INVALID");
+        // Two records claiming one offset: the pairing is no longer a bijection.
+        byte[] dup = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
+                rawCd("web-scraper/assets/note.txt", 8, 0, crc32(asset), assetDef.length, asset.length, 0));
+        assertCode(bytes(first, second, dup, rawEocd(2, dup.length, first.length + second.length)),
+                "SKILL_ZIP_STRUCTURE_INVALID");
+    }
+
+    @Test
+    @DisplayName("counter-control: an unsigned descriptor whose CRC32 equals the signature value is accepted (#1242 r2 P2a)")
+    void unsignedDescriptorCrcEqualsExtSigAccepted() {
+        // The entry's real CRC32 is 0x08074b50 — the very value marking a signed
+        // descriptor. The old reader took it as the signature and misread the
+        // descriptor; python, java.util.zip.ZipFile and .NET all read this package.
+        assertThat(crc32(crcExtSigPayload())).isEqualTo(0x08074B50L);
+        byte[] pkg = descriptorPackage(false, 0x08074B50L);
+
+        assertThat(SkillZipValidator.validate(pkg).name()).isEqualTo("web-scraper");
+    }
+
+    @Test
+    @DisplayName("counter-control: a signed descriptor whose CRC value equals the signature is still read as signed (#1242 r2 P2a)")
+    void signedDescriptorCrcEqualsExtSigAccepted() {
+        // The mirror case: a genuine 16-byte signed descriptor whose CRC field and
+        // signature word are both 0x08074b50. The signed reading is adopted only
+        // after its values are checked against the inflated bytes, so it wins over
+        // the (also self-consistent-looking) unsigned reading of its prefix.
+        assertThat(crc32(crcExtSigPayload())).isEqualTo(0x08074B50L);
+        byte[] pkg = descriptorPackage(true, 0x08074B50L);
+
+        assertThat(SkillZipValidator.validate(pkg).name()).isEqualTo("web-scraper");
+    }
+
+    @Test
+    @DisplayName("fail-closed: a descriptor matching neither spelling is still rejected (#1242 r2 P2a)")
+    void descriptorInconsistentBothSpellingsRejected() {
+        assertThat(crc32(crcExtSigPayload())).isEqualTo(0x08074B50L);
+        // Signed spelling present but the CRC value is wrong; the unsigned reading
+        // of the same bytes (signature word as CRC, then the real CRC as the size)
+        // is inconsistent too.
+        assertCode(descriptorPackage(true, 0xB0B0B0B0L), "SKILL_ZIP_STRUCTURE_INVALID");
+        // No signature word and a wrong CRC: neither reading fits.
+        assertCode(descriptorPackage(false, 0xB0B0B0B0L), "SKILL_ZIP_STRUCTURE_INVALID");
+    }
+
+    @Test
+    @DisplayName("counter-control: max EOCD comment plus max trailing padding is accepted (#1242 r2 P2b)")
+    void eocdCommentPlusMaxPaddingAccepted() {
+        // A 65535-byte comment (the record's field maximum) followed by 65535
+        // bytes of block padding pushes the true EOCD 22+65535+65535 bytes from
+        // the end — beyond the old 22+65535 search window, so the record was "not
+        // found". .NET reads this combination (review r2).
+        byte[] comment = new byte[0xFFFF];
+        java.util.Arrays.fill(comment, (byte) 'c');
+        byte[] pkg = bytes(rawHonestDeflateWithComment(comment), new byte[0xFFFF]);
+
+        assertThat(SkillZipValidator.validate(pkg).name()).isEqualTo("web-scraper");
+    }
+
+    @Test
+    @DisplayName("counter-control: an EOCD comment containing the EOCD signature bytes is accepted (#1242 r2 P2b)")
+    void eocdCommentContainingEocdSignatureAccepted() {
+        // The bytes a record's comment-length field declares are comment data:
+        // the EOCD signature may appear among them without being a second record.
+        // java.util.zip.ZipFile and .NET read this package; the old scan started
+        // right after the record and refused the bare signature.
+        byte[] comment = bytes("note".getBytes(StandardCharsets.UTF_8), le32(0x06054B50L));
+        byte[] pkg = rawHonestDeflateWithComment(comment);
+
+        assertThat(SkillZipValidator.validate(pkg).name()).isEqualTo("web-scraper");
+    }
+
+    @Test
+    @DisplayName("fail-closed: a second EOCD inside the trailing padding is still rejected (#1242 r2 P2b)")
+    void secondEocdInsidePaddingStillRejected() {
+        byte[] pkg = rawHonestDeflate();
+        byte[] eocdRecord = java.util.Arrays.copyOfRange(pkg, pkg.length - 22, pkg.length);
+        // A bare signature deep in the padding: the search window now reaches it,
+        // and its garbage record fields refuse the package.
+        assertCode(bytes(pkg, new byte[30000], le32(0x06054B50L), new byte[30000]), "SKILL_ZIP_STRUCTURE_INVALID");
+        // A full record copy deep in the padding: the later signature becomes the
+        // chosen record and no longer abuts the central directory.
+        assertCode(bytes(pkg, new byte[30000], eocdRecord, new byte[30000]), "SKILL_ZIP_STRUCTURE_INVALID");
+        // A bare signature in the last 21 bytes, past the backward scan's reach:
+        // the padding-region uniqueness scan is what must refuse it.
+        assertCode(bytes(pkg, new byte[30000], le32(0x06054B50L), new byte[2]), "SKILL_ZIP_STRUCTURE_INVALID");
+    }
+
+    @Test
+    @DisplayName("fail-closed: two entries normalizing to one delivered path are rejected (#1242 r2 adversarial round)")
+    void duplicateNormalizedEntryPathRejected() {
+        // Duplicate paths used to be accepted whenever both views listed the
+        // entries in the same order: the metadata came from the last matching
+        // entry while the extractors disagree on which duplicate wins (python and
+        // java.util.zip.ZipFile deliver the directory-order-last, .NET the first),
+        // so the bytes a user unpacks can differ from what this validator parsed
+        // and charged. Every spelling is refused whatever the order.
+        assertCode(duplicateNotePathPackage(false), "SKILL_ZIP_STRUCTURE_INVALID");
+        assertCode(duplicateNotePathPackage(true), "SKILL_ZIP_STRUCTURE_INVALID");
+        assertCode(duplicateSkillMdDivergencePackage(), "SKILL_ZIP_STRUCTURE_INVALID");
+        assertCode(dotCollapsedSkillMdPackage(), "SKILL_ZIP_STRUCTURE_INVALID");
+    }
+
+    /**
+     * Two entries named web-scraper/assets/note.txt, CD record order as flagged.
+     */
+    private static byte[] duplicateNotePathPackage(boolean reversedCd) {
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] note = "hello asset\n".repeat(100).getBytes(StandardCharsets.UTF_8);
+        byte[] noteDef = deflate(note);
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
+        byte[] second = bytes(rawLocal("web-scraper/assets/note.txt", 8, 0, crc32(note), noteDef.length, note.length),
+                noteDef);
+        byte[] third = bytes(rawLocal("web-scraper/assets/note.txt", 8, 0, crc32(note), noteDef.length, note.length),
+                noteDef);
+        byte[] mdRecord = rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0);
+        byte[] noteRecord1 = rawCd("web-scraper/assets/note.txt", 8, 0, crc32(note), noteDef.length, note.length,
+                first.length);
+        byte[] noteRecord2 = rawCd("web-scraper/assets/note.txt", 8, 0, crc32(note), noteDef.length, note.length,
+                first.length + second.length);
+        byte[] cd = reversedCd ? bytes(noteRecord2, noteRecord1, mdRecord) : bytes(mdRecord, noteRecord1, noteRecord2);
+        return bytes(first, second, third, cd, rawEocd(3, cd.length, first.length + second.length + third.length));
+    }
+
+    /**
+     * The divergence shape of the adversarial round: two SKILL.md entries, the good
+     * one last in the local chain (what the walk parses) and the bad one last in
+     * the directory (what python and java.util.zip.ZipFile deliver) — the
+     * order-insensitive pairing alone would accept it, the duplicate-path rule
+     * refuses it.
+     */
+    private static byte[] duplicateSkillMdDivergencePackage() {
+        byte[] good = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] goodDef = deflate(good);
+        byte[] bad = SKILL_MD.replace("name: web-scraper", "name: claude-evil").getBytes(StandardCharsets.UTF_8);
+        byte[] badDef = deflate(bad);
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(bad), badDef.length, bad.length), badDef);
+        byte[] second = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(good), goodDef.length, good.length),
+                goodDef);
+        byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(good), goodDef.length, good.length, first.length),
+                rawCd("web-scraper/SKILL.md", 8, 0, crc32(bad), badDef.length, bad.length, 0));
+        return bytes(first, second, cd, rawEocd(2, cd.length, first.length + second.length));
+    }
+
+    /** One delivered path spelled two ways: the './' segment collapses onto it. */
+    private static byte[] dotCollapsedSkillMdPackage() {
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
+        byte[] second = bytes(rawLocal("web-scraper/./SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
+        byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
+                rawCd("web-scraper/./SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, first.length));
+        return bytes(first, second, cd, rawEocd(2, cd.length, first.length + second.length));
+    }
+
+    private static void assertStructureRejected(byte[] pkg, String what) {
+        assertCode(pkg, "SKILL_ZIP_STRUCTURE_INVALID", what);
+    }
+
+    private static void assertCode(byte[] pkg, String expectedCode) {
+        assertCode(pkg, expectedCode, expectedCode);
+    }
+
+    private static void assertCode(byte[] pkg, String expectedCode, String what) {
+        assertThatThrownBy(() -> SkillZipValidator.validate(pkg)).as("%s must be rejected", what)
+                .isInstanceOf(SkillValidationException.class)
+                .satisfies(thrown -> assertThat(((SkillValidationException) thrown).code()).isEqualTo(expectedCode));
+    }
+
+    @Test
+    @DisplayName("counter-control: an honest raw package (sizes upfront, DEFLATED) is accepted (#1242)")
+    void rawHonestDeflateAccepted() {
+        assertThat(SkillZipValidator.validate(rawHonestDeflate()).name()).isEqualTo("web-scraper");
+    }
+
+    @Test
+    @DisplayName("counter-control: an honest raw package with STORED entries is accepted (#1242)")
+    void rawHonestStoredAccepted() {
+        assertThat(SkillZipValidator.validate(rawHonestStored()).name()).isEqualTo("web-scraper");
+    }
+
+    @Test
+    @DisplayName("counter-control: honest directory entry + EOCD comment is accepted (#1242)")
+    void rawHonestDirectoryAndCommentAccepted() {
+        assertThat(SkillZipValidator.validate(rawHonestDirComment()).name()).isEqualTo("web-scraper");
+    }
+
+    // --- raw zip construction (#1242): full control over both views ---
+
+    /** 640 MiB of zeros, raw-deflated; ~650 KB on the wire. Built once. */
+    private static final class Payload {
+        static final int SIZE = 640 * 1024 * 1024;
+        static final byte[] DEFLATE;
+        static final long CRC;
+
+        static {
+            try {
+                Deflater deflater = new Deflater(Deflater.BEST_COMPRESSION, true);
+                try {
+                    CRC32 crc = new CRC32();
+                    ByteArrayOutputStream out = new ByteArrayOutputStream();
+                    byte[] chunk = new byte[1024 * 1024];
+                    byte[] buf = new byte[64 * 1024];
+                    for (int i = 0; i < SIZE / chunk.length; i++) {
+                        crc.update(chunk);
+                        deflater.setInput(chunk);
+                        while (!deflater.needsInput()) {
+                            int n = deflater.deflate(buf);
+                            if (n > 0) {
+                                out.write(buf, 0, n);
+                            }
+                        }
+                    }
+                    deflater.finish();
+                    while (!deflater.finished()) {
+                        int n = deflater.deflate(buf);
+                        if (n > 0) {
+                            out.write(buf, 0, n);
+                        }
+                    }
+                    DEFLATE = out.toByteArray();
+                    CRC = crc.getValue();
+                } finally {
+                    deflater.end();
+                }
+            } catch (Exception e) {
+                throw new ExceptionInInitializerError(e);
+            }
+        }
+    }
+
+    private static byte[] formA() {
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] skillEntry = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
+        byte[] payloadData = Payload.DEFLATE;
+        // Local view: STORED, self-consistent, CRC over the raw (compressed) bytes.
+        byte[] payloadEntry = bytes(
+                rawLocal("web-scraper/payload.bin", 0, 0, crc32(payloadData), payloadData.length, payloadData.length),
+                payloadData);
+        // CD view: DEFLATED, inflating to 640 MiB.
+        byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0), rawCd(
+                "web-scraper/payload.bin", 8, 0, Payload.CRC, payloadData.length, Payload.SIZE, skillEntry.length));
+        return bytes(skillEntry, payloadEntry, cd, rawEocd(2, cd.length, skillEntry.length + payloadEntry.length));
+    }
+
+    private static byte[] formB() {
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] skillEntry = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
+        String carrierName = "web-scraper/asset.bin";
+        byte[] fakeLocal = rawLocal("web-scraper/payload.bin", 8, 0, Payload.CRC, Payload.DEFLATE.length, Payload.SIZE);
+        byte[] carrierData = bytes(fakeLocal, Payload.DEFLATE);
+        byte[] carrierEntry = bytes(
+                rawLocal(carrierName, 0, 0, crc32(carrierData), carrierData.length, carrierData.length), carrierData);
+        long fakeOffset = skillEntry.length + rawLocal(carrierName, 0, 0, 0, 0, 0).length;
+        byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
+                rawCd("web-scraper/payload.bin", 8, 0, Payload.CRC, Payload.DEFLATE.length, Payload.SIZE, fakeOffset));
+        return bytes(skillEntry, carrierEntry, cd, rawEocd(2, cd.length, skillEntry.length + carrierEntry.length));
+    }
+
+    private static byte[] formC() {
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] skillEntry = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
+        String name = "web-scraper/data.bin";
+        byte[] fakeLocal = rawLocal(name, 8, 0, Payload.CRC, Payload.DEFLATE.length, Payload.SIZE);
+        byte[] carrierData = bytes(fakeLocal, Payload.DEFLATE);
+        byte[] carrierEntry = bytes(rawLocal(name, 0, 0, crc32(carrierData), carrierData.length, carrierData.length),
+                carrierData);
+        long fakePos = skillEntry.length + rawLocal(name, 0, 0, 0, 0, 0).length;
+        byte[] cdHonest = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
+                rawCd(name, 0, 0, crc32(carrierData), carrierData.length, carrierData.length, skillEntry.length));
+        // python's zipfile reads the CD at cdOffset + concat and adds concat to every
+        // header_offset (concat = EOCD_pos - cdSize - cdOffset); with two equal-length
+        // CDs that lands on the evil one, so its offset is pre-subtracted.
+        byte[] cdEvil = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
+                rawCd(name, 8, 0, Payload.CRC, Payload.DEFLATE.length, Payload.SIZE, fakePos - cdHonest.length));
+        if (cdHonest.length != cdEvil.length) {
+            throw new IllegalStateException("form C needs equal-length central directories");
+        }
+        return bytes(skillEntry, carrierEntry, cdHonest, cdEvil,
+                rawEocd(2, cdHonest.length, skillEntry.length + carrierEntry.length));
+    }
+
+    private static byte[] rawHonestDeflate() {
+        return rawHonestDeflateWithComment(new byte[0]);
+    }
+
+    private static byte[] rawHonestDeflateWithComment(byte[] comment) {
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] asset = "hello asset\n".repeat(100).getBytes(StandardCharsets.UTF_8);
+        byte[] assetDef = deflate(asset);
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
+        byte[] second = bytes(
+                rawLocal("web-scraper/assets/note.txt", 8, 0, crc32(asset), assetDef.length, asset.length), assetDef);
+        byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
+                rawCd("web-scraper/assets/note.txt", 8, 0, crc32(asset), assetDef.length, asset.length, first.length));
+        return bytes(first, second, cd, rawEocd(2, cd.length, first.length + second.length, comment));
+    }
+
+    /** rawHonestDeflate() with the two central-directory records order-reversed. */
+    private static byte[] rawHonestDeflateReversedCd() {
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] asset = "hello asset\n".repeat(100).getBytes(StandardCharsets.UTF_8);
+        byte[] assetDef = deflate(asset);
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
+        byte[] second = bytes(
+                rawLocal("web-scraper/assets/note.txt", 8, 0, crc32(asset), assetDef.length, asset.length), assetDef);
+        // The spec ties records to local headers by the offset field, not by
+        // position: reversing the records must not change the verdict.
+        byte[] cd = bytes(
+                rawCd("web-scraper/assets/note.txt", 8, 0, crc32(asset), assetDef.length, asset.length, first.length),
+                rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0));
+        return bytes(first, second, cd, rawEocd(2, cd.length, first.length + second.length));
+    }
+
+    private static byte[] rawHonestStored() {
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] asset = "hello asset\n".repeat(100).getBytes(StandardCharsets.UTF_8);
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 0, 0, crc32(md), md.length, md.length), md);
+        byte[] second = bytes(rawLocal("web-scraper/assets/note.txt", 0, 0, crc32(asset), asset.length, asset.length),
+                asset);
+        byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 0, 0, crc32(md), md.length, md.length, 0),
+                rawCd("web-scraper/assets/note.txt", 0, 0, crc32(asset), asset.length, asset.length, first.length));
+        return bytes(first, second, cd, rawEocd(2, cd.length, first.length + second.length));
+    }
+
+    private static byte[] rawHonestDirComment() {
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
+        byte[] dir = rawLocal("web-scraper/assets/", 0, 0, 0, 0, 0);
+        byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0),
+                rawCd("web-scraper/assets/", 0, 0, 0, 0, 0, first.length));
+        return bytes(first, dir, cd,
+                rawEocd(2, cd.length, first.length + dir.length, "skill package".getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private static byte[] rawLocal(String name, int method, int flags, long crc, long csize, long usize) {
+        return rawLocal(name.getBytes(StandardCharsets.UTF_8), method, flags, crc, csize, usize);
+    }
+
+    private static byte[] rawLocal(byte[] name, int method, int flags, long crc, long csize, long usize) {
+        return bytes(le32(0x04034B50L), le16(20), le16(flags), le16(method), le16(0), le16(0), le32(crc), le32(csize),
+                le32(usize), le16(name.length), le16(0), name);
+    }
+
+    private static byte[] rawDescriptor(long crc, long csize, long usize) {
+        return bytes(le32(0x08074B50L), le32(crc), le32(csize), le32(usize));
+    }
+
+    /**
+     * Payload whose CRC32 is exactly 0x08074b50, the data-descriptor signature
+     * value: the 36 ASCII bytes plus a 4-byte suffix found by solving the CRC32
+     * recurrence over GF(2) (the tests re-assert the CRC, so the constant is
+     * self-checking).
+     */
+    private static byte[] crcExtSigPayload() {
+        return bytes("web-scraper/assets/note.txt: payload ".getBytes(StandardCharsets.UTF_8),
+                new byte[]{(byte) 0x99, (byte) 0xBB, (byte) 0x4D, (byte) 0xC6});
+    }
+
+    /**
+     * rawHonestDeflate()-shaped package with a bit-3 note.txt entry whose CRC32 is
+     * 0x08074b50 and the given descriptor spelling (signed = 16 bytes with the
+     * 0x08074b50 signature word, unsigned = 12 bytes); {@code descriptorCrc} is the
+     * descriptor's first CRC value, which the honest tests set to the real one.
+     */
+    private static byte[] descriptorPackage(boolean signed, long descriptorCrc) {
+        byte[] content = crcExtSigPayload();
+        byte[] contentDef = deflate(content);
+        byte[] descriptor = signed
+                ? bytes(le32(0x08074B50L), le32(descriptorCrc), le32(contentDef.length), le32(content.length))
+                : bytes(le32(descriptorCrc), le32(contentDef.length), le32(content.length));
+        byte[] md = SKILL_MD.getBytes(StandardCharsets.UTF_8);
+        byte[] mdDef = deflate(md);
+        byte[] first = bytes(rawLocal("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length), mdDef);
+        byte[] second = bytes(rawLocal("web-scraper/assets/note.txt", 8, 8, 0, 0, 0), contentDef, descriptor);
+        byte[] cd = bytes(rawCd("web-scraper/SKILL.md", 8, 0, crc32(md), mdDef.length, md.length, 0), rawCd(
+                "web-scraper/assets/note.txt", 8, 8, crc32(content), contentDef.length, content.length, first.length));
+        return bytes(first, second, cd, rawEocd(2, cd.length, first.length + second.length));
+    }
+
+    private static byte[] rawCd(String name, int method, int flags, long crc, long csize, long usize, long offset) {
+        return rawCd(name.getBytes(StandardCharsets.UTF_8), method, flags, crc, csize, usize, offset);
+    }
+
+    private static byte[] rawCd(byte[] name, int method, int flags, long crc, long csize, long usize, long offset) {
+        return bytes(le32(0x02014B50L), le16(20), le16(20), le16(flags), le16(method), le16(0), le16(0), le32(crc),
+                le32(csize), le32(usize), le16(name.length), le16(0), le16(0), le16(0), le16(0), le32(0), le32(offset),
+                name);
+    }
+
+    private static byte[] rawEocd(int count, long cdSize, long cdOffset) {
+        return rawEocd(count, cdSize, cdOffset, new byte[0]);
+    }
+
+    private static byte[] rawEocd(int count, long cdSize, long cdOffset, byte[] comment) {
+        return bytes(le32(0x06054B50L), le16(0), le16(0), le16(count), le16(count), le32(cdSize), le32(cdOffset),
+                le16(comment.length), comment);
+    }
+
+    private static byte[] le16(int value) {
+        return new byte[]{(byte) value, (byte) (value >> 8)};
+    }
+
+    private static byte[] le32(long value) {
+        return new byte[]{(byte) value, (byte) (value >> 8), (byte) (value >> 16), (byte) (value >> 24)};
+    }
+
+    private static byte[] bytes(byte[]... parts) {
+        int length = 0;
+        for (byte[] part : parts) {
+            length += part.length;
+        }
+        byte[] out = new byte[length];
+        int at = 0;
+        for (byte[] part : parts) {
+            System.arraycopy(part, 0, out, at, part.length);
+            at += part.length;
+        }
+        return out;
+    }
+
+    private static byte[] deflate(byte[] data) {
+        Deflater deflater = new Deflater(Deflater.BEST_COMPRESSION, true);
+        try {
+            deflater.setInput(data);
+            deflater.finish();
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            while (!deflater.finished()) {
+                int n = deflater.deflate(buf);
+                if (n > 0) {
+                    out.write(buf, 0, n);
+                }
+            }
+            return out.toByteArray();
+        } finally {
+            deflater.end();
+        }
+    }
+
+    private static long crc32(byte[] data) {
+        CRC32 crc = new CRC32();
+        crc.update(data);
+        return crc.getValue();
     }
 
     private static byte[] zipOf(TestEntry... entries) throws Exception {

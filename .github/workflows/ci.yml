@@ -159,6 +159,13 @@ jobs:
   # test, so passing on a healthy stack proves nothing; the harness is built to
   # fail on the broken one. Reverse-verified: reverting any of the three fixes
   # makes it exit non-zero.
+  #
+  # The second step asks the same question of deploy/diagnose.{sh,ps1}, whose
+  # conclusions are designed to be pasted into a public issue: it seeds
+  # credentials and fails if any survives into the report, records every docker
+  # invocation and fails on a verb outside the read set. The .ps1 leg runs here
+  # too (the runner has pwsh) — that is where the PowerShell 5.1 stderr-capture
+  # bug it pins was found, and where a regression of it would be caught.
   deploy-script:
     name: Deploy script (behavioural)
     needs: [changes]
@@ -169,6 +176,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Regression scenarios
         run: python3 deploy/tests/deploy_script_regression.py
+      - name: Diagnose scripts (behavioural)
+        run: python3 deploy/tests/diagnose_script_regression.py
 
   # Whether the one line an operator has to go on says the truth. The backup
   # entrypoint wraps the documented 4-value exit contract (runbook §441) into a

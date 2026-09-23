@@ -1,0 +1,73 @@
+name: ✨ 需求 / 功能建议
+description: 新的功能、能力或改进（对照腾讯云 / 阿里云 AI 网关的某能力时请注明）
+title: "[需求] "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        写之前先搜一下 issue 与 [docs/decisions](https://github.com/sijie-Z/miqro-gate/tree/main/docs/decisions)：不少能力已有 ADR 结论（做 / 不做 / 等拍板），在对应条目下补充会比新开一条更有效。
+        产品边界是硬约束（单客户私有化、透明代理、不自动故障切换……），与边界冲突的提案需要先走 ADR。
+
+  - type: textarea
+    id: background
+    attributes:
+      label: 需求背景
+      description: 这个需求解决什么问题？谁在用？（例如：报备合规、成本控制、可用性、运维效率……）
+      placeholder: 例：财务每月要按项目导出用量对账单，目前只能人工从用量页筛，一次半小时
+    validations:
+      required: true
+
+  - type: textarea
+    id: capability
+    attributes:
+      label: 期望能力
+      description: 请尽量具体，按「角色 / 触发场景 / 期望行为」三要素写
+      value: |
+        - 用户 / 角色：谁操作？
+        - 触发场景：什么时候用？
+        - 期望行为：操作后应该发生什么？
+    validations:
+      required: true
+
+  - type: textarea
+    id: references
+    attributes:
+      label: 参考（可选）
+      description: 对应的腾讯云 / 阿里云 / 其他网关文档链接，或本仓现有功能的对照
+      placeholder: |
+        - https://cloud.tencent.com/document/product/1826/…
+        - https://help.aliyun.com/zh/api-gateway/ai-gateway/…
+        - 本仓对照：用量页导出（#709）
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准（可选）
+      description: 怎么算做完了？一两条可验证的判据即可
+      placeholder: 例：管理端能按项目 + 月份导出 CSV，金额列与用量页同源、可对账
+    validations:
+      required: false
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 优先级（可选）
+      description: 你的判断即可，维护者会复核；不确定就选 P2
+      options:
+        - P0 紧急（阻塞使用）
+        - P1 重要（明显影响效率 / 有合规风险）
+        - P2 一般（有了更好）
+        - P3 锦上添花
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 备注（可选）
+      description: 相关 issue/PR/ADR、讨论记录、临时替代方案
+    validations:
+      required: false

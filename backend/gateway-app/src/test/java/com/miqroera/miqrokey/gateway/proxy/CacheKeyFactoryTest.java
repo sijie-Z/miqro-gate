@@ -37,7 +37,7 @@ class CacheKeyFactoryTest {
      * The wire protocol family for tests that do not exercise the protocol
      * dimension itself — the chat endpoint's family (#1236).
      */
-    private static final String CHAT_FAMILY = ProtocolFamily.OPENAI_CHAT_COMPLETIONS.name();
+    private static final ProtocolFamily CHAT_FAMILY = ProtocolFamily.OPENAI_CHAT_COMPLETIONS;
 
     @Test
     @DisplayName("wire protocol family is a key dimension (#1236)")
@@ -47,11 +47,11 @@ class CacheKeyFactoryTest {
         // The same bytes sent to two endpoints produce two response shapes, so
         // the family must split the key — otherwise the cached chat answer
         // replays into an Anthropic client (#444's argument one level up).
-        assertThat(factory.compute(ctx, "m", body, ProtocolFamily.OPENAI_CHAT_COMPLETIONS.name()))
-                .isNotEqualTo(factory.compute(ctx, "m", body, ProtocolFamily.ANTHROPIC_MESSAGES.name()));
+        assertThat(factory.compute(ctx, "m", body, ProtocolFamily.OPENAI_CHAT_COMPLETIONS))
+                .isNotEqualTo(factory.compute(ctx, "m", body, ProtocolFamily.ANTHROPIC_MESSAGES));
         // Same endpoint: still one key.
-        assertThat(factory.compute(ctx, "m", body, ProtocolFamily.OPENAI_CHAT_COMPLETIONS.name()))
-                .isEqualTo(factory.compute(ctx, "m", body, ProtocolFamily.OPENAI_CHAT_COMPLETIONS.name()));
+        assertThat(factory.compute(ctx, "m", body, ProtocolFamily.OPENAI_CHAT_COMPLETIONS))
+                .isEqualTo(factory.compute(ctx, "m", body, ProtocolFamily.OPENAI_CHAT_COMPLETIONS));
     }
 
     @Test
