@@ -2,8 +2,8 @@
  *
  * Master update (owner round 2026-09-06): the console language moves from the
  * PostHog warm-paper palette to the Vue Vben Admin console family — cool light
- * canvas (#f0f2f5), white content surfaces, hairline borders, the antd blue
- * (#1677ff) single brand color, and a deep-navy navigation rail (#001529).
+ * canvas (#f4f7f9), white content surfaces, hairline borders, a single Vben
+ * default blue (#0960bd) brand color, and a deep-navy navigation rail (#001529).
  * Layout/component organization follows Vben Admin (github.com/vben-group/
  * vue-vben-admin + v2.vben.pro demo) as the design master; no code is copied.
  *

@@ -8,17 +8,22 @@
 > UI skill 借鉴：Anthropic 官方 `frontend-design` 反模板清单（本会话 local
 > reference/ui-skills/）。**token 权威源 = `frontend/src/styles/design-tokens.css`（v2.1 `--ui-*`）+ `design-base.css`；本文件只记方向与验收。**
 
-- **分层签名**：内容画布 `#f0f2f5` 冷灰、白卡/白表浮于画布（发丝边、无卡片阴影）、
-  深海军蓝导航轨 `#001529`（240px；激活项=主色 16% 浅底 + 白字 + 左侧 3px
-  `#4096ff` 竖条；hover 白 6%）。
-- **颜色**：单主色 antd/Vben 蓝 `#1677ff`（hover `#4096ff` / active `#0958d9` /
-  soft `#e6f0ff` / ring 35%）；hairline `#dfe3e8`；input `#bcc3d1`；正文 `#1f2328`
-  / 次级 `#59636e` / 弱 `#8c959f`；登录品牌板 `#2a5ad7`；状态色沿用 muted 成对
+- **分层签名**：内容画布 `--ui-background` **`#f4f7f9`**（Vben v2 `@content-bg`）、白卡/白表浮于画布（发丝边、无卡片阴影）、
+  深海军蓝导航轨 `--ui-rail` `#001529`（宽 `--ui-sidebar-width` 默认 **210px**，用户可在偏好设置里改；激活项=主色浅底 + 白字 + 左侧主色竖条；hover `--ui-rail-hover` 白 8%）。
+- **颜色**（**值以 `design-tokens.css` 为准**，此处为 2026-09-21 快照）：单主色 `--ui-primary` **`#0960bd`**（Vben v2 默认 themeColor）
+  ｜hover `--ui-primary-hover` `#2a7dc9`｜active `--ui-primary-active` `#095bb4`｜
+  soft `--ui-primary-soft` `#e6eff8`｜ring `--ui-ring` `rgba(0,155,228,0.11)`；
+  边线 `--ui-border` `#f0f0f0`、强边 `--ui-border-strong` / 输入框 `--ui-input-border` `#d9d9d9`；正文 `--ui-foreground` `#262626`
+  ／次级 `--ui-foreground-secondary` `#595959`／弱 `--ui-foreground-faint` `#737373`；登录品牌板 `--ui-login-panel` `#2a5ad7`；状态色沿用 muted 成对
   fg/bg（success/warning/danger/info/neutral）。
-- **几何**：顶栏 56、页内容边距 24、页标题 20px/600 + 描述 14 次级；控件高 32
-  （页内主导 40、登录 44）圆角 6；表头 muted 底 13px/600、行 48px、字 14、行
-  hover 7% 灰、数字列右对齐 tabular；分页右对齐（共 N 条 / 上页 / 第 N 页 / 下页）；
+- **几何**：顶栏 `--ui-header-height` **48**、页内容边距 24、页标题 20px/600 + 描述 14 次级；控件高 `--ui-control-height` 32
+  （页内主导 `--ui-control-height-lg` 40、登录 44）圆角 `--ui-radius-control` 6、卡面 `--ui-radius-panel` 8；表头 muted 底 13px/600、行 `--ui-table-row-height` 48px、字 14、行
+  hover `--ui-row-hover` `#fafafa`、数字列右对齐 tabular；分页右对齐（共 N 条 / 上页 / 第 N 页 / 下页）；
   表单面板同卡带 hairline；导航分组标题 11px 白 42% 大写。
+
+> ⚠️ **本节此前记的是一批已经不在代码里的值**（`#1677ff` 主色 / `#4096ff` hover / `#0958d9` active / `#e6f0ff` soft / `#dfe3e8` hairline / `#bcc3d1` input / `#1f2328` 正文 / 240px 侧栏 / 56px 顶栏），
+> 已按 `design-tokens.css` 订正。`#1677ff` 现在只作为 `--ui-info-fg`（info 状态前景）存在，**不再是主色**。
+> 改动色值/尺寸请直接改 `frontend/src/styles/design-tokens.css`，本文件不要另立数值。
 - **登录页（2026-09-07 增补：设计师权威稿为现行母版，覆盖上方 v3 登录段）**：左右分屏——
   左深色 hero（网关传送门插画 scene：紫蓝光晕/轨道流线/供应商卡/在线状态卡/终端条；
   hero 文案 #214 起全中文：眉标「企业级 AI 基础设施」、两句标语「网关悄然运行。/ 密钥由你掌控。」、

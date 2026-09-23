@@ -84,6 +84,7 @@ V1 migration 可以创建首批核心表；后续 Goal 只能追加 migration。
 - `model_catalog_strategy`, `plan_status_strategy`, `balance_authority`
 - `implementation_status`: DRAFT/DOCUMENTED/IMPLEMENTED/VERIFIED/DEGRADED/DISABLED
 - `catalog_version`, `version`
+- **官方探测结果（V43，#346，I4）**：`model_catalog_probe_status varchar(16)`（`SUCCEEDED|FAILED`）、`model_catalog_probe_error varchar(500)`、`model_catalog_model_count integer`、`model_catalog_probed_at timestamptz`。**四列全部可空**。管理端 probe 端点（抓官方 `/models`）把**最后一次**结果记在产品行上——失败探测因此紧挨着"上次成功目录"可见；`model_catalog` 行本身**仍只写成功**，失败探测永不触碰它们。
 
 唯一 `(provider_id, product_code)`。JSONB 由版本化 JSON Schema 校验后入库。
 
@@ -241,7 +242,11 @@ Key × 项目绑定（标签路由的鉴权权威），与 `virtual_keys.project
   - **读取方**：`UsageStatsAggregator` 链路同时给出 `pricingStatus` 与 `unpriced.*`：已知金额与未计价用量**分开披露**，`pricingStatus != COMPLETE` 时已知金额**不是总额**。口径见 usage-accounting §6
 - `occurred_at`、`created_at`
 
-部分唯一索引 `(tenant_id, provider_request_id) WHERE provider_request_id IS NOT NULL`；`virtual_key_id`、`project_id`、`cache_level`、`occurred_at` 索引。正文（prompt、代码、工具、回答）永不写入。
+部分唯一索引 `(tenant_id, provider_request_id) WHERE provider_request_id IS NOT NULL`；`virtual_key_id`、`project_id`、`cache_level`、`occurred_at` 索引。
+
+**V62（#729）增 `idx_usage_event_virtual_key_occurred (virtual_key_id, occurred_at DESC)`**——给管理端"最后使用时间"聚合（`LEFT JOIN (SELECT virtual_key_id, MAX(occurred_at) … GROUP BY virtual_key_id)`）用。V6 的单列 `idx_usage_event_virtual_key_id` 答不了 per-key MAX，`idx_usage_event_occurred_at` 是全局排序而非每 Key，二者都会退化成对这张**永久保留表**的全扫；复合索引使其变成 index-only 反向扫描。**查询与 schema 都没改，只是计划自己变好了。**
+
+正文（prompt、代码、工具、回答）永不写入。
 
 ### `usage_adjustments` (V63，#709 / F20)
 
@@ -268,7 +273,28 @@ Key × 项目绑定（标签路由的鉴权权威），与 `virtual_keys.project
 
 服务层规则：净额不得为负，配合 `pg_advisory_xact_lock`（按 `usage_event_id` 串行化）执行，避免两个并发提交各自看到健康净额却共同越界。正文永不写入。
 
-**当前范围**：本期只落 schema + 追加/查询接口（`POST|GET /api/v1/admin/usage-adjustments`，仅 SYSTEM_ADMIN）。**明细净额列、导出/审计调整标记、对账"含调整"维度尚未接入**——调整目前可记录、可查看，但还不改变任何上报数字。
+**外键支撑索引（V69）**：`idx_usage_adjustments_usage_event_fk (usage_event_id)` 与 `idx_usage_adjustments_reversal_of_fk (reversal_of_id)`，两个单列非唯一索引。
+由头是 V63 声明的两个外键（`usage_event_id → usage_event ON DELETE CASCADE`、`reversal_of_id → usage_adjustments ON DELETE RESTRICT`）——**外键的检查查询只有引用列上的单一等值谓词**。此前 `usage_event_id` 只是复合索引 `idx_usage_adjustments_usage_event (tenant_id, usage_event_id)` 的第二列，`reversal_of_id` 则完全无索引，删除路径因此顺序扫描。PG17 实测（10 万 `usage_event` / 5 千 `usage_adjustments`）：两个 FK trigger 分别耗时 9486 ms / 276 ms，整条语句 10028 ms，**94.6% 在第一个 FK trigger 上**；该路径是 `UsageDeletionService.confirm` 一个 `@Transactional`，由 `POST /api/v1/admin/usage-deletions/{id}/confirm` 同步触达（#987）。
+**复合索引刻意保留**——它答的是租户范围读取，新单列索引答不了，两者不冗余（与 #864 那对**真重复**的索引相反）。代价是每次 insert 多维护两个单列 b-tree。
+
+**唯一部分索引（V70）**：`uq_usage_adjustments_reversal_of (tenant_id, reversal_of_id) WHERE reversal_of_id IS NOT NULL`——**每笔原始调整至多一个冲销行**。
+理由：冲销行把指向行的 deltas 取负，读路径按 `observed + SUM(全部 deltas)` 算（V63）。第二笔冲销会"减掉一个已经不在的修正"，净额反而**高于**观测事实（例：observed 500 + 修正 -200，冲销一次回 500，再冲销变 700），且这个错数字会流进明细/汇总/导出/计费。`UsageAdjustmentService` 已在 per-event advisory lock 下以 `ADJUSTMENT_ALREADY_REVERSED`（400）拒绝第二次；本索引是**结构性保证**——绕过 service 直接写台账的路径也无法破坏读数。
+> ⚠️ **部署注意（这条比一般迁移的注意事项更重，见 #1249）**：若库中已存在"一笔原始调整有两个冲销"，该语句会以 `could not create unique index ... is duplicated` 失败——**但后果不止"中止迁移批次"**：
+>
+> 1. **PostgreSQL 的事务性 DDL 把「迁移执行 + 迁移表插入」一起回滚**，失败**在 `flyway_schema_history` 里不留任何记录**（连 `success=false` 的行都没有）。
+> 2. 于是 `flyway repair` 报 *"No failed migration detected"*（**空转**），控制面此后**每次启动都停在同一个地方**，没有任何自动或文档化的出路——只能人工改数据、或人工 `DROP INDEX`。
+> 3. 与同批次的 **V69 对比**：V69 用 `IF NOT EXISTS` 且注释明写 *Idempotent on purpose*；**V70 不是幂等的**。所以还有第二条可达路径——运维若照 V69 注释里的建议**带外** `CREATE UNIQUE INDEX CONCURRENTLY` 建过同名索引，V70 同样会失败。
+>
+> **两条路径都 100% 必现。** 路径 A 是否发生取决于库里有没有重复冲销行——**#999 之前 `UsageAdjustmentService.reversalOf()` 没有任何"已被冲销"检查**，所以 V63–V69 期间**可以通过公开 API 产生**重复冲销行，不是人为构造才有的状态。
+>
+> ⚠️ **V70 文件里那段前置查重 SQL 只存在于 `.sql` 注释中**——全仓 `grep -rn "uq_usage_adjustments_reversal_of"` 除 V70 本身外零命中，发布检查单和运维手册里都没有它。**"发布前由业主决策"这条要求目前没有可执行入口。**
+>
+> 查重语句：`SELECT tenant_id, reversal_of_id, count(*) FROM usage_adjustments WHERE reversal_of_id IS NOT NULL GROUP BY 1,2 HAVING count(*) > 1`
+
+**当前范围**：schema + 追加/查询接口（`POST|GET /api/v1/admin/usage-adjustments`，仅 SYSTEM_ADMIN）**已交付，且净额已实际生效**——明细行读 `observed + Σ调整`（`UsageStatsRepositoryImpl` 走 net 列），导出带 `adjusted` 标记与 `net*` 列（`UsageRecordPage`；任务级 `adjustment_level` 见 V67）。
+> ⚠️ 本段此前写「调整目前可记录、可查看，但还不改变任何上报数字」——**该陈述已过期**，与 `UsageRecordPage`（net 列 + `adjusted`）及 `UsageStatsRepositoryImpl` 的净额读取不符。
+>
+> **仍未接入的是对账的"含调整"维度**（engines 侧），不是净额本身。
 
 ### `cache_hit_event` (V6)
 
@@ -307,6 +333,20 @@ CAA 逐请求上下文证据审计（append-only）：`id`、`tenant_id`、`requ
 
 主键含分区键：`primary key (started_at, id)`；幂等键唯一 `(started_at, gateway_request_id)`。常用索引：`(tenant_id, started_at desc)`、`(virtual_key_id, started_at desc)` 等。
 
+**`(tenant_id, gateway_request_id)` 索引的增删史（V61 → V65 → V68）**——三个迁移都只动这一个形状，值得记一笔：
+
+| 迁移 | 动作 | 说明 |
+|---|---|---|
+| **V61**（#705） | **建** `idx_request_usage_records_gateway_request (tenant_id, gateway_request_id)` | 模型调用时间线按 `(tenant_id, gateway_request_id)` 解析单次调用——**与写入方的幂等键同一个三元组**。没有匹配索引时规划器退化成对**每个分区**顺序扫描。文件头记了 demo 实例上的 `EXPLAIN` 证据：`Seq Scan on request_usage_records_default`；并指出 ~4.6k 行时扫描只要 0.03 ms，**所以一切都"看起来正常"，代价要等表长大才显形** |
+| **V65**（#758） | **建** `idx_request_usage_records_tenant_gateway_request` | 同一形状，为 usage-stats 读路径 join `usage_event` × 本表。理由：既有唯一键是 `(started_at, gateway_request_id)`，**答不了不知道精确 `started_at` 的查询** |
+| **V68** | **删** V65 那个 | 它是 V61 索引的**逐字节重复**（同表、同列同序、都非唯一、都无谓词；在干净 PostgreSQL 17.6 全量迁移后用 `pg_index` 核过 `indrelid/indkey/indisunique/indpred` 完全一致）。**保留 V61 那个**——它更早、注释里带完整理由、也是 #705 讨论中引用的名字。用 `IF EXISTS` 保持幂等（"只在其中一个迁移落过库的实例不能在这里失败"） |
+
+> **为什么删得动**：本表是**写热路径**（每转发一个请求一行 `IN_FLIGHT` + 一次 finalizing UPDATE）。finalizing 的 guarded upsert 因 `WHERE` 触及 `request_status`（已由 `idx_request_usage_records_status` 覆盖）**无法 HOT-prune**，所以表上**每个**索引都要在每次写入时维护；又因按 `started_at` RANGE 分区，父表索引会传播到每个分区（当前只有 `request_usage_records_default`）。删掉一个重复索引是直接的写放大收益。
+>
+> ⚠️ **V65 的索引在当前 schema 里已不存在**——只有在 V65–V68 之间短暂存在过。查索引别照抄中间态。
+
+V61、V69 两处的 `CREATE INDEX` **都没用 `CONCURRENTLY`**，文件里给了理由：Flyway 在事务内跑，`CONCURRENTLY` 不可用；裸 `CREATE INDEX` 取 SHARE 锁会阻塞写入，但当前各环境表小、可接受，将来大表应改为 out-of-band 建索引。
+
 **延后列（后续 Goal）**：`team_id`、`subscription_id`、相关名称/指纹快照、`error_category`、每类 token authority、`provider_usage_json jsonb`、成本列、`plan_window_ref`、`usage_integrity`。
 
 > **2026-09-18 收敛（#710 评审）**：原清单混了三类性质不同的东西，本轮**只落逐事件价格快照**（见上方 V64 价格基座列）。
@@ -328,7 +368,16 @@ URL（创建时经控制面 SSRF 门控：默认仅公网 https，`MIQROKEY_CONT
 
 ### `alert_rules` / `alert_events` / `webhook_delivery_attempts` (V12/V15/V24，G4.5/G8.3/配额告警实现)
 
-规则：`type`（`USAGE_MISSING_RATE|UPSTREAM_ERROR_RATE|BALANCE_UNAVAILABLE|USAGE_SURGE|BUDGET_THRESHOLD|QUOTA_THRESHOLD|MODEL_APPROVAL_SUBMITTED|MODEL_APPROVAL_APPROVED|MODEL_APPROVAL_REJECTED|ADMIN_API_KEY_EXPIRING|CONSUMER_KEY_EXPIRING|USAGE_QUEUE_SATURATION`，V15/V24/V27/V36/V39/V60 扩展 CHECK 约束）、`threshold`、`dedupe_minutes`、`enabled`、可选 `webhook_endpoint_id`（null = 仅记录事件；**V74 起外键是复合的** `(tenant_id, webhook_endpoint_id) → webhook_endpoints (tenant_id, id)`、`ON DELETE SET NULL (webhook_endpoint_id)`——引用必须指向**规则自己租户**的端点，跨租户引用在数据库层不可写；删除端点只清 `webhook_endpoint_id` 而不动 `tenant_id`，列清单形式要求 PostgreSQL 15+。V74 迁移会把存量跨租户引用一次性清空并 `version + 1`，被清空引用的规则不再投递 Webhook（事件仍照常记录），需人工重新指向本租户端点）、`scope_json jsonb`（`BUDGET_THRESHOLD` 必填：`{"projectId": "…"}`；`QUOTA_THRESHOLD` 必填：`{"quotaRuleId": "…"}`）。事件：`dedupe_key`（type + 小时桶；`BUDGET_THRESHOLD` 为 type + 月份；`QUOTA_THRESHOLD` 为 type + 配额重置窗口起点 epoch；审批通知型为 type + approvalId）唯一约束 `(tenant_id, rule_id, dedupe_key)` 实现去重；`value` 为指标实际值（审批通知型恒为 1 = 一次发生）；`payload_json` 存事件明细（审批通知型 = 通知字段原样，重试投递时随信封带出），不含正文/密钥。投递表：事件 × 端点 × 尝试次数唯一；`next_retry_at` 指数退避（2^attempt × 1min，最多 3 次）、`http_status`、脱敏错误。**重试外发前必须在数据库上抢占**（#1383，多副本前提）：发送前一句条件更新 `UPDATE webhook_delivery_attempts SET next_retry_at = now() + 租约 WHERE … AND attempt = 待发次数 AND next_retry_at <= now()`，租约 = 端点 `timeout_ms` + 60s（`CLAIM_SLACK_MS`），`UPDATE` 只可能影响一行——两个副本的扫描同时命中同一行时只有抢占成功的那一个真的发 POST，另一个跳过。因此 `next_retry_at` 在投递期间兼作**租约到期时刻**，而投递表本身同时是「已投递次数」的账本；抢占者中途崩溃时租约自然过期，下一个扫描按**同一个 attempt 号**重发（崩溃只代价一个退避周期的延迟，不消耗 `MAX_ATTEMPTS` 的次数）。`recordAttempt` 的 upsert 会覆盖同一 `(event_id, endpoint_id, attempt)` 行，故重复外发在投递表上看不出行数增长，只能靠接收端计数或 `next_retry_at` 的推后指纹识别。评估调度：`@Scheduled` 固定延迟（`miqrokey.alerts.evaluation-interval-ms` 默认 5min）；指标基于滚动 1 小时、**按规则自身 `tenant_id` 过滤**（V60 起四条周期指标 SQL 显式带 `tenant_id = :tenantId`：事实表都带租户列，规则不得读别的租户的行；单租户部署每个事实行都属同一 seed 租户，语义与旧「单租户全局聚合」一致）；`BUDGET_THRESHOLD` 由 `AlertEvaluator` 复用 `AdminBudgetService` 水位（当月分摊成本/预算 × 100），`QUOTA_THRESHOLD` 复用 `AdminQuotaRuleService` 水位（当前窗口用量/限额 × 100；规则 DISABLED 不评估）。**投递/重试/退避原语抽取为 `AlertEventDispatcher`**（G4.5 机制），周期型由 `AlertEvaluator` 经它投递；`MODEL_APPROVAL_*` 事件型不评估、由审批工作流（`ModelApprovalService` 迁移瞬间）直接触发。
+规则：`type`（`USAGE_MISSING_RATE|UPSTREAM_ERROR_RATE|BALANCE_UNAVAILABLE|USAGE_SURGE|BUDGET_THRESHOLD|QUOTA_THRESHOLD|MODEL_APPROVAL_SUBMITTED|MODEL_APPROVAL_APPROVED|MODEL_APPROVAL_REJECTED|ADMIN_API_KEY_EXPIRING|CONSUMER_KEY_EXPIRING|USAGE_QUEUE_SATURATION|UPSTREAM_RATE_LIMITED|KEY_REQUEST_RATE`，**共 14 个**；V15/V24/V27/V36/V39/V60/**V71** 扩展 CHECK 约束）、`threshold`、`dedupe_minutes`、`enabled`、可选 `webhook_endpoint_id`（null = 仅记录事件；**V74 起外键是复合的** `(tenant_id, webhook_endpoint_id) → webhook_endpoints (tenant_id, id)`、`ON DELETE SET NULL (webhook_endpoint_id)`——引用必须指向**规则自己租户**的端点，跨租户引用在数据库层不可写；删除端点只清 `webhook_endpoint_id` 而不动 `tenant_id`，列清单形式要求 PostgreSQL 15+。V74 迁移会把存量跨租户引用一次性清空并 `version + 1`，被清空引用的规则不再投递 Webhook（事件仍照常记录），需人工重新指向本租户端点）、`scope_json jsonb`（`BUDGET_THRESHOLD` 必填：`{"projectId": "…"}`；`QUOTA_THRESHOLD` 必填：`{"quotaRuleId": "…"}`）。事件：`dedupe_key`（type + 小时桶；`BUDGET_THRESHOLD` 为 type + 月份；`QUOTA_THRESHOLD` 为 type + 配额重置窗口起点 epoch；审批通知型为 type + approvalId）唯一约束 `(tenant_id, rule_id, dedupe_key)` 实现去重；`value` 为指标实际值（审批通知型恒为 1 = 一次发生）；`payload_json` 存事件明细（审批通知型 = 通知字段原样，重试投递时随信封带出），不含正文/密钥。投递表：事件 × 端点 × 尝试次数唯一；`next_retry_at` 指数退避（2^attempt × 1min，最多 3 次）、`http_status`、脱敏错误。**重试外发前必须在数据库上抢占**（#1383，多副本前提）：发送前一句条件更新 `UPDATE webhook_delivery_attempts SET next_retry_at = now() + 租约 WHERE … AND attempt = 待发次数 AND next_retry_at <= now()`，租约 = 端点 `timeout_ms` + 60s（`CLAIM_SLACK_MS`），`UPDATE` 只可能影响一行——两个副本的扫描同时命中同一行时只有抢占成功的那一个真的发 POST，另一个跳过。因此 `next_retry_at` 在投递期间兼作**租约到期时刻**，而投递表本身同时是「已投递次数」的账本；抢占者中途崩溃时租约自然过期，下一个扫描按**同一个 attempt 号**重发（崩溃只代价一个退避周期的延迟，不消耗 `MAX_ATTEMPTS` 的次数）。`recordAttempt` 的 upsert 会覆盖同一 `(event_id, endpoint_id, attempt)` 行，故重复外发在投递表上看不出行数增长，只能靠接收端计数或 `next_retry_at` 的推后指纹识别。评估调度：`@Scheduled` 固定延迟（`miqrokey.alerts.evaluation-interval-ms` 默认 5min）；指标基于滚动 1 小时、**按规则自身 `tenant_id` 过滤**（V60 起四条周期指标 SQL 显式带 `tenant_id = :tenantId`：事实表都带租户列，规则不得读别的租户的行；单租户部署每个事实行都属同一 seed 租户，语义与旧「单租户全局聚合」一致）；`BUDGET_THRESHOLD` 由 `AlertEvaluator` 复用 `AdminBudgetService` 水位（当月分摊成本/预算 × 100），`QUOTA_THRESHOLD` 复用 `AdminQuotaRuleService` 水位（当前窗口用量/限额 × 100；规则 DISABLED 不评估）。**投递/重试/退避原语抽取为 `AlertEventDispatcher`**（G4.5 机制），周期型由 `AlertEvaluator` 经它投递；`MODEL_APPROVAL_*` 事件型不评估、由审批工作流（`ModelApprovalService` 迁移瞬间）直接触发。
+
+**V71（#706，ADR-0026 选项 D）新增两个速率信号类型**，由控制面 `AlertEvaluator` 评估：
+
+- `UPSTREAM_RATE_LIMITED`——滚动 1 小时内**上游返回的 429 计数**
+- `KEY_REQUEST_RATE`——滚动 1 小时内**单 Key 请求峰值**（按 `virtual_key_id` 分组取最高 `COUNT(*)`，fired event 的 `payload_json` 带该 Key 的 id 与 name）
+
+> **为什么另开类型而不是复用 `UPSTREAM_ERROR_RATE`**：后者把 429 与 5xx 混在一起，但**"上游在限流我们"和"上游坏了"是两类事故，应对方式不同**。
+> **为什么网关侧零改动**：这两个信号**不新增任何请求路径上的工作**，也不依赖外部状态。
+> ⚠️ **网关自己因配额拒绝的 429 不计入 `UPSTREAM_RATE_LIMITED`**——那些请求根本没到上游、不带上游状态码。别把它和 `QUOTA_THRESHOLD` 的 429 混为一谈。
 
 ### `gateway_queue_signal` (V60，F07/#245)
 
@@ -350,6 +399,20 @@ URL（创建时经控制面 SSRF 门控：默认仅公网 https，`MIQROKEY_CONT
 ### `export_tasks` (V11，G4.4 实现)
 
 异步导出任务：`format`（`CSV|JSONL`）、窗口、`status`（`PENDING|RUNNING|SUCCEEDED|FAILED|EXPIRED`）、`sha256`（gzip 产物哈希）、`row_count`/`byte_count`、`file_bytes`（gzip 产物本体，24h 过期）、`error_message`（脱敏）。产物只含计数与元数据列（时间/模型/缓存层级/token/延迟/状态码/request ID/Key/项目/产品/凭证 ID），绝不包含 prompt、代码、Secret 或 Virtual Key 明文。
+
+**两级"这个导出能不能拿去对账"声明——刻意分成两个正交的轴**（都是任务级、都可空，值含义同 `NULL` = 历史任务与空窗口，"没什么可声明的"）：
+
+| 列 | 迁移 | 取值 | 答的问题 |
+|---|---|---|---|
+| `reconcile_level varchar(32)` | **V41**（#330，F23 首片） | `PROVIDER_ID_BACKED` / `PARTIAL` / `LOCAL_ONLY` | **能不能按 provider request ID 对上**——每行都带 ID=全带、都没有=全不带、混合=部分 |
+| `adjustment_level varchar(32)` | **V67**（#716，F23R 第二片） | `NONE` / `PRESENT` | **手里的数字要不要读 net 列**——至少一行带修正=PRESENT |
+
+两列都带**未命名 inline CHECK**、都可空、都无索引、都无默认值。
+
+> **为什么不用一个枚举**：那样需要为每种组合造一个值（`PROVIDER_ID_BACKED_AND_ADJUSTED`、…），**读起来两边都不像**。
+> **为什么记在任务级而不是行级**：这正是消费方**在读文件之前**（或只看任务列表时）想知道的——"这批数字到底要不要看 net 列"。行级的 `adjusted` 标记仍在每行上（见 `UsageRecordPage`）。
+> `reconcile_level` 的文件头另注明：净额/含调整的等级**随 F20 调整机制一起到位**，本列只承载基础词表（后来的 V67 正是那条路）。
+> `PRESENT` 时：消费方读 per-row `adjusted` 与 `net*` 列，**observed 列仍是网关原始计数**；`NONE` 时 net 列只是重复 observed。
 
 ### `usage_deletions` (V11，G4.4 实现)
 
@@ -513,9 +576,34 @@ URL、加密签名 Secret、启停、超时、version。URL 必须通过 SSRF �
 
 ### `admin_audit_events`
 
-追加写入：actor、action、target type/id、change summary JSON、gateway/admin request ID、时间、前一事件 hash、当前 hash、chain_position (数据库单调序列)。禁止删除和外键 cascade。
+追加写入：actor、action、target type/id、change summary JSON、gateway/admin request ID、时间、前一事件 hash、当前 hash、chain_position (数据库单调序列，**V3**)。禁止删除和外键 cascade。
 
 Head selection 使用 `ORDER BY chain_position DESC` —— 数据库单调 identity/sequence 在 INSERT 时分配，反映真实因果提交顺序。JVM 时钟和随机 UUID 不用于 head 排序。
+
+**V3 这一步做了什么**（`V3__audit_chain_position.sql`，append-only）：建序列 `admin_audit_events_chain_seq` → 加 `chain_position bigint`（先可空）→ PL/pgSQL 按 `(created_at, id)` 给**存量行**回填 `nextval` → `SET DEFAULT nextval(...)`、`SET NOT NULL` → 加 `UNIQUE (chain_position)` → `setval` 越过最大值（空表用 `setval(...,1,false)`，使首个 `nextval()` 返回 1）→ `ALTER SEQUENCE ... OWNED BY admin_audit_events.chain_position`。
+
+> **为什么需要它**（文件头原文）：*"A later writer with an older Instant/UUID can be inserted after the current head, causing the next writer to select the wrong predecessor row and fork the audit hash chain."* —— 即**时间戳和 UUID 都不构成全序**，用它们选 head 会让哈希链分叉。改成数据库序列后，*"the highest position IS the most recent committed event regardless of JVM clock skew"*。
+> 该列在 INSERT 时赋值，写入方**持有 `pg_advisory_xact_lock`**；不在网关请求路径上。
+
+### `retention_log` (**V51**，ADR-0014 §8 增补，2026-09-15)
+
+**内容留痕台账**——ADR-0014 显式放宽「不保存正文」红线后新增的密文通道，**默认关闭**。控制面侧的账本，由**可选的**内置 Kafka 消费者（`miqrokey.retention.consumer.*`）填充。
+
+列（14 个，**全部 NOT NULL**）：
+
+- `event_id uuid PRIMARY KEY` —— **幂等键**：at-least-once 流的重放是 no-op
+- `tenant_id uuid REFERENCES tenants (id) ON DELETE RESTRICT`、`user_id uuid`、`virtual_key_id uuid`
+- `wire_protocol varchar(32)`、`direction varchar(16) DEFAULT 'INPUT' CHECK (IN ('INPUT','OUTPUT'))`
+- `gateway_request_id varchar(64)`、`occurred_at timestamptz`、`key_version varchar(16)`
+- `ciphertext bytea`、`nonce bytea`、`text_char_count integer DEFAULT 0`、`truncated boolean DEFAULT FALSE`
+- `created_at timestamptz DEFAULT now()`
+
+索引（三个，**均非唯一、无谓词、未用 CONCURRENTLY**）：`(tenant_id, occurred_at DESC)`、`(tenant_id, user_id, occurred_at DESC)`、`(gateway_request_id)`。
+
+> **为什么存字节而不是文本**（文件头原文）：*"one row per retention envelope, in the exact encrypted form shipped by the gateway — ciphertext/nonce stay `bytea`, plaintext exists only inside the control plane's decryption path for the authorized (admin) reader."*
+> 即：**网关侧从不持有明文**，密文原样落库；只有控制面在授权（管理员）读取路径上解密。
+> ⚠️ **写入方不是网关请求路径**，而是那个可选的 Kafka 消费者——所以这张表**不参与推理热路径**。
+> ⚠️ 这张表在 **V51 建表前完全不在这份文档里**；`retention_log` 的读取/导出/公式注入防护见 `AdminRetentionLogService`（导出带 BOM + `=+-@\t\r` 前缀防护，#955）。
 
 ## 8. 调度与配置
 
