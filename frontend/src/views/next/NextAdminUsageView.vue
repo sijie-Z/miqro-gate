@@ -703,7 +703,12 @@ async function load() {
   const range = rangeParams();
   try {
     const [summaryResult, seriesResult, recordsResult] = await Promise.all([
-      api.adminUsageSummary({ groupBy: breakdownGroupBy.value, ...summaryFiltersNow, ...range }),
+      api.adminUsageSummary({
+        groupBy: breakdownGroupBy.value,
+        ...summaryFiltersNow,
+        ...range,
+        tzOffsetMinutes: localTzOffsetMinutes(),
+      }),
       api.adminUsageSummary({
         groupBy: seriesDim.value,
         ...summaryFiltersNow,
@@ -793,6 +798,7 @@ async function loadBreakdown() {
       groupBy: breakdownGroupBy.value,
       ...summaryFilters(),
       ...rangeParams(),
+      tzOffsetMinutes: localTzOffsetMinutes(),
     });
     if (seq !== breakdownRequestSeq) {
       return; // a newer request won — this response is stale
