@@ -25,6 +25,14 @@ public final class CanonicalBillParser {
     private static final String BAD_TYPE = "FIELD_TYPE";
     private static final String BAD_TIME = "FIELD_TIME";
     private static final String EMPTY = "EMPTY_LINE";
+    private static final String TOO_LONG = "FIELD_TOO_LONG";
+
+    /**
+     * Width of {@code reconciliation_rows.provider_row_ref}
+     * ({@code V42__reconciliation_reports.sql:47}). PostgreSQL counts characters —
+     * code points — so the bound below is applied in code points, not UTF-16 units.
+     */
+    static final int ROW_REF_MAX_CODE_POINTS = 256;
 
     private final ObjectMapper objectMapper;
 
@@ -70,7 +78,7 @@ public final class CanonicalBillParser {
         String amount = decimal(node, "amount", lineNumber, errors);
         String currency = text(node, "currency");
         String status = text(node, "status");
-        String rowRef = text(node, "provider_row_ref");
+        String rowRef = rowRef(node, lineNumber, errors);
 
         if (absent(node, "amount")) {
             errors.add(new LineError(lineNumber, REQUIRED, "amount 必填"));
@@ -92,6 +100,44 @@ public final class CanonicalBillParser {
     private static String text(JsonNode node, String field) {
         JsonNode value = node.get(field);
         return value == null || value.isNull() ? null : value.asText();
+    }
+
+    /**
+     * Read {@code provider_row_ref}, bounded to the width of its column (#1439).
+     *
+     * <p>
+     * docs/bill-reconciliation-contract.md declares the field as a plain string and
+     * this parser checked no length, but the column is {@code varchar(256)}. A
+     * single over-long value made the batch INSERT raise "value too long for type
+     * character varying(256)", which the caller's catch-all turned into
+     * {@code FAILED} for the whole report — every line in the file was lost,
+     * {@code line_error_count} stayed null, and the error named no line number.
+     * That is exactly the whole-file failure this parser exists to prevent, so the
+     * bound is applied here and reported as an ordinary line error.
+     * </p>
+     *
+     * <p>
+     * The row is kept rather than dropped: it still carries the tokens that drive
+     * the four verdicts and the amount gap. This field is decoration — the engine
+     * only echoes it into its row result for traceability and matches on
+     * {@code provider_request_id} — so bounding it cannot change a verdict, only
+     * the string the report shows.
+     * </p>
+     */
+    private static String rowRef(JsonNode node, int lineNumber, List<LineError> errors) {
+        String value = text(node, "provider_row_ref");
+        int supplied = value == null ? 0 : value.codePointCount(0, value.length());
+        if (value == null || supplied <= ROW_REF_MAX_CODE_POINTS) {
+            return value;
+        }
+        // offsetByCodePoints cannot land inside a surrogate pair, so the result is
+        // always well-formed UTF-16.
+        String bounded = value.substring(0, value.offsetByCodePoints(0, ROW_REF_MAX_CODE_POINTS));
+        // Lengths only: the value is caller-supplied and must not reach the report
+        // unescaped.
+        errors.add(new LineError(lineNumber, TOO_LONG, "provider_row_ref 超过 " + ROW_REF_MAX_CODE_POINTS + " 字符，已截断到列宽（"
+                + supplied + " 码点 -> " + ROW_REF_MAX_CODE_POINTS + "）"));
+        return bounded;
     }
 
     private static boolean absent(JsonNode node, String field) {
