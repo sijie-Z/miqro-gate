@@ -613,4 +613,224 @@ class CacheKeyFactoryTest {
                     .isNotEqualTo(factory.compute(ctx, "gpt-5.2", secondConversation, CHAT_FAMILY));
         }
     }
+
+    /**
+     * Multimodal content (#PH22): the semantic scope flattens array content parts
+     * by keeping only the {@code text} ones, so every non-text part — an image, an
+     * uploaded document, an audio clip — is invisible to the key. Two requests that
+     * ask the same question about two different images therefore share one cache
+     * entry and replay each other's answer.
+     *
+     * <p>
+     * The bail-out applies to <em>any</em> message part that is not text, at any
+     * position: the last user turn, the top-level {@code system} / {@code
+     * instructions} prompt, and the assistant history (which is where Anthropic
+     * echoes back {@code thinking} / {@code redacted_thinking} blocks). The tests
+     * below pin each of those to the full-body fallback so the widened trigger is
+     * intended behaviour rather than an accident of where the check sits.
+     */
+    @Nested
+    @DisplayName("Multimodal content parts")
+    class MultimodalContent {
+
+        private static final String ANTHROPIC = "{\"model\":\"claude-3-7-sonnet\",\"messages\":[{\"role\":\"user\","
+                + "\"content\":[{\"type\":\"image\",\"source\":{\"type\":\"base64\","
+                + "\"media_type\":\"image/png\",\"data\":\"%s\"}},{\"type\":\"text\","
+                + "\"text\":\"describe this image\"}]}]}";
+
+        private static final String OPENAI = "{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\","
+                + "\"content\":[{\"type\":\"text\",\"text\":\"describe this image\"},{\"type\":\"image_url\","
+                + "\"image_url\":{\"url\":\"%s\"}}]}]}";
+
+        /** Anthropic top-level {@code system} array carrying the image. */
+        private static final String ANTHROPIC_SYSTEM = "{\"model\":\"claude-3-7-sonnet\",\"system\":["
+                + "{\"type\":\"text\",\"text\":\"describe this image\"},{\"type\":\"image\",\"source\":"
+                + "{\"type\":\"base64\",\"media_type\":\"image/png\",\"data\":\"%s\"}}],"
+                + "\"messages\":[{\"role\":\"user\",\"content\":\"what is this\"}]}";
+
+        /** OpenAI Responses {@code instructions} array carrying the image. */
+        private static final String RESPONSES_INSTRUCTIONS = "{\"model\":\"gpt-5.2\",\"instructions\":["
+                + "{\"type\":\"text\",\"text\":\"describe this image\"},{\"type\":\"input_image\","
+                + "\"image_url\":\"%s\"}],\"input\":[\"what is this\"]}";
+
+        /** Non-text part in the assistant history, not in the last user turn. */
+        private static final String ASSISTANT_HISTORY = "{\"model\":\"claude-3-7-sonnet\",\"messages\":["
+                + "{\"role\":\"user\",\"content\":\"what is this\"},"
+                + "{\"role\":\"assistant\",\"content\":[{\"type\":\"image\",\"source\":{\"type\":\"base64\","
+                + "\"media_type\":\"image/png\",\"data\":\"%s\"}}]},"
+                + "{\"role\":\"user\",\"content\":\"and this\"}]}";
+
+        @Test
+        @DisplayName("two different images must not share one key (Anthropic messages)")
+        void anthropicImageSplits() {
+            byte[] imageA = json(ANTHROPIC.formatted("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"));
+            byte[] imageB = json(ANTHROPIC.formatted("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAC"));
+            assertThat(factory.compute(ctx, "claude-3-7-sonnet", imageA))
+                    .isNotEqualTo(factory.compute(ctx, "claude-3-7-sonnet", imageB));
+        }
+
+        @Test
+        @DisplayName("two different image URLs must not share one key (OpenAI chat)")
+        void openAiImageSplits() {
+            byte[] imageA = json(OPENAI.formatted("https://example.test/cat.png"));
+            byte[] imageB = json(OPENAI.formatted("https://example.test/dog.png"));
+            assertThat(factory.compute(ctx, "gpt-4o-mini", imageA))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", imageB));
+        }
+
+        @Test
+        @DisplayName("image in the Anthropic top-level system array must not share one key")
+        void anthropicTopLevelSystemImageSplits() {
+            byte[] imageA = json(ANTHROPIC_SYSTEM.formatted("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"));
+            byte[] imageB = json(ANTHROPIC_SYSTEM.formatted("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAC"));
+            assertThat(factory.compute(ctx, "claude-3-7-sonnet", imageA))
+                    .isNotEqualTo(factory.compute(ctx, "claude-3-7-sonnet", imageB));
+        }
+
+        @Test
+        @DisplayName("image in the Responses instructions array must not share one key")
+        void responsesInstructionsImageSplits() {
+            byte[] imageA = json(RESPONSES_INSTRUCTIONS.formatted("https://example.test/cat.png"));
+            byte[] imageB = json(RESPONSES_INSTRUCTIONS.formatted("https://example.test/dog.png"));
+            assertThat(factory.compute(ctx, "gpt-5.2", imageA)).isNotEqualTo(factory.compute(ctx, "gpt-5.2", imageB));
+        }
+
+        @Test
+        @DisplayName("non-text part in the assistant history forces the full-body key")
+        void assistantHistoryNonTextFallsBack() {
+            byte[] imageA = json(ASSISTANT_HISTORY.formatted("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"));
+            byte[] imageB = json(ASSISTANT_HISTORY.formatted("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAC"));
+            // The last user turn ("and this") is identical in both, so the scope
+            // path would collapse them; the history image must keep them apart.
+            assertThat(factory.compute(ctx, "claude-3-7-sonnet", imageA))
+                    .isNotEqualTo(factory.compute(ctx, "claude-3-7-sonnet", imageB));
+        }
+    }
+
+    /**
+     * Hot-path cost: key derivation runs on the gateway request path, so the
+     * buffered body must be parsed once per {@code compute} — not once per key
+     * dimension.
+     */
+    @Nested
+    @DisplayName("Hot-path parse cost")
+    class HotPathParseCost {
+
+        @Test
+        @DisplayName("derives the key with a single parse of the request body")
+        void singleBodyParse() {
+            // Chat shape: scope is extractable, so the fallback normalize() is
+            // not reached — this is the 3-parse case.
+            byte[] chat = json("{\"model\":\"gpt-4o-mini\",\"temperature\":0.9,\"max_tokens\":256,"
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            // Non-chat shape: no extractable user message, so the key falls back
+            // to the normalized body — the worst case, one parse more than chat.
+            byte[] fallback = json("{\"model\":\"text-embedding-3-small\",\"input\":\"hello world\"}");
+
+            assertThat(parsesFor(chat)).isEqualTo(1);
+            assertThat(parsesFor(fallback)).isEqualTo(1);
+        }
+
+        /** Full-body parses performed by one {@code compute} of the given body. */
+        private int parsesFor(byte[] body) {
+            CountingObjectMapper counting = new CountingObjectMapper();
+            new CacheKeyFactory(counting).compute(ctx, "gpt-4o-mini", body);
+            return counting.bodyParses();
+        }
+    }
+
+    /** Counts full-body JSON parses; the helpers must share one parsed tree. */
+    private static final class CountingObjectMapper extends ObjectMapper {
+
+        private static final long serialVersionUID = 1L;
+
+        private final java.util.concurrent.atomic.AtomicInteger bodyParses = new java.util.concurrent.atomic.AtomicInteger();
+
+        @Override
+        public tools.jackson.databind.JsonNode readTree(byte[] content) {
+            if (content != null && content.length > 0) {
+                bodyParses.incrementAndGet();
+            }
+            return super.readTree(content);
+        }
+
+        int bodyParses() {
+            return bodyParses.get();
+        }
+    }
+
+    /**
+     * Key-identity hardening (2026-09-18, external review of the semantic-cache
+     * evaluation): the chat path keeps only the conversation scope, so
+     * output-shaping generation parameters and the Anthropic/Responses top-level
+     * system prompt must be explicit key dimensions — otherwise two requests with
+     * different sampling or system prompts would replay each other's responses.
+     */
+    @Nested
+    @DisplayName("Key identity hardening")
+    class IdentityHardening {
+
+        private static final String BASE = "{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\","
+                + "\"content\":\"hi\"}]}";
+
+        @Test
+        @DisplayName("generation parameters are a key dimension (temperature / token budget)")
+        void generationParametersSplit() {
+            byte[] warm = json("{\"model\":\"gpt-4o-mini\",\"temperature\":0.9,\"max_tokens\":256,"
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            byte[] cold = json("{\"model\":\"gpt-4o-mini\",\"temperature\":0.1,\"max_tokens\":256,"
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            byte[] budget = json("{\"model\":\"gpt-4o-mini\",\"temperature\":0.9,\"max_tokens\":1024,"
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+
+            assertThat(factory.compute(ctx, "gpt-4o-mini", warm))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", cold));
+            assertThat(factory.compute(ctx, "gpt-4o-mini", warm))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", budget));
+            // Identical parameters (any field order) stay a stable hit.
+            byte[] warmAgain = json("{\"max_tokens\":256,\"temperature\":0.9,\"model\":\"gpt-4o-mini\","
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            assertThat(factory.compute(ctx, "gpt-4o-mini", warm))
+                    .isEqualTo(factory.compute(ctx, "gpt-4o-mini", warmAgain));
+            // Absent parameters keep the pre-existing key shape (both absent = equal).
+            assertThat(factory.compute(ctx, "gpt-4o-mini", json(BASE)))
+                    .isEqualTo(factory.compute(ctx, "gpt-4o-mini", json(BASE)));
+        }
+
+        @Test
+        @DisplayName("thinking budget is a key dimension (Anthropic)")
+        void thinkingBudgetSplits() {
+            byte[] small = json("{\"model\":\"claude-3-7-sonnet\",\"thinking\":{\"type\":\"enabled\","
+                    + "\"budget_tokens\":1024},\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            byte[] large = json("{\"model\":\"claude-3-7-sonnet\",\"thinking\":{\"type\":\"enabled\","
+                    + "\"budget_tokens\":16384},\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            assertThat(factory.compute(ctx, "claude-3-7-sonnet", small))
+                    .isNotEqualTo(factory.compute(ctx, "claude-3-7-sonnet", large));
+        }
+
+        @Test
+        @DisplayName("Anthropic top-level system prompt is part of the scope")
+        void anthropicTopLevelSystemMatters() {
+            byte[] a = json("{\"model\":\"claude-3-7-sonnet\",\"system\":\"You are terse.\","
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            byte[] b = json("{\"model\":\"claude-3-7-sonnet\",\"system\":\"You are verbose.\","
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            byte[] sameAsA = json("{\"model\":\"claude-3-7-sonnet\",\"system\":[{\"type\":\"text\","
+                    + "\"text\":\"You are terse.\"}],\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+
+            assertThat(factory.compute(ctx, "claude-3-7-sonnet", a))
+                    .isNotEqualTo(factory.compute(ctx, "claude-3-7-sonnet", b));
+            // Array-form system parts flatten identically to the plain string.
+            assertThat(factory.compute(ctx, "claude-3-7-sonnet", a))
+                    .isEqualTo(factory.compute(ctx, "claude-3-7-sonnet", sameAsA));
+        }
+
+        @Test
+        @DisplayName("OpenAI Responses instructions field is part of the scope")
+        void responsesInstructionsMatter() {
+            byte[] a = json("{\"model\":\"gpt-5.2\",\"instructions\":\"answer briefly\",\"input\":[\"hi\"]}");
+            byte[] b = json("{\"model\":\"gpt-5.2\",\"instructions\":\"answer verbosely\",\"input\":[\"hi\"]}");
+            assertThat(factory.compute(ctx, "gpt-5.2", a)).isNotEqualTo(factory.compute(ctx, "gpt-5.2", b));
+        }
+    }
 }

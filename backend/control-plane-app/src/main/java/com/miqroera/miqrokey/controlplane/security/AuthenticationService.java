@@ -480,6 +480,19 @@ public class AuthenticationService {
         LOG.info("User {} revoked other sessions", LogValues.forLog(currentUser.username()));
     }
 
+    /**
+     * Self-service "sign out of other sessions": revoke every session of the
+     * current user except the calling one (the same revocation the change-password
+     * flow performs internally). The current session stays valid, so the caller
+     * keeps working without re-authenticating.
+     */
+    public void logoutOthers(User currentUser, UUID currentSessionId, String requestId) {
+        sessionService.revokeOtherSessions(currentUser.id(), currentSessionId);
+        auditService.record(currentUser.tenantId(), currentUser.id(), "LOGOUT_OTHERS", "USER", currentUser.id(),
+                buildSummary(currentUser.username()), requestId);
+        LOG.info("User {} revoked other sessions", currentUser.username());
+    }
+
     // -----------------------------------------------------------------------
     // Internal helpers
     // -----------------------------------------------------------------------
