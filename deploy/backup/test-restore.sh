@@ -47,7 +47,11 @@ cat > "$WORK/bin/pg_restore" <<'WRAP'
 #!/usr/bin/env bash
 exec docker exec -i -e PGUSER="$PGUSER" -e PGPASSWORD="$PGPASSWORD"   -e PGHOST="$PGHOST" -e PGPORT="$PGPORT" -e PGDATABASE="$PGDATABASE"   miqrokey-backup-dst pg_restore "$@"
 WRAP
-chmod +x "$WORK/bin/pg_dump" "$WORK/bin/pg_restore"
+cat > "$WORK/bin/psql" <<'WRAP'
+#!/usr/bin/env bash
+exec docker exec -i -e PGUSER="$PGUSER" -e PGPASSWORD="$PGPASSWORD"   -e PGHOST="$PGHOST" -e PGPORT="$PGPORT" -e PGDATABASE="$PGDATABASE"   miqrokey-backup-dst psql "$@"
+WRAP
+chmod +x "$WORK/bin/pg_dump" "$WORK/bin/pg_restore" "$WORK/bin/psql"
 export PATH="$WORK/bin:$PATH"
 
 echo "== running the real backup script =="
@@ -59,6 +63,23 @@ MIQROKEY_DB_USERNAME=postgres MIQROKEY_DB_PASSWORD="$PASS" \
 
 BACKUP_FILE=$(ls "$WORK"/out/miqrokey-*.sql.gz.enc | head -1)
 echo "== verifying the archive =="
+MIQROKEY_BACKUP_KEY_FILE="$KEY_FILE" "$(dirname "$0")/miqrokey-verify.sh" "$BACKUP_FILE"
+
+# Off-host leg (#1381): the archive is synced to another machine/directory by
+# design and restored from there. Move it out of the directory that produced
+# it — then verify and restore from the new location only. Pinning the
+# producing path inside the manifest used to make this fail as
+# "checksum mismatch" on a perfectly good backup.
+echo "== syncing the archive off to another directory =="
+mkdir -p "$WORK/offsite"
+cp "$BACKUP_FILE" "$BACKUP_FILE.sha256" "$WORK/offsite/"
+rm -f "$BACKUP_FILE" "$BACKUP_FILE.sha256"
+rmdir "$WORK/out"
+BACKUP_FILE="$WORK/offsite/$(basename "$BACKUP_FILE")"
+[ -f "$BACKUP_FILE" ] || { echo "FAIL: relocated archive missing" >&2; exit 1; }
+[ ! -e "$WORK/out" ] || { echo "FAIL: producing directory still present" >&2; exit 1; }
+
+echo "== verifying the relocated archive =="
 MIQROKEY_BACKUP_KEY_FILE="$KEY_FILE" "$(dirname "$0")/miqrokey-verify.sh" "$BACKUP_FILE"
 
 echo "== restoring into the target =="
@@ -73,3 +94,36 @@ DST_COUNT=$(docker exec miqrokey-backup-dst psql -U postgres -d miqrokey -tAc \
 echo "== asserting consistency =="
 [ "$SRC_COUNT" = "$DST_COUNT" ] || { echo "FAIL: source=$SRC_COUNT target=$DST_COUNT" >&2; exit 1; }
 echo "restore drill PASS: $SRC_COUNT rows intact"
+
+# Empty-target restores are the easy case. The documented rollback
+# (operations-runbook 9b.5) restores over the *live* database, which is never
+# empty — exercise that path too (#1423).
+DST_URL="jdbc:postgresql://$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' miqrokey-backup-dst):5432/miqrokey"
+
+echo "== rollback leg: lose the data, keep the schema =="
+docker exec miqrokey-backup-dst psql -U postgres -d miqrokey -c "DELETE FROM accounts" >/dev/null
+LOST_COUNT=$(docker exec miqrokey-backup-dst psql -U postgres -d miqrokey -tAc "SELECT count(*) FROM accounts")
+[ "$LOST_COUNT" = "0" ] || { echo "FAIL: could not empty the target, $LOST_COUNT rows left" >&2; exit 1; }
+
+echo "== rollback leg: plain restore must refuse, not dump pg_restore noise =="
+set +e
+MIQROKEY_BACKUP_KEY_FILE="$KEY_FILE" \
+MIQROKEY_DB_URL="$DST_URL" \
+MIQROKEY_DB_USERNAME=postgres MIQROKEY_DB_PASSWORD="$PASS" \
+  "$(dirname "$0")/miqrokey-restore.sh" "$BACKUP_FILE" > "$WORK/refused.out" 2>&1
+REFUSED_RC=$?
+set -e
+[ "$REFUSED_RC" = "1" ] || { echo "FAIL: restore onto a non-empty database exited $REFUSED_RC, expected 1" >&2; cat "$WORK/refused.out" >&2; exit 1; }
+grep -q "already holds" "$WORK/refused.out" || { echo "FAIL: refusal message is not actionable:" >&2; cat "$WORK/refused.out" >&2; exit 1; }
+STILL_LOST=$(docker exec miqrokey-backup-dst psql -U postgres -d miqrokey -tAc "SELECT count(*) FROM accounts")
+[ "$STILL_LOST" = "0" ] || { echo "FAIL: refused restore changed the target ($STILL_LOST rows)" >&2; exit 1; }
+
+echo "== rollback leg: --replace must actually bring the data back =="
+MIQROKEY_BACKUP_KEY_FILE="$KEY_FILE" \
+MIQROKEY_RESTORE_CONFIRM=yes \
+MIQROKEY_DB_URL="$DST_URL" \
+MIQROKEY_DB_USERNAME=postgres MIQROKEY_DB_PASSWORD="$PASS" \
+  "$(dirname "$0")/miqrokey-restore.sh" --replace "$BACKUP_FILE" miqrokey
+ROLLBACK_COUNT=$(docker exec miqrokey-backup-dst psql -U postgres -d miqrokey -tAc "SELECT count(*) FROM accounts")
+[ "$SRC_COUNT" = "$ROLLBACK_COUNT" ] || { echo "FAIL: rollback source=$SRC_COUNT target=$ROLLBACK_COUNT" >&2; exit 1; }
+echo "rollback drill PASS: $ROLLBACK_COUNT rows intact after a destructive rollback"

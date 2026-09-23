@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { defineComponent } from 'vue';
 import NextUsersView from '@/views/next/NextUsersView.vue';
+import { useAuthStore } from '@/stores/auth';
 import * as api from '@/api';
 import type { AdminUser } from '@/types/generated-api';
 
@@ -434,6 +435,52 @@ describe('NextUsersView', () => {
     expect((mockApi.listUsers as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(
       callsBefore,
     );
+  });
+
+  it('#PH78: renaming your own account updates the identity copy the overview renders', async () => {
+    // The signed-in admin and row u1 are the same entity in two copies: the
+    // users table (this view) and the auth store. Seed the store so the row
+    // and the identity agree before the edit.
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const auth = useAuthStore();
+    auth.user = {
+      id: 'u1',
+      username: 'alice',
+      displayName: 'Alice',
+      role: 'SYSTEM_ADMIN',
+      status: 'ACTIVE',
+      mustChangePassword: false,
+    };
+    mockApi.updateUser.mockResolvedValue(user({ displayName: '改后名字' }));
+
+    const wrapper = mount(NextUsersView, {
+      global: { plugins: [pinia], stubs: { UiSelect: SelectStub } },
+    });
+    await flushPromises();
+    // The rename lands server-side: the list loaded after the save carries it.
+    mockApi.listUsers.mockResolvedValueOnce([user({ displayName: '改后名字' })]);
+
+    await wrapper.find('[data-testid="user-actions-u1"]').trigger('click');
+    await flushPromises();
+    (document.querySelector('[data-testid="user-edit"]') as HTMLElement).click();
+    await flushPromises();
+
+    const input = document.querySelector('[data-testid="user-edit-display"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(input, '改后名字');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushPromises();
+    (document.querySelector('[data-testid="user-edit-save"]') as HTMLButtonElement).click();
+    await flushPromises();
+
+    // The row the user is looking at now carries the new name...
+    expect(mockApi.updateUser).toHaveBeenCalledWith('u1', { displayName: '改后名字' });
+    expect(wrapper.text()).toContain('改后名字');
+    // ...so the identity copy behind the overview greeting — which never
+    // refetches (`NextOverviewView.load()` at :490 touches no auth API, read at
+    // :54 and rendered at :542) — must not still hold the old one.
+    expect(auth.user?.displayName).toBe('改后名字');
   });
 
   it('#1160: a failed project read in the join picker is visible, not 「没有更多可加入」', async () => {

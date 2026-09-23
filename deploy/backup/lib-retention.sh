@@ -31,7 +31,17 @@ apply_retention() {
       weeks_kept=$((weeks_kept + 1))
       keep="$keep"$'\n'"$f"
     else
-      rm -f -- "$f" "$f.sha256"
+      # A bare `rm` here would be invisible: the caller invokes this function as
+      # `PRUNE_COUNT=$(apply_retention …) || { …; exit 2; }`, and a function
+      # called in a `||` list has errexit disabled for its whole body, so a
+      # failed rm neither aborted nor changed the return status. The script went
+      # on to print `backup ok: … (pruned N)` and exit 0 while every file was
+      # still on disk (#1405). `return` is not subject to errexit, so the
+      # documented exit code 2 now reaches the caller.
+      if ! rm -f -- "$f" "$f.sha256"; then
+        echo "retention: cannot prune $f" >&2
+        return 1
+      fi
       pruned=$((pruned + 1))
     fi
   done <<<"$rest"

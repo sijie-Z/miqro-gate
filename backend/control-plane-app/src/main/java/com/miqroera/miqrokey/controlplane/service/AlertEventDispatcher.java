@@ -33,6 +33,12 @@ public class AlertEventDispatcher {
 
     static final int MAX_ATTEMPTS = 3;
 
+    /**
+     * Slack added to an endpoint's own timeout when leasing a retry, so the lease
+     * always outlives the POST it guards. See {@link #claimRetry}.
+     */
+    private static final long CLAIM_SLACK_MS = 60_000L;
+
     private final NamedParameterJdbcTemplate jdbc;
     private final WebhookEndpointService endpointService;
     private final ObjectMapper objectMapper;
@@ -227,6 +233,13 @@ public class AlertEventDispatcher {
      * A suppressed retry keeps its backoff deadline, so re-enabling the switch
      * makes it eligible again on the next sweep.
      * </p>
+     *
+     * <p>
+     * Deliveries are claimed before they are sent ({@link #claimRetry}): the SELECT
+     * below is a plain read, so every control-plane instance running this sweep is
+     * handed the same due rows and each would otherwise call the receiver for the
+     * same attempt.
+     * </p>
      */
     public void retryDue() {
         List<Map<String, Object>> due = jdbc.query("""
@@ -248,7 +261,8 @@ public class AlertEventDispatcher {
         for (Map<String, Object> row : due) {
             UUID eventId = (UUID) row.get("eventId");
             UUID endpointId = (UUID) row.get("endpointId");
-            int attempt = (int) row.get("attempt") + 1;
+            int dueAttempt = (int) row.get("attempt");
+            int attempt = dueAttempt + 1;
             UUID ruleId = (UUID) row.get("ruleId");
             UUID tenantId = (UUID) row.get("tenantId");
             try {
@@ -277,11 +291,55 @@ public class AlertEventDispatcher {
                 envelope.put("occurredAt", event.occurredAt().toString());
                 envelope.putAll(details);
                 byte[] payload = objectMapper.writeValueAsBytes(envelope);
+                // Claim immediately before sending, never earlier: a claimed row whose
+                // delivery never starts would stall until the lease expires.
+                if (!claimRetry(eventId, endpointId, dueAttempt, (endpoint.timeoutMs() + CLAIM_SLACK_MS) / 1000.0)) {
+                    LOG.debug("Alert {} attempt {} is already claimed by another instance", eventId, attempt);
+                    continue;
+                }
                 attempt(eventId, rule, endpoint, payload, attempt);
             } catch (Exception e) {
                 LOG.warn("Alert retry for event {} failed", eventId);
             }
         }
+    }
+
+    /**
+     * Claims the right to send the retry that follows {@code dueAttempt}, by
+     * pushing that attempt row's backoff deadline out by a lease. The deadline is
+     * re-checked inside the {@code WHERE} clause, so PostgreSQL — not the two
+     * sweeps' SELECTs — decides the winner: exactly one caller sees one row
+     * updated, every other caller sees none and must not send.
+     *
+     * <p>
+     * Both the eligibility check and the new deadline are computed on the database
+     * clock, because the instances racing here are separate JVMs whose wall clocks
+     * may disagree; the shared database is the only clock they can both be right
+     * about.
+     * </p>
+     *
+     * <p>
+     * The lease has to outlive the POST it guards, or a receiver that is slow but
+     * alive would be re-claimed and called twice — the duplication this exists to
+     * prevent. It is therefore the endpoint's own timeout plus
+     * {@link #CLAIM_SLACK_MS}, never a constant that a large {@code timeoutMs}
+     * could outlast. Should the claimer die mid-POST, the lease simply expires and
+     * the next sweep picks the row up again <em>at the same attempt number</em>: a
+     * crash costs one backoff period of delay, not one of the {@link #MAX_ATTEMPTS}
+     * attempts.
+     * </p>
+     *
+     * @return {@code true} when this caller owns the retry and must send it
+     */
+    private boolean claimRetry(UUID eventId, UUID endpointId, int dueAttempt, double leaseSeconds) {
+        int claimed = jdbc.update("""
+                UPDATE webhook_delivery_attempts
+                SET next_retry_at = now() + make_interval(secs => :leaseSeconds)
+                WHERE event_id = :eventId AND endpoint_id = :endpointId AND attempt = :dueAttempt
+                  AND next_retry_at IS NOT NULL AND next_retry_at <= now()
+                """, new MapSqlParameterSource("leaseSeconds", leaseSeconds).addValue("eventId", eventId)
+                .addValue("endpointId", endpointId).addValue("dueAttempt", dueAttempt));
+        return claimed == 1;
     }
 
     private List<AlertRuleService.AlertRule> enabledRulesOfType(UUID tenantId, String type) {

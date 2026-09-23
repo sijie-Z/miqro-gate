@@ -126,7 +126,7 @@ public class AdminMcpService {
                 checkPath != null && !checkPath.isBlank() ? checkPath : service.checkPath(), service.version(),
                 service.createdBy(), service.createdAt(), service.updatedAt(), service.backendAuthMode(),
                 service.backendSecretUpdatedAt(), service.upstreamTimeoutMs(), normalizedCheckMode);
-        McpService saved = repository.update(updated, service.version());
+        McpService saved = repository.replace(updated, service.version());
         auditService.record(tenantId, adminId, "MCP_SERVICE_HEALTH_UPDATE", "MCP_SERVICE", serviceId,
                 AuditSummaries.summary("name", AuditSummaries.sanitize(service.name())), requestId);
         return saved;

@@ -132,7 +132,7 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_UPSTREAM_CONNECT_TIMEOUT` | `PT10S` | 建立上游连接超时 |
 | `MIQROKEY_UPSTREAM_FIRST_BYTE_TIMEOUT` | `PT120S` | 等待首个响应字节（含头）超时；超时永不重试 |
 | `MIQROKEY_UPSTREAM_STREAM_IDLE_TIMEOUT` | `PT5M` | SSE 无数据超时（每个 chunk 重置）；已出首字节后超时 → `STREAM_INTERRUPTED` |
-| `MIQROKEY_UPSTREAM_RESPONSE_TIMEOUT` | `PT10M` | 整体硬截止（自第一次尝试起计时，不重置）；流式空闲另算 |
+| `MIQROKEY_UPSTREAM_RESPONSE_TIMEOUT` | `PT10M` | 整体硬截止（**自请求体到手起计时**，**含排队等待**与缓存读/凭据解密/SSRF DNS 等前置跳，不重置）：同一份预算按剩余量拆成互不重叠的若干窗口（L2 读 / 凭据解密含等车道 / 全部上游尝试），每段只在自己的源产出前计时、总时长不超预算（#1388 前该截止装在调度器 hop 之后，排队等待整个落在它之外）；流式空闲另算 |
 | `MIQROKEY_MAX_INBOUND_HEADER_BYTES` | `32KB` | 入站 Header 上限（G2.6）；Netty 在路由前拒绝超限请求 → `431` |
 | `MIQROKEY_MAX_CONTROL_BODY_BYTES` | `1MB` | 管理 API body 上限 |
 | `MIQROKEY_MAX_PROXY_BUFFER_BYTES` | `256KB` | 只限制必要解析缓冲，不聚合完整响应 |
@@ -216,6 +216,8 @@ Gateway 使用版本化只读路由快照 + 有界用量写入队列（G2.2/G2.4
 
 队列达到高水位必须告警；队列满不能静默丢弃——写失败保留在队列并重试，幂等键防止双计。
 
+**`GET /v1/context-registry` 的两个内建界限（无对应配置项，故列在此处）：** 该端点与热路径共用 `credential-decrypt` 有界调度器（4 车道，`GatewayFeatureConfig` 硬编码），其阻塞读自带语句级上限（`ContextRegistryController.STATEMENT_TIMEOUT_SECONDS`，固定 8 s，即 `REGISTRY_TIMEOUT` 10 s 减 2 s），因此车道与连接在数据库不返回时也**由网关主动中止**收回，而不是靠 Reactor 计时器停止等待（#1400：`.timeout()` 只停止等待、不会中断已开始的阻塞读）。两种失败给出**不同**的 503 信封，便于不查网关日志即区分：`context_registry_unavailable`（我们放弃等待——语句级中止或 10 s 计时到点）、`context_registry_error`（数据库故障而非超时，如连接中断/表不存在）。
+
 ## 6. Usage、成本与后台任务
 
 | 配置 | 默认 | 说明 |
@@ -225,7 +227,7 @@ Gateway 使用版本化只读路由快照 + 有界用量写入队列（G2.2/G2.4
 | `MIQROKEY_MODEL_SYNC_INTERVAL` | `PT6H` | 模型目录同步（**预留：当前版本未读取**——真实旋钮为 `miqrokey.model-catalog.reprobe.*`） |
 | `miqrokey.quota.refresh-interval-ms` | `900000` | **实际生效**：配额/余额快照定时刷新周期（`QuotaSnapshotService` @Scheduled，毫秒） |
 | `miqrokey.model-catalog.reprobe.*` | 默认关 | **实际生效**：模型目录定期重探（#350 交付；enabled/interval 等子键） |
-| `MIQROKEY_PRICE_CATALOG_PATH` | `/etc/miqrokey/prices` | 版本化价格目录 |
+| `MIQROKEY_PRICE_CATALOG_PATH` | `/etc/miqrokey/prices` | 版本化价格目录（**预留：当前版本未读取**——实现无文件型价格目录；真实价源为 §5 的 `MIQROKEY_PRICE_SYNC_URL`） |
 | `MIQROKEY_EXPORT_MAX_RANGE` | `P93D` | 单次导出最大时间窗（**预留：当前版本未读取**——实现硬编码 93 天，与 api-contract 一致；#733 更正，原文档误写 `P366D` 且不可配） |
 | `MIQROKEY_EXPORT_LINK_TTL` | `PT24H` | 下载链接到期（**预留：当前版本未读取**——实现硬编码 24 小时；#733 更正，原文档误写 `PT1H` 且不可配） |
 
@@ -284,7 +286,7 @@ F15 MCP 访问日志队列（网关数据面）：`miqrokey.gateway.mcp-log.capa
 
 请求前置预检（#553）在拒绝时计数 `miqrokey_gateway_context_limit_rejected_total`（零标签 counter，与 `miqrokey_gateway_requests_total` 同规矩）；命中日志只含 requestId、路径、实测字符数与阈值，不含 body 内容。
 
-上游错误体分类（ADR-0024 选项 B / #770，**只观测**）：网关对**已经缓冲**的上游非 2xx 响应体做**有界**（前 8KB）子串分类，命中即计数 `miqrokey_gateway_upstream_error_class_total{class=…}`——`class` 是**有界枚举**（`SIGNATURE_INVALID` / `THINKING_BLOCK_MISMATCH` / `MISSING_SIGNATURE` / `BUDGET_INVALID` / `UNCLASSIFIED`），符合上一段「标签不得高基数」的规矩；HTTP 状态码只进日志、**不作标签**（上游可能返回任意整数码）。同时打一行 `status=… class=…` 日志。**不重试、不改写请求、不改变响应**——客户端收到的仍是上游原字节；错误体**只读不存**（不进日志正文、不落库、不进事件），被缓冲上限截断的响应体一律记 `UNCLASSIFIED`（不从不完整片段下结论）。该计数是「签名类错误是否为稳定模式」这一判定的证据来源；升档（选项 C 的整流重试）需另行拍板。
+上游错误体分类（ADR-0024 选项 B / #770，**只观测**）：网关对**已经缓冲**的上游非 2xx 响应体做**有界**（前 8KB）子串分类，命中即计数 `miqrokey_gateway_upstream_error_class_total{class=…}`——`class` 是**有界枚举**（`SIGNATURE_INVALID` / `THINKING_BLOCK_MISMATCH` / `MISSING_SIGNATURE` / `BUDGET_INVALID` / `UNCLASSIFIED`），符合上一段「标签不得高基数」的规矩；HTTP 状态码只进日志、**不作标签**（上游可能返回任意整数码）。同时打一行 `status=… class=…` 日志。**不重试、不改写请求、不改变响应**——客户端收到的仍是上游原字节；错误体**只读不存**（不进日志正文、不落库、不进事件），被缓冲上限截断的响应体一律记 `UNCLASSIFIED`（不从不完整片段下结论）。该计数是「签名类错误是否为稳定模式」这一判定的证据来源。**升档已于 2026-09-22 拍板**（ADR-0024 转为 Accepted（部分））：实现首期**只允许 thinking / signature 整流**，且须满足该 ADR §0 的八条硬条件（白名单错误模式、仅首字节前、最多 1 次重试、不改 messages 正文、不记正文、计费语义明确、无副作用证明的供应商不整流）；**`budget_tokens` 留二期**。
 
 ## 9. Cache（ADR-0009 已启用）
 

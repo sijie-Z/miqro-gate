@@ -373,12 +373,20 @@ const toolRetryVisible = ref(false);
 const toolRetryLoading = ref(false);
 const toolRetrySaving = ref(false);
 const toolRetryError = ref('');
-const toolRetryForm = ref({
-  retryEnabled: false,
-  retryMax: '1',
-  retryConditions: [] as string[],
-  idempotencyConfirmed: false,
-});
+// 工具级策略只有「已为本工具加载」和「未知」两态：打开时先复位，失败时不渲染表单，
+// 否则上一个工具的策略会被当成本工具的显示、并被保存写进去（#1386）。
+const toolRetryLoaded = ref(false);
+
+function blankToolRetryForm() {
+  return {
+    retryEnabled: false,
+    retryMax: '1',
+    retryConditions: [] as string[],
+    idempotencyConfirmed: false,
+  };
+}
+
+const toolRetryForm = ref(blankToolRetryForm());
 
 // F16 edit-and-publish dialog
 const editTool = ref<McpToolView | null>(null);
@@ -699,6 +707,8 @@ async function openToolRetry(tool: McpToolView) {
   toolRetryVisible.value = true;
   toolRetryLoading.value = true;
   toolRetryError.value = '';
+  toolRetryLoaded.value = false;
+  toolRetryForm.value = blankToolRetryForm();
   const seq = ++toolRetryRequestSeq;
   try {
     const policy = await api.getMcpToolRetryPolicy(toolsService.value.id!, tool.id!);
@@ -711,6 +721,7 @@ async function openToolRetry(tool: McpToolView) {
       retryConditions: [...policy.retryConditions],
       idempotencyConfirmed: policy.idempotencyConfirmed,
     };
+    toolRetryLoaded.value = true;
   } catch (error) {
     if (seq !== toolRetryRequestSeq) {
       return;
@@ -731,7 +742,8 @@ function toggleToolRetryCondition(condition: string) {
 }
 
 async function saveToolRetry() {
-  if (!toolsService.value || !toolRetryTool.value) {
+  // 没有为本工具加载到策略时不允许保存：否则会把上一次打开的工具的策略写进本次对象。
+  if (!toolsService.value || !toolRetryTool.value || !toolRetryLoaded.value) {
     return;
   }
   toolRetrySaving.value = true;
@@ -1377,6 +1389,9 @@ async function openResilience(service: McpServiceView) {
   resilienceOpen.value = true;
   resilienceLoading.value = true;
   resilienceError.value = '';
+  // 先复位再加载：抽屉模板以 resilience 为渲染门，读到 null 就收起表单，
+  // 不会把上一个服务的策略当成本服务的显示或保存内容（#1386）。
+  resilience.value = null;
   const seq = ++resilienceRequestSeq;
   try {
     const policy = await api.getMcpServiceResilience(service.id!);
@@ -1423,7 +1438,8 @@ function toggleRetryCondition(condition: string) {
 }
 
 async function saveResilience() {
-  if (!resilienceService.value) return;
+  // 没有读到本服务的策略就不允许保存：rForm 此时可能仍是上一个服务的草稿。
+  if (!resilienceService.value || !resilience.value) return;
   resilienceSaving.value = true;
   resilienceError.value = '';
   try {
@@ -2225,7 +2241,7 @@ async function saveResilience() {
       <div v-if="toolRetryLoading" class="next-mcp__tools-loading">
         <div v-for="n in 3" :key="n" class="ui-skeleton">&nbsp;</div>
       </div>
-      <template v-else>
+      <template v-else-if="toolRetryLoaded">
         <p class="next-mcp__routes-note">
           工具级重试仅覆盖服务级策略的重试字段（熔断保持服务级）；无记录时跟随服务策略。
         </p>
@@ -2267,6 +2283,7 @@ async function saveResilience() {
         <UiButton
           variant="primary"
           :loading="toolRetrySaving"
+          :disabled="!toolRetryLoaded"
           data-testid="mcp-tool-retry-save"
           @click="saveToolRetry"
         >
@@ -2949,6 +2966,7 @@ async function saveResilience() {
         <UiButton
           variant="primary"
           :loading="resilienceSaving"
+          :disabled="!resilience"
           data-testid="mcp-resilience-save"
           @click="saveResilience"
           >保存</UiButton
