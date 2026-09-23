@@ -1,6 +1,6 @@
 # Claude Code 项目指令
 
-本仓库用于开发 MiQroEra 内部凭证治理产品 **MiQroKey Gateway**（简称 MiQroKey）。**读到本文件的 Claude Code 是后续默认实施者**：当前规格作者不会继续替你编写代码、补测试或操作 Git。你的首要任务是严格实现现有规格，不是重新设计产品。责任、授权和每次交付格式见 [`docs/claude-code-execution-contract.md`](docs/claude-code-execution-contract.md)。
+本仓库用于开发 MiQroEra 内部凭证治理产品 **MiQroGate**。**读到本文件的 Claude Code 是后续默认实施者**：当前规格作者不会继续替你编写代码、补测试或操作 Git。你的首要任务是严格实现现有规格，不是重新设计产品。责任、授权和每次交付格式见 [`docs/claude-code-execution-contract.md`](docs/claude-code-execution-contract.md)。
 
 ## 1. 开始任何 Goal 前
 
@@ -32,10 +32,10 @@
 - Java 21；Gateway 使用 Spring WebFlux/Reactor Netty；前端 Vue 3 + TypeScript；PostgreSQL。
 - Gateway 是多协议透明代理，不做 Anthropic/OpenAI/Gemini 跨协议转换。
 - CC Switch 负责客户端配置、协议转换与模型映射。
-- 一个 Virtual Key 固定绑定一个用户、项目、供应商产品、真实凭证和用途；不跨供应商，不负载均衡。
+- 一个 Virtual Key 固定绑定一个用户、供应商产品、真实凭证和用途；不跨供应商，不负载均衡。**项目维度已由 [ADR-0018](docs/decisions/0018-single-key-multi-project.md) 修订**：一个 Key 可绑多个项目（key×project 多绑定），后缀作为每次使用时的项目选择器；其余维度不变。
 - 不自动故障切换；首字节前最多安全重试一次，流开始后不重试。
 - 普通用户免审批创建自己的 Virtual Key；系统管理员管理其他全部资源。
-- 不限流、不因预算阻断，只做 Webhook 告警。
+- 默认不限流、不因预算阻断，只做 Webhook 告警。**已由 [ADR-0020](docs/decisions/0020-quota-soft-landing.md) 修订**：标记为 `REJECT` 的配额规则在超限后拒绝请求（返回 429 + `Retry-After`），其余仍不限流、不做预算熔断。
 - 不保存 prompt、代码、工具正文和模型回答。
 - 原始用量永久保留，直到管理员手动删除。
 - 响应缓存已实现但默认关闭（ADR-0009 双重 opt-in，另需网关总开关）；语义缓存不启用；不部署 Redis（ADR-0005）。

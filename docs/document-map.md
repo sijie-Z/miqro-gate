@@ -20,6 +20,7 @@
 | `CLAUDE.md` | Agent 工作协议与不可变边界 | Agent 规则变化 |
 | `claude-code-execution-contract.md` | 实施者身份、授权、输入输出和交接 | 实施责任变化 |
 | `claude-code-context-strategy.md` | 上下文预算、压缩失败和新会话续接 | Claude Code 上下文策略变化 |
+| `handover/` | **交接文档集（2026-09-21 归档，`sijie-Z`）**——按接手顺序组织的导读：总纲 · 功能与使用引导 · 后端网关服务手册 · 后端管理服务手册 · 前端手册 · HTTP API 手册 · 运维部署手册。**是时间切片存档，不是当前事实来源**；契约一律以本表其余专项文档为准 | 不再更新（归档件）；如需勘误请直接改对应专项文档 |
 | `product-requirements.md` | 用户、范围、业务规则、非目标 | 产品需求变化 |
 | `architecture.md` | 组件、依赖方向、运行时数据流 | 架构变化 |
 | `decisions/*.md` | 已接受架构决策 | 关键决策新增/替换 |
