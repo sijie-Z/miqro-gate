@@ -1,0 +1,133 @@
+name: 🐛 Bug 报告
+description: 报告一个可复现的缺陷（先跑诊断脚本，把输出粘进「诊断输出」）
+title: "[bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        按下面逐节填写，**必填项不填无法提交**。维护者要靠这些信息复现，缺一环就要多来回一轮。
+
+        安全漏洞（凭证泄露、密钥、鉴权绕过）**不要走公开 issue**，见 [SECURITY.md](https://github.com/sijie-Z/miqro-gate/blob/main/SECURITY.md) 的私密通报方式。
+        不确定这是不是缺陷，先看 [文档地图](https://github.com/sijie-Z/miqro-gate/blob/main/docs/document-map.md) 和 [部署与运维](https://github.com/sijie-Z/miqro-gate/blob/main/docs/deployment-and-operations.md)。
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug 描述
+      description: 一句话说清楚这是什么缺陷（现象 + 位置）
+      placeholder: 例：控制面回滚一次失败的部署后，网关的凭证快照停在上一个版本，删掉的 Virtual Key 仍能调通
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostic
+    attributes:
+      label: 诊断输出
+      description: |
+        在**部署机**（或开发机）的仓库根目录运行下面任一条命令，把完整输出粘到这里：
+
+        Linux / macOS / Git Bash：`bash deploy/diagnose.sh`
+        Windows PowerShell：`powershell -ExecutionPolicy Bypass -File deploy\diagnose.ps1`
+
+        脚本只读采集（不改动任何容器、不写任何文件），并已按模式脱敏；粘贴前请再人工扫一遍，确认没有你的 Secret、Virtual Key 或用户正文。
+        脚本无法运行时（如无 docker 权限），在「补充信息」里说明，并至少填写部署形态、版本与日志。
+      render: shell
+      placeholder: |
+        --- MiQroGate DIAGNOSTIC ---
+        ...
+        --- END DIAGNOSTIC ---
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 从零开始的精确操作步骤，让维护者可以照做复现（含用的命令 / 页面 / Key 形态）
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: 复现频率
+      description: 选最接近的一档；不确定就在「补充信息」里说明观察到的次数
+      options:
+        - 必现（每次都能复现）
+        - 偶现（同条件下时有时无）
+        - 只在特定条件下出现（请在复现步骤里写明条件）
+        - 只出现过一次，暂未复现
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+      description: 正确情况下应该发生什么
+      placeholder: 例：回滚后网关应在快照刷新周期内同步到当前路由，被删的 Key 立即 401
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      description: 实际发生了什么（含错误码 / 错误文案；与期望的差异说清楚）
+      placeholder: 例：Key 删除 10 分钟后仍能调通，日志里快照版本号停在回滚前
+    validations:
+      required: true
+
+  - type: input
+    id: request_id
+    attributes:
+      label: requestId（可选）
+      description: 响应头 X-Request-Id，或日志里 `[requestId=…]` 的值——有它就能把网关与控制面的日志串起来
+      placeholder: 例：9f2c1e7a-…
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志
+      description: |
+        诊断输出已含各容器最近日志的尾部；这里贴"它没覆盖到"的部分——更完整的报错堆栈、浏览器控制台输出、客户端侧记录。
+        没有额外日志就写「见诊断输出」。
+        **不要粘贴 Secret、Virtual Key、供应商 Key、用户 prompt/代码正文**；贴之前把敏感行删掉或打码。
+      render: shell
+      placeholder: |
+        （堆栈 / 控制台输出；没有就写「见诊断输出」）
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: 截图 / 录屏（可选）
+      description: 界面类问题建议附上；拖拽图片到编辑框即可
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 补充信息（可选）
+      description: 已排查过什么、怀疑的范围、相关 commit/PR/issue、最近的变更（升级、改配置、迁移）
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: ack
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已运行诊断脚本（或说明为何无法运行），并人工复核过粘贴内容里不含 Secret、Virtual Key、供应商 Key 与用户正文
+          required: true
+        - label: 我已搜索过 open 与 closed issue，确认这不是重复报告
+          required: true
