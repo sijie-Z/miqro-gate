@@ -191,6 +191,43 @@ class VirtualKeyAuthContractTest {
     }
 
     // -------------------------------------------------------------------
+    // Envelope correlation (#1447)
+    // -------------------------------------------------------------------
+
+    /**
+     * The gateway's own error envelopes have to carry the request id: a {@code /v1}
+     * rejection opens no usage row and no lifecycle row, so the response header is
+     * the client's only handle on the request — and it must be the value the
+     * gateway logs.
+     */
+    @Nested
+    @DisplayName("gateway envelope request id (#1447)")
+    class EnvelopeCorrelation {
+
+        @Test
+        @DisplayName("an unauthenticated /v1/models rejection carries a canonical X-MiqroKey-Request-Id")
+        void rejectionCarriesRequestId() {
+            String id = webTestClient.get().uri("/v1/models").header("Authorization", "").exchange().expectStatus()
+                    .isUnauthorized().returnResult().getResponseHeaders()
+                    .getFirst(SseReplayEngine.X_MIQROKEY_REQUEST_ID);
+
+            assertThat(id).as("rejection envelope carries the request id").isNotNull();
+            assertThat(UUID.fromString(id).toString()).as("and it is the canonical UUID the log line prints")
+                    .isEqualTo(id);
+        }
+
+        @Test
+        @DisplayName("the unsupported-path 404 envelope carries it too")
+        void unsupportedPathCarriesRequestId() {
+            String id = webTestClient.get().uri("/v1/does-not-exist").exchange().expectStatus().isNotFound()
+                    .returnResult().getResponseHeaders().getFirst(SseReplayEngine.X_MIQROKEY_REQUEST_ID);
+
+            assertThat(id).isNotNull();
+            assertThat(UUID.fromString(id).toString()).isEqualTo(id);
+        }
+    }
+
+    // -------------------------------------------------------------------
     // 404 — uniform VIRTUAL_KEY_INVALID
     // -------------------------------------------------------------------
 
