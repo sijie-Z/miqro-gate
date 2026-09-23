@@ -127,3 +127,38 @@ MIQROKEY_DB_USERNAME=postgres MIQROKEY_DB_PASSWORD="$PASS" \
 ROLLBACK_COUNT=$(docker exec miqrokey-backup-dst psql -U postgres -d miqrokey -tAc "SELECT count(*) FROM accounts")
 [ "$SRC_COUNT" = "$ROLLBACK_COUNT" ] || { echo "FAIL: rollback source=$SRC_COUNT target=$ROLLBACK_COUNT" >&2; exit 1; }
 echo "rollback drill PASS: $ROLLBACK_COUNT rows intact after a destructive rollback"
+
+# The rollback runs under pressure, on whatever key the operator can find —
+# possibly lost, rotated, or a stale offsite copy. That is exactly when the
+# target database must not be dropped: --replace has to prove the archive is
+# readable back *before* it destroys anything (#1436).
+echo "== rollback leg: a wrong backup key must refuse without dropping the target =="
+printf '%s' "$(openssl rand -base64 32)" > "$WORK/wrong.key"
+chmod 400 "$WORK/wrong.key"
+set +e
+MIQROKEY_BACKUP_KEY_FILE="$WORK/wrong.key" \
+MIQROKEY_RESTORE_CONFIRM=yes \
+MIQROKEY_DB_URL="$DST_URL" \
+MIQROKEY_DB_USERNAME=postgres MIQROKEY_DB_PASSWORD="$PASS" \
+  "$(dirname "$0")/miqrokey-restore.sh" --replace "$BACKUP_FILE" miqrokey > "$WORK/wrongkey.out" 2>&1
+WRONGKEY_RC=$?
+set -e
+# Assert the substantive invariant -- the target survived -- before the wording
+# of the message. If this ordering ever regresses, the failure should name the
+# data loss, not a cosmetic phrasing change.
+# Read the survivors back without -e: in the broken state this query is what
+# fails, and "relation does not exist" is the finding, not a test crash.
+set +e
+SURVIVORS=$(docker exec miqrokey-backup-dst psql -U postgres -d miqrokey -tAc \
+  "SELECT count(*) FROM accounts" 2>/dev/null)
+SURVIVORS_RC=$?
+set -e
+if [ "$SURVIVORS_RC" != "0" ]; then
+  echo "FAIL: a failed --replace destroyed the target database (accounts is gone)" >&2
+  cat "$WORK/wrongkey.out" >&2; exit 1
+fi
+[ "$SURVIVORS" = "$SRC_COUNT" ] || { echo "FAIL: a failed --replace lost data ($SURVIVORS of $SRC_COUNT rows left)" >&2; cat "$WORK/wrongkey.out" >&2; exit 1; }
+[ "$WRONGKEY_RC" = "1" ] || { echo "FAIL: a wrong backup key exited $WRONGKEY_RC, expected 1" >&2; cat "$WORK/wrongkey.out" >&2; exit 1; }
+grep -q "cannot be read back" "$WORK/wrongkey.out" || { echo "FAIL: refusal message is not actionable:" >&2; cat "$WORK/wrongkey.out" >&2; exit 1; }
+grep -q "was not touched" "$WORK/wrongkey.out" || { echo "FAIL: refusal does not say the target survived:" >&2; cat "$WORK/wrongkey.out" >&2; exit 1; }
+echo "rollback drill PASS: a bad backup key left all $SURVIVORS rows in place"
