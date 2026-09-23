@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { usedInputOutputTokens, windowRanges } from '@/lib/quota-window-usage';
+import { monthlyRange, usedInputOutputTokens, windowRanges } from '@/lib/quota-window-usage';
 
 /**
  * #1234: 额度账本的三窗口口径（权限在 UTC 日历上，与 AdminQuotaRuleService.window() 同口径）：
@@ -52,6 +52,54 @@ describe('windowRanges (#1234)', () => {
       { key: 'WEEKLY', label: '本周', from: '2026-08-31T00:00:00Z', to: '2026-09-01T00:30:00Z' },
       { key: 'MONTHLY', label: '本月', from: '2026-09-01T00:00:00Z', to: '2026-09-01T00:30:00Z' },
     ]);
+  });
+});
+
+/**
+ * 窗口不能是空的。`to` 截到秒：当「现在」落在窗口起点那一秒里（当月 1 日 / 周一的
+ * 00:00:00.000–.999Z），截断后 from == to，后端按 TIME_RANGE_INVALID 拒掉
+ * （UsageStatsService.validateTimeRange：「from must be before to」），
+ * 页面进错误态。#1429 把卡片改成显式传窗口后，总览与资料页才第一次撞上这个边界。
+ */
+describe('empty-window guard', () => {
+  it('撑开当月 1 日 00:00:00–.999Z 的本月窗口', () => {
+    // 那一秒本来就含着「本月到目前为止」的全部时间，撑到 from+1s 不是编造区间。
+    expect(monthlyRange(new Date('2026-10-01T00:00:00.500Z'))).toEqual({
+      key: 'MONTHLY',
+      label: '本月',
+      from: '2026-10-01T00:00:00Z',
+      to: '2026-10-01T00:00:01Z',
+    });
+    expect(monthlyRange(new Date('2026-10-01T00:00:00.000Z')).to).toBe('2026-10-01T00:00:01Z');
+    expect(monthlyRange(new Date('2026-10-01T00:00:00.999Z')).to).toBe('2026-10-01T00:00:01Z');
+  });
+
+  it('同一条规则也盖住周一 00:00:00–.999Z 的本周窗口（既有边界）', () => {
+    expect(windowRanges(new Date('2026-09-21T00:00:00.250Z'))[1]).toEqual({
+      key: 'WEEKLY',
+      label: '本周',
+      from: '2026-09-21T00:00:00Z',
+      to: '2026-09-21T00:00:01Z',
+    });
+  });
+
+  it('任何时刻、任何窗口都满足 from < to', () => {
+    const instants = [
+      '2026-10-01T00:00:00.000Z',
+      '2026-10-01T00:00:00.999Z',
+      '2026-10-01T00:00:01.000Z',
+      '2026-09-21T00:00:00.000Z',
+      '2026-09-21T00:00:00.999Z',
+      '2026-09-21T13:47:00.400Z',
+      '2026-09-20T10:00:00.000Z',
+    ];
+    for (const iso of instants) {
+      for (const range of windowRanges(new Date(iso))) {
+        expect(Date.parse(range.from), `${range.label} @ ${iso}`).toBeLessThan(
+          Date.parse(range.to),
+        );
+      }
+    }
   });
 });
 
