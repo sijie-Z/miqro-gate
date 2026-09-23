@@ -87,8 +87,10 @@ public class UpstreamSubscriptionRepositoryImpl implements UpstreamSubscriptionR
         // 200, and the row kept its old values. Every field the update request can
         // carry
         // has to be in this SET list, or the response is a claim the row does not hold.
+        // #1330: the period columns were the same story one write path earlier — the
+        // create hardwrote NULL and this SET list carried none of them.
         int rows = jdbc.update(
-                "UPDATE upstream_subscriptions SET name = :name, subscription_price = :subscriptionPrice, currency = :currency, quota_total = :quotaTotal, quota_unit = :quotaUnit, billing_mode = :billingMode, plan_scope = :planScope, status = :status, last_status_sync_at = :lastStatusSyncAt, status_source = :statusSource, version = version + 1, updated_at = :updatedAt WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion",
+                "UPDATE upstream_subscriptions SET name = :name, subscription_price = :subscriptionPrice, currency = :currency, period_start = :periodStart, period_end = :periodEnd, renewal_at = :renewalAt, quota_total = :quotaTotal, quota_unit = :quotaUnit, billing_mode = :billingMode, plan_scope = :planScope, status = :status, last_status_sync_at = :lastStatusSyncAt, status_source = :statusSource, version = version + 1, updated_at = :updatedAt WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion",
                 params);
         if (rows != 1)
             throw new OptimisticLockingFailureException("Optimistic lock failure: subscription " + sub.id());

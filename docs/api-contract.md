@@ -460,13 +460,13 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `GET /api/v1/admin/provider-products/{id}` | 产品详情 |
 | `GET /api/v1/admin/provider-products/providers` | 供应商列表 |
 | `GET /api/v1/admin/subscriptions` / `/{id}` | 订阅列表/详情（含产品名） |
-| `POST /api/v1/admin/subscriptions` | 创建（`providerProductId`/`name`/`billingMode`/`planScope`/价格/配额） |
-| `PATCH /api/v1/admin/subscriptions/{id}` | 更新（价格/币种/配额/状态） |
+| `POST /api/v1/admin/subscriptions` | 创建（`providerProductId`/`name`/`billingMode`/`planScope`/价格/配额/账期 `periodStart`+`periodEnd`+`renewalAt`） |
+| `PATCH /api/v1/admin/subscriptions/{id}` | 更新（价格/币种/配额/状态/账期三字段）；未提交或 `null` 的字段保留原值（本 PATCH 无清空入口） |
 | `GET /api/v1/admin/subscriptions/{id}/seats` | 席位列表（含分配用户） |
 | `POST /api/v1/admin/subscriptions/{id}/seats` | 创建席位（`externalSeatRef`/`displayName`/`assignedUserId`） |
 | `PATCH /api/v1/admin/subscriptions/{id}/seats/{seatId}` | 分配/释放/禁用席位 |
 
-错误码：`PRODUCT_NOT_FOUND`（404）、`SUBSCRIPTION_NOT_FOUND`（404）、`SEAT_NOT_FOUND`（404）。写操作审计 `SUBSCRIPTION_CREATE/UPDATE`、`SEAT_CREATE/UPDATE`。成员 Key（席位凭证）继续由 `/api/v1/admin/credentials` 管理（`seat_id` 关联）。
+错误码：`PRODUCT_NOT_FOUND`（404）、`SUBSCRIPTION_NOT_FOUND`（404）、`SEAT_NOT_FOUND`（404）、`TIME_RANGE_INVALID`（400，账期须成对提交且 start 严格早于 end；PATCH 按合并后的最终值判定）。写操作审计 `SUBSCRIPTION_CREATE/UPDATE`、`SEAT_CREATE/UPDATE`。成员 Key（席位凭证）继续由 `/api/v1/admin/credentials` 管理（`seat_id` 关联）。
 
 ### 5.1 上游凭证
 
