@@ -19,6 +19,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferUtils;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -30,6 +31,8 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Scheduler;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -38,6 +41,7 @@ import java.nio.file.Path;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -71,6 +75,21 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Tag("integration")
 @DisplayName("Timeout, retry and backpressure end-to-end (gateway + PostgreSQL)")
 class TimeoutRetryIntegrationTest {
+
+    /**
+     * Lanes of the shared scheduler bean
+     * ({@code GatewayFeatureConfig.credentialDecryptScheduler()}). The value is
+     * asserted at runtime by the saturation test itself: if the configured cap
+     * changes, the queued-task probe stops observing a queue and the test says so
+     * instead of silently testing nothing.
+     */
+    private static final int SATURATION_LANES = 4;
+
+    /**
+     * Must match {@code miqrokey.gateway.upstream.response-timeout} in the
+     * properties above.
+     */
+    private static final Duration OVERALL_BUDGET = Duration.ofSeconds(4);
 
     private static final AnthropicMockProvider mockProvider = new AnthropicMockProvider();
 
@@ -106,6 +125,14 @@ class TimeoutRetryIntegrationTest {
 
     @Autowired
     private UsageEventBus usageEventBus;
+
+    /**
+     * The very scheduler the credential/SSRF hops of the proxy run on — the same
+     * bean, so occupying it here is what a wedged blocking read does in production
+     * (#1388).
+     */
+    @Autowired
+    private Scheduler credentialDecryptScheduler;
 
     @LocalServerPort
     private int gatewayPort;
@@ -288,6 +315,72 @@ class TimeoutRetryIntegrationTest {
     }
 
     // -------------------------------------------------------------------
+    // Scheduler saturation: the deadline must cover the queue wait (#1388)
+    // -------------------------------------------------------------------
+
+    @Test
+    @DisplayName("every credential-decrypt lane busy: the request fails inside the overall budget instead of hanging")
+    void saturatedSchedulerFailsInsideTheOverallBudget() throws Exception {
+        // The proxy resolves the credential and runs the SSRF check on the shared
+        // bounded scheduler, so a request can spend time *queued* before any
+        // upstream timer exists. Occupy all lanes with work that ends only when
+        // this test says so, then post an ordinary request. With the deadline
+        // armed after the lane hops the request hung for as long as the lanes
+        // stayed busy (measured against a wedged table lock: 17-30s, still HTTP
+        // 200); with the deadline armed before them it must fail inside the
+        // configured PT4S overall budget. Lanes are always released in the
+        // finally block.
+        CountDownLatch lanesHeld = new CountDownLatch(SATURATION_LANES);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicBoolean queuedTaskRan = new AtomicBoolean();
+        try {
+            for (int i = 0; i < SATURATION_LANES; i++) {
+                Mono.<Void>fromRunnable(() -> {
+                    lanesHeld.countDown();
+                    awaitQuietly(release);
+                }).subscribeOn(credentialDecryptScheduler).subscribe();
+            }
+            assertThat(lanesHeld.await(10, TimeUnit.SECONDS)).as("%d scheduler lanes are busy", SATURATION_LANES)
+                    .isTrue();
+            // Prove the pool really is saturated: further work is queued, not run.
+            // (If the cap ever grows past SATURATION_LANES this probe starts
+            // running and the test fails loudly rather than passing vacuously.)
+            Mono.<Void>fromRunnable(() -> queuedTaskRan.set(true)).subscribeOn(credentialDecryptScheduler).subscribe();
+            Thread.sleep(300);
+            assertThat(queuedTaskRan).as("a saturated scheduler queues additional work").isFalse();
+
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(AnthropicFixtures.RESPONSE_BASIC).build());
+
+            AtomicReference<HttpStatusCode> status = new AtomicReference<>();
+            AtomicReference<Throwable> error = new AtomicReference<>();
+            AtomicBoolean terminated = new AtomicBoolean();
+            long startedAtNanos = System.nanoTime();
+            WebClient.create("http://localhost:" + gatewayPort).post().uri("/v1/messages")
+                    .header("Authorization", "Bearer " + GatewayTestKeys.DEFAULT_KEY.presented())
+                    .bodyValue(AnthropicFixtures.REQUEST_NON_STREAMING)
+                    .exchangeToMono(response -> response.releaseBody().thenReturn(response.statusCode()))
+                    // Client-side guard: an unbounded gateway hang fails here
+                    // instead of parking the suite until the build times out.
+                    .timeout(Duration.ofSeconds(10)).subscribe(status::set, error::set, () -> terminated.set(true));
+
+            assertTerminatedWithin(Duration.ofSeconds(15), terminated, error);
+            Duration elapsed = Duration.ofNanos(System.nanoTime() - startedAtNanos);
+            assertThat(error.get()).as("the gateway answered instead of holding the request open").isNull();
+            assertThat(status.get()).isNotNull();
+            assertThat(status.get().is5xxServerError()).as("saturation surfaces as a bounded server error").isTrue();
+            assertThat(elapsed).as("the configured overall budget is what ends the wait")
+                    .isGreaterThanOrEqualTo(OVERALL_BUDGET);
+            assertThat(elapsed).isLessThan(Duration.ofSeconds(10));
+            // The deadline fired while the request was still waiting for a lane:
+            // nothing was ever sent upstream.
+            assertThat(mockProvider.getCapturedRequests()).isEmpty();
+        } finally {
+            release.countDown();
+        }
+    }
+
+    // -------------------------------------------------------------------
     // Slow client: memory stays bounded (streaming, no aggregation)
     // -------------------------------------------------------------------
 
@@ -334,6 +427,17 @@ class TimeoutRetryIntegrationTest {
     // -------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------
+
+    /**
+     * Parks a lane-occupying task until the test releases it (or a hard 30s cap).
+     */
+    private static void awaitQuietly(CountDownLatch latch) {
+        try {
+            latch.await(30, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
 
     private void assertTerminatedWithin(Duration timeout, AtomicBoolean completed, AtomicReference<Throwable> error)
             throws InterruptedException {

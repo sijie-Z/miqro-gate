@@ -6119,3 +6119,38 @@ V73 的索引用 `WHERE status = 'PENDING'` 作部分谓词，而白名单分支
   「非空 + 全租户唯一」，不拒绝该 code，而 `ensureBucketProject` 按 code **收养**已存在的项目。于是「先建
   `UNATTRIBUTED` 项目、后配置未归属策略」会让桶项目停在 `system=false`，**绕过 `VirtualKeyService` 的
   `PROJECT_NOT_SELECTABLE` 守卫**。先于本次改动存在，不由本次引入或加重；后由 #1171 修复并合入。
+
+## 2026-09-23 报 bug 的环境信息从手填改为一条命令：Issue Forms + 部署诊断脚本（#1443）
+
+### 改动
+
+- `.github/ISSUE_TEMPLATE/` 由两份 Markdown 模板改为 GitHub Issue Forms：`bug_report.yml`（描述 / 诊断输出 /
+  复现步骤 / 复现频率 / 期望 / 实际 / requestId / 日志 / 截图 / 补充 + 两项提交前确认）、`feature_request.yml`
+  （背景 / 期望能力 / 参考 / 验收标准 / 优先级 / 备注）、`config.yml`（关闭空白 issue；contact_links 指向文档
+  地图与 SECURITY.md——安全问题不走公开 issue）。两份旧 `.md` 删除。
+- 新增 `deploy/diagnose.sh`（POSIX sh）与 `deploy/diagnose.ps1`（Windows）：只读采集主机 / Docker / 容器状态 +
+  镜像 digest / `deploy.log` 留痕 / 健康探针（portal `/healthz`、cp、gw 的 `/actuator/health`、`pg_isready`）/
+  `.env` 与 `deploy/secrets` 的**存在性**（只报有无、权限、字节数，不读值）/ 各容器日志尾部（每容器截 8000
+  字符，整报控制在 issue 正文长度内）。全程脱敏：`sk-` 形密钥、Bearer/Basic、URL 内嵌密码、URL 查询参数
+  `key=`（企微 webhook 的典型形态）、`KEY/SECRET/TOKEN=` 赋值、私钥头；不写任何文件，docker 只问
+  ps/inspect/logs/exec(wget|pg_isready)/stats/system df。
+- `deploy/tests/diagnose_script_regression.py` + 挂进既有 `deploy-script` CI job（job 名不动——它是必过检查）。
+
+### 验证
+
+- shellcheck（CI 同款 `-S warning`，经 `koalaman/shellcheck:stable` 容器）零告警；`deploy/security/check-secrets.sh` 通过。
+- 真机两次：演示机（Linux、`/opt/miqrokey`、sudo——ubuntu 不在 docker 组，报告如实标出）与 Windows 开发机
+  （PowerShell 5.1）。报告结构完整、深扫零泄漏。
+- 该轮修掉两处**实测**出来的 PS 5.1 缺陷：`SilentlyContinue` 会把 `2>&1` 合并的原生命令 stderr 静默丢弃
+  （redpanda 日志整段为空）；`Get-Content` 默认按 ANSI 解码无 BOM 的 UTF-8 文件（git 提交信息乱码）。
+- 回归测试自有牙齿：种子 8 类假凭证必须全部缺席、对照串（origin allowlist / requestId / model）必须原样存活；
+  stub docker 记录每次调用，只读动词白名单之外判红。变异校准各红一次：删一条脱敏规则 → 对应检查红；
+  插入 `docker restart` → 只读检查红。
+- 表单 YAML 经 SchemaStore `github-issue-forms.json` 校验 + 本仓 label 存在性校验（`assignees: []` 被 schema 拒，已删）。
+
+### 说明
+
+- Issue Forms 只在**默认分支（main）**渲染：合入 develop 后需等 main 同步 PR 才在 GitHub 界面生效。
+- `.ps1` 腿在 CI（ubuntu runner 自带 pwsh）执行；Windows 本地因 PATHEXT 跳过无扩展名 stub 故 SKIP（避免误碰真
+  daemon），Windows 侧由人工实跑覆盖。
+

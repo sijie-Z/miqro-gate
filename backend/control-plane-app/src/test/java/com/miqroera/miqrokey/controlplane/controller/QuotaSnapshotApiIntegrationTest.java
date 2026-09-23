@@ -32,6 +32,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -154,6 +155,43 @@ class QuotaSnapshotApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("#1330: a subscription created through the API with quota + period gets a LOCAL_ESTIMATE row")
+    void estimateRowIsProducedForSubscriptionCreatedThroughTheApi() throws Exception {
+        // The subscription is created through the API with its period, so the
+        // estimate row below exists only if the create actually persisted
+        // period_start (#1330). The sibling test seeds the row with SQL, which is
+        // why it could never catch the missing write path.
+        fx.insertCatalogOnly(mockBaseUrl);
+        String subscriptionId = createSubscriptionViaApi(Map.of("providerProductId", fx.productId.toString(), "name",
+                "Estimate Plan", "billingMode", "PAYG", "planScope", "NONE", "quotaTotal", 1000, "quotaUnit", "TOKENS",
+                "periodStart", "2026-08-01T00:00:00Z", "periodEnd", "2026-09-01T00:00:00Z"));
+
+        // Phase 1 — no ACTIVE credential yet. The estimate row is written, but the
+        // refresh response is the latest-per-scope view keyed on
+        // (seat_id, credential_id), and the UNAVAILABLE row sits in the same
+        // (NULL, NULL) scope, so the view may show either. The row is the truth:
+        // assert it in the table.
+        mockMvc.perform(post("/api/v1/admin/subscriptions/" + subscriptionId + "/quota/refresh")
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isOk());
+        Integer estimates = jdbc.queryForObject(
+                "SELECT count(*) FROM quota_snapshots WHERE subscription_id = :id AND source = 'LOCAL_ESTIMATE'",
+                new MapSqlParameterSource("id", UUID.fromString(subscriptionId)), Integer.class);
+        assertThat(estimates).as("LOCAL_ESTIMATE rows for the API-created subscription").isEqualTo(1);
+
+        // Phase 2 — with an ACTIVE credential the official row lands in its own
+        // scope, so the operator-facing refresh response carries the estimate.
+        fx.createCredentialViaApi(UUID.fromString(subscriptionId), "sk-test-1234567890");
+        mockMvc.perform(post("/api/v1/admin/subscriptions/" + subscriptionId + "/quota/refresh")
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.source=='LOCAL_ESTIMATE')].total").value(1000.0))
+                .andExpect(jsonPath("$[?(@.source=='LOCAL_ESTIMATE')].windowType").value("PERIOD"));
+
+        // …and the GET view the operator looks at shows it too.
+        mockMvc.perform(get("/api/v1/admin/subscriptions/" + subscriptionId + "/quota").cookie(sessionCookie))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[?(@.source=='LOCAL_ESTIMATE')].total").value(1000.0));
+    }
+
+    @Test
     @DisplayName("unknown or foreign subscriptions are uniformly 404")
     void unknownSubscriptionIs404() throws Exception {
         mockMvc.perform(get("/api/v1/admin/subscriptions/" + UUID.randomUUID() + "/quota").cookie(sessionCookie))
@@ -172,6 +210,14 @@ class QuotaSnapshotApiIntegrationTest {
     // ------------------------------------------------------------------
     // helpers
     // ------------------------------------------------------------------
+
+    /** Creates a subscription through the admin API and returns its id. */
+    private String createSubscriptionViaApi(Map<String, Object> body) throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/v1/admin/subscriptions").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(body))).andExpect(status().isOk()).andReturn();
+        return objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id").toString();
+    }
 
     private static Cookie cookie(MvcResult r, String name) {
         if (r.getResponse().getCookies() == null)
@@ -237,6 +283,26 @@ class QuotaSnapshotApiIntegrationTest {
                             .addValue("periodEnd", java.sql.Timestamp.from(Instant.parse("2026-09-01T00:00:00Z"))));
         }
 
+        /**
+         * Catalog only — the subscription comes in through the API (the write path
+         * under test, #1330).
+         */
+        void insertCatalogOnly(String balanceBaseUrl) {
+            jdbc.update("""
+                    INSERT INTO providers (id, slug, display_name, status, version)
+                    VALUES (:id, 'deepseek', 'DeepSeek', 'ACTIVE', 0)
+                    """, new MapSqlParameterSource("id", providerId));
+            jdbc.update("""
+                    INSERT INTO provider_products
+                        (id, provider_id, product_code, display_name, billing_mode, credential_topology,
+                         supported_wire_protocols, base_url_templates, auth_scheme, implementation_status, version)
+                    VALUES (:productId, :providerId, 'deepseek-payg-api', 'DeepSeek PAYG', 'PAYG', 'SINGLE_SHARED',
+                            '["chat_completions","messages"]', CAST(:baseUrl AS jsonb), '{"type":"bearer"}',
+                            'IMPLEMENTED', 0)
+                    """, new MapSqlParameterSource("productId", productId).addValue("providerId", providerId)
+                    .addValue("baseUrl", "[{\"url\":\"" + balanceBaseUrl + "\"}]"));
+        }
+
         void insertEmptySubscription(String balanceBaseUrl) {
             jdbc.update("""
                     INSERT INTO upstream_subscriptions
@@ -249,10 +315,15 @@ class QuotaSnapshotApiIntegrationTest {
 
         /** Creates an ACTIVE credential through the admin API (real encryption). */
         void createCredentialViaApi(String secret) throws Exception {
+            createCredentialViaApi(subscriptionId, secret);
+        }
+
+        /** The same, for a subscription that came in through the API (#1330). */
+        void createCredentialViaApi(UUID forSubscriptionId, String secret) throws Exception {
             mockMvc.perform(post("/api/v1/admin/credentials").contentType(MediaType.APPLICATION_JSON)
                     .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                    .content(objectMapper.writeValueAsString(
-                            Map.of("name", "cred-1", "subscriptionId", subscriptionId.toString(), "secret", secret))))
+                    .content(objectMapper.writeValueAsString(Map.of("name", "cred-1", "subscriptionId",
+                            forSubscriptionId.toString(), "secret", secret))))
                     .andExpect(status().isCreated()).andReturn();
         }
     }

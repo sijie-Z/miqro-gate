@@ -463,13 +463,13 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `GET /api/v1/admin/provider-products/{id}` | 产品详情 |
 | `GET /api/v1/admin/provider-products/providers` | 供应商列表 |
 | `GET /api/v1/admin/subscriptions` / `/{id}` | 订阅列表/详情（含产品名） |
-| `POST /api/v1/admin/subscriptions` | 创建（`providerProductId`/`name`/`billingMode`/`planScope`/价格/配额） |
-| `PATCH /api/v1/admin/subscriptions/{id}` | 更新（价格/币种/配额/状态） |
+| `POST /api/v1/admin/subscriptions` | 创建（`providerProductId`/`name`/`billingMode`/`planScope`/价格/配额/账期 `periodStart`+`periodEnd`+`renewalAt`） |
+| `PATCH /api/v1/admin/subscriptions/{id}` | 更新（价格/币种/配额/状态/账期三字段）；未提交或 `null` 的字段保留原值（本 PATCH 无清空入口） |
 | `GET /api/v1/admin/subscriptions/{id}/seats` | 席位列表（含分配用户） |
 | `POST /api/v1/admin/subscriptions/{id}/seats` | 创建席位（`externalSeatRef`/`displayName`/`assignedUserId`） |
 | `PATCH /api/v1/admin/subscriptions/{id}/seats/{seatId}` | 分配/释放/禁用席位 |
 
-错误码：`PRODUCT_NOT_FOUND`（404）、`SUBSCRIPTION_NOT_FOUND`（404）、`SEAT_NOT_FOUND`（404）。写操作审计 `SUBSCRIPTION_CREATE/UPDATE`、`SEAT_CREATE/UPDATE`。成员 Key（席位凭证）继续由 `/api/v1/admin/credentials` 管理（`seat_id` 关联）。
+错误码：`PRODUCT_NOT_FOUND`（404）、`SUBSCRIPTION_NOT_FOUND`（404）、`SEAT_NOT_FOUND`（404）、`TIME_RANGE_INVALID`（400，账期须成对提交且 start 严格早于 end；PATCH 按合并后的最终值判定）。写操作审计 `SUBSCRIPTION_CREATE/UPDATE`、`SEAT_CREATE/UPDATE`。成员 Key（席位凭证）继续由 `/api/v1/admin/credentials` 管理（`seat_id` 关联）。
 
 ### 5.1 上游凭证
 
@@ -893,11 +893,13 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `GET /api/v1/admin/skills/{id}/revisions?limit=` | **I14 版本历史**（新→旧，默认 20/上限 50）：`{revision, version, description, author, license, tags, examples, contentSha256, contentBytes, createdBy, createdAt, activatedAt}`——**只回元数据，不回包体**；`activatedAt` 非空即当前版本 |
 | `POST /api/v1/admin/skills/{id}/revisions/{revision}/activate` | **I14 回滚/切换**：激活指定修订（幂等，不产生新版本号），并把该修订的元数据+包体镜像回 `skills`（目录/下载即时生效）；审计 `SKILL_REVISION_ACTIVATE`（发布审计 `SKILL_REVISION_PUBLISH`） |
 
-**格式校验（上传时）**：zip 必须只含一个技能目录（`skill-name/`），含 `SKILL.md`（YAML frontmatter：`name` 必填且为小写 kebab-case、与目录名一致、不含 claude/anthropic 保留词；`description` 必填 ≤ 1024 字符；可选 `author`/`license`/`tags`/`examples`；`tags` ≤5 个 × ≤20 字符（重复去重）；`examples` ≤10 条 × ≤512 字符）。包上限 5MB、条目上限 200、SKILL.md 上限 512KB（防 zip 炸弹——只读 SKILL.md，不解压）。`version` 必填语义化（`\d+\.\d+\.\d+`）。
+**格式校验（上传时）**：zip 必须只含一个技能目录（`skill-name/`），含 `SKILL.md`（YAML frontmatter：`name` 必填且为小写 kebab-case、与目录名一致、不含 claude/anthropic 保留词；`description` 必填 ≤ 1024 字符；可选 `author`/`license`/`tags`/`examples`；`tags` ≤5 个 × ≤20 字符（重复去重）；`examples` ≤10 条 × ≤512 字符）。包上限 5MB、条目上限 200、SKILL.md 上限 512KB、解压后总体积上限 64MB（防 zip 炸弹——逐条目流式走过计数、不落盘解压；条目流与中央目录两视图必须相互核对，不一致即拒绝；EOCD 记录必须位于文件末尾 22+65535（注释）+65535（填充）字节窗口内，且注释之后的填充区不得再出现第二条 EOCD 记录）。`version` 必填语义化（`\d+\.\d+\.\d+`）。
+
+**支持的 ZIP 子集**：仅接受 canonical 布局——`[局部头链][中央目录][EOCD(+注释)]` 无缝铺满、两视图逐条目全等、**条目路径唯一**（两个条目规范化到同一交付路径即拒：不同读者对重复条目的取舍不同，解包结果无法与校验结论一致）；中央目录记录经「局部头相对偏移」指回局部头（**记录顺序不限**，偏移是配对的权威依据）。下列合法结构**明确不支持**、一律 400 拒绝：**ZIP64**（含 zip64 EOCD 定位器与 extra 字段，`SKILL_ZIP64_UNSUPPORTED`）、**多卷（multi-disk）**、**Archive Extra Data Record**、**中央目录数字签名（CD digital signature）**及其余非 canonical 扩展记录（`SKILL_ZIP_STRUCTURE_INVALID`）。EOCD 注释是按 `commentLength` 声明的任意数据：其中出现 `PK\x05\x06` 字节序列不算第二条 EOCD 记录（注释区不参与第二记录扫描；注释之后的填充区仍全文扫描）。
 
 **下载授权语义**：无 `skill_access` 行 = 公开；有行 = 仅授权 TEAM/PROJECT 成员（及管理员）可下载；非成员 `403 SKILL_DOWNLOAD_FORBIDDEN`；归档技能对目录/详情/下载一律 `404 SKILL_NOT_FOUND`。
 
-**错误码**：`SKILL_NOT_FOUND`（404）、`SKILL_DOWNLOAD_FORBIDDEN`（403）、`VERSION_INVALID`（400）、`SKILL_EMPTY`/`SKILL_TOO_LARGE`/`SKILL_TOO_MANY_ENTRIES`/`SKILL_ZIP_INVALID`/`SKILL_ENTRY_PATH_INVALID`/`SKILL_DECOMPRESSED_TOO_LARGE`/`SKILL_MD_MISSING`/`SKILL_MD_TOO_LARGE`/`SKILL_FRONTMATTER_INVALID`/`SKILL_NAME_INVALID`/`SKILL_NAME_MISMATCH`/`SKILL_DESCRIPTION_INVALID`/`SKILL_TAGS_INVALID`/`SKILL_EXAMPLES_INVALID`/`SKILL_QUERY_INVALID`（400）、`SCOPE_INVALID`（400）。视图（列表/详情）含 `examples` 与 `createdBy`/`createdByName`（创建人姓名，服务端解析）。
+**错误码**：`SKILL_NOT_FOUND`（404）、`SKILL_DOWNLOAD_FORBIDDEN`（403）、`VERSION_INVALID`（400）、`SKILL_EMPTY`/`SKILL_TOO_LARGE`/`SKILL_TOO_MANY_ENTRIES`/`SKILL_ZIP_INVALID`/`SKILL_ZIP_STRUCTURE_INVALID`/`SKILL_ZIP64_UNSUPPORTED`/`SKILL_ENTRY_PATH_INVALID`/`SKILL_DECOMPRESSED_TOO_LARGE`/`SKILL_MD_MISSING`/`SKILL_MD_TOO_LARGE`/`SKILL_FRONTMATTER_INVALID`/`SKILL_NAME_INVALID`/`SKILL_NAME_MISMATCH`/`SKILL_DESCRIPTION_INVALID`/`SKILL_TAGS_INVALID`/`SKILL_EXAMPLES_INVALID`/`SKILL_QUERY_INVALID`（400）、`SCOPE_INVALID`（400）。视图（列表/详情）含 `examples` 与 `createdBy`/`createdByName`（创建人姓名，服务端解析）。
 
 ### 5.13 Agent 管理（P3.1，对标阿里 AI 网关 Agent 拓扑）
 
@@ -1250,7 +1252,7 @@ detail_currency, detail_occurred_at, detail_status, detail_bucket_key, detail_pr
 - 客户端必须且只能提供**一个**凭证 Header：`Authorization: Bearer <key>`（或裸值）、`x-api-key`、`api-key`。零个或多个凭证 Header → `401`（错误体不区分具体原因，防枚举）。
 - **凭据值错误的统一语义**：未知 / 畸形（含缺失后缀、后缀含点）的 Virtual Key → `404 virtual_key_invalid`——各场景响应逐字一致、与"未知 Key"不可区分（防枚举；见 `VirtualKeyAuthContractTest`）。注意与 MCP 数据面（消费者 Key/JWT）同场景的 `401 invalid_api_key` 口径不同：`/v1` 用 404、MCP 用 401，均为各通道既定设计。
 - Key 格式 `mqk_live_<publicKeyId>_<secret>.<projectTag>`（后缀在解析级必填）：点号后缀是**路由选择器**（明文，用于在 Key 的多个项目绑定间选择），鉴权权威是数据库中的 `key_project_binding`，标签本身不承载权限。HMAC 摘要不包含标签。
-- `GET /v1/context-registry`（CAA，#639）：本地 Agent 的 repo → 项目映射来源。虚拟 Key 认证（**identity-only**，#641：只做凭证抽取/解析/HMAC，不走归属阶梯——多绑定 Key 带任意（含不匹配）后缀都可读取；统一 404/401 失败语义）；**只返回该 Key ACTIVE 绑定项目**下的 `project_repositories` 行——`{ entries: [{ repoKey, projectId, projectTag }] }`；无持久化时返回空表。注册表读取发生在 Agent 同步（非热路径），直接查库、不占快照。
+- `GET /v1/context-registry`（CAA，#639）：本地 Agent 的 repo → 项目映射来源。虚拟 Key 认证（**identity-only**，#641：只做凭证抽取/解析/HMAC，不走归属阶梯——多绑定 Key 带任意（含不匹配）后缀都可读取；统一 404/401 失败语义）；**只返回该 Key ACTIVE 绑定项目**下的 `project_repositories` 行——`{ entries: [{ repoKey, projectId, projectTag }] }`；无持久化时返回空表。注册表读取发生在 Agent 同步（非热路径），直接查库、不占快照。读与热路径共用 `credential-decrypt` 有界调度器并带语句级上限（8 s，`REGISTRY_TIMEOUT` 减 2 s；#1400），失败分两种 503 信封：`context_registry_unavailable`（放弃等待：语句级中止或 10 s 到点）与 `context_registry_error`（数据库故障非超时）——**两者不可互相顶替**，"超时"是对本网关自身截止的断言。
 - **请求上下文解析阶梯（CAA，#633）**：身份（Key/HMAC）与归属（本请求计入哪个项目）分离，归属按固定阶梯裁决，首个命中生效：
   1. `X-Miqro-Project-Id` 声明（**不可信输入**，仅当目标项目确为该 Key 的绑定时生效）→ `RESOLVED_HEADER`；
   2. 点号后缀标签命中该 Key 的某个绑定 → `RESOLVED_SUFFIX`；

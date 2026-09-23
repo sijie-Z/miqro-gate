@@ -3511,6 +3511,12 @@ export interface components {
             /** Format: int64 */
             quotaTotal?: number;
             quotaUnit?: string;
+            /** Format: date-time */
+            periodStart?: string;
+            /** Format: date-time */
+            periodEnd?: string;
+            /** Format: date-time */
+            renewalAt?: string;
         };
         UpstreamSubscription: {
             /** Format: uuid */
@@ -4286,6 +4292,12 @@ export interface components {
             quotaUnit?: string;
             /** @enum {string} */
             status?: "ACTIVE" | "EXPIRED" | "CANCELLED" | "SUSPENDED";
+            /** Format: date-time */
+            periodStart?: string;
+            /** Format: date-time */
+            periodEnd?: string;
+            /** Format: date-time */
+            renewalAt?: string;
         };
         SeatUpdateRequest: {
             /** Format: uuid */

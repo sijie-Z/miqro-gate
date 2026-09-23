@@ -1,0 +1,10 @@
+# Issue 创建入口的配置（GitHub Issue Forms）。
+# 本仓纪律：issue 一律按模板逐节填写（docs/git-workflow.md §3），因此关闭空白 issue。
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 文档（先查这里）
+    url: https://github.com/sijie-Z/miqro-gate/blob/main/docs/document-map.md
+    about: 文档地图——部署、配置、API 契约、运维手册的入口；多数问题在这里已有答案
+  - name: 🔐 报告安全漏洞（勿公开）
+    url: https://github.com/sijie-Z/miqro-gate/blob/main/SECURITY.md
+    about: 涉及凭证、密钥、鉴权绕过的问题请走私密通报（Security Advisory / 邮件），不要开公开 issue
