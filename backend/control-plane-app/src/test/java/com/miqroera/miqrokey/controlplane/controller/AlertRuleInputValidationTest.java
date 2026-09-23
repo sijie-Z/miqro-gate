@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -160,6 +161,22 @@ class AlertRuleInputValidationTest {
         Map<String, Object> body = validBody();
         body.remove("threshold");
         create(body).andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("absent type is a 400 ALERT_TYPE_INVALID, not an NPE behind a 500 (#1252)")
+    void missingTypeIsRejected() throws Exception {
+        // The one field the DTO leaves to the service (AdminAlertRuleController: "type
+        // stays validated in AlertRuleService#create"), and the baseline does not
+        // require it — so omitting it is a legal-looking request that must still 400.
+        Map<String, Object> absent = validBody();
+        absent.remove("type");
+        create(absent).andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("ALERT_TYPE_INVALID"));
+
+        Map<String, Object> explicitNull = validBody();
+        explicitNull.put("type", null);
+        create(explicitNull).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("ALERT_TYPE_INVALID"));
     }
 
     @Test

@@ -5,7 +5,13 @@ import { createPinia, setActivePinia } from 'pinia';
 import { defineComponent } from 'vue';
 import NextAdminMcpServicesView from '@/views/next/NextAdminMcpServicesView.vue';
 import * as api from '@/api';
-import type { McpAccessView, McpServiceView, McpToolView } from '@/types/generated-api';
+import { ApiError } from '@/api/http';
+import type {
+  McpAccessView,
+  McpResiliencePolicy,
+  McpServiceView,
+  McpToolView,
+} from '@/types/generated-api';
 import { toastState } from '@/ui/toast';
 
 vi.mock('@/api', () => ({
@@ -901,6 +907,102 @@ describe('NextAdminMcpServicesView', () => {
     expect(toastState.items.some((item) => item.message?.includes('已回滚到修订 #2'))).toBe(true);
   });
 
+  it('F16: reports a failed rollback instead of closing the dialog silently', async () => {
+    mockApi.adminListMcpServices.mockResolvedValue([service()]);
+    mockApi.adminListMcpTools.mockResolvedValue([tool()]);
+    const rev2 = {
+      id: 'r2',
+      revision: 2,
+      description: '查询订单 v2',
+      method: 'POST',
+      path: '/orders/v2/{id}',
+      createdAt: '2026-09-02T00:00:00Z',
+      activatedAt: null as unknown as string,
+    };
+    mockApi.adminListToolRevisions.mockResolvedValue([rev2]);
+    mockApi.adminActivateToolRevision.mockRejectedValue(
+      new ApiError({
+        type: 'about:blank',
+        title: 'revision conflict',
+        status: 409,
+        code: 'TOOL_REVISION_CONFLICT',
+        detail: '该修订已被上游重新发布，回滚未执行，请刷新后重试。',
+        requestId: 'rq-9',
+      }),
+    );
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="mcp-tools"]').trigger('click');
+    await flushPromises();
+    (
+      document.querySelector('[data-testid="mcp-tool-revisions-open"]') as HTMLButtonElement
+    ).click();
+    await flushPromises();
+
+    (document.querySelector('[data-testid="mcp-rev-rollback-2"]') as HTMLButtonElement).click();
+    await flushPromises();
+    const buttons = Array.from(document.body.querySelectorAll('button')).filter(
+      (b) => b.textContent?.trim() === '回滚',
+    );
+    expect(buttons.length).toBeGreaterThan(0);
+    buttons[buttons.length - 1]!.click();
+    await flushPromises();
+
+    expect(mockApi.adminActivateToolRevision).toHaveBeenCalledWith('m1', 't1', 2);
+    // The failure must reach the operator — the dialog closing is not a result.
+    expect(toastState.items.some((item) => item.message?.includes('回滚未执行'))).toBe(true);
+  });
+
+  it('F16: keeps a successful rollback successful when only the refresh fails', async () => {
+    mockApi.adminListMcpServices.mockResolvedValue([service()]);
+    mockApi.adminListMcpTools.mockResolvedValue([tool()]);
+    const rev2 = {
+      id: 'r2',
+      revision: 2,
+      description: '查询订单 v2',
+      method: 'POST',
+      path: '/orders/v2/{id}',
+      createdAt: '2026-09-02T00:00:00Z',
+      activatedAt: null as unknown as string,
+    };
+    // 打开修订弹窗时列表是好的，回滚后的刷新才失败。
+    mockApi.adminListToolRevisions.mockResolvedValueOnce([rev2]).mockRejectedValue(
+      new ApiError({
+        type: 'about:blank',
+        title: 'gateway timeout',
+        status: 504,
+        code: 'UPSTREAM_TIMEOUT',
+        detail: '读取修订列表超时，请重试。',
+        requestId: 'rq-10',
+      }),
+    );
+    mockApi.adminActivateToolRevision.mockResolvedValue(rev2);
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="mcp-tools"]').trigger('click');
+    await flushPromises();
+    (
+      document.querySelector('[data-testid="mcp-tool-revisions-open"]') as HTMLButtonElement
+    ).click();
+    await flushPromises();
+
+    (document.querySelector('[data-testid="mcp-rev-rollback-2"]') as HTMLButtonElement).click();
+    await flushPromises();
+    const buttons = Array.from(document.body.querySelectorAll('button')).filter(
+      (b) => b.textContent?.trim() === '回滚',
+    );
+    expect(buttons.length).toBeGreaterThan(0);
+    buttons[buttons.length - 1]!.click();
+    await flushPromises();
+
+    // 回滚本身成功：成功提示必须在，刷新失败也不能被讲成回滚失败。
+    expect(toastState.items.some((item) => item.message?.includes('已回滚到修订 #2'))).toBe(true);
+    expect(toastState.items.some((item) => item.message?.includes('读取修订列表超时'))).toBe(true);
+    expect(toastState.items.some((item) => item.message?.includes('回滚失败'))).toBe(false);
+  });
+
   it('F16: publishes an edited revision from the tool row', async () => {
     mockApi.adminListMcpServices.mockResolvedValue([service()]);
     mockApi.adminListMcpTools.mockResolvedValue([tool()]);
@@ -1013,6 +1115,151 @@ describe('NextAdminMcpServicesView', () => {
       retryConditions: ['SERVER_5XX', 'TIMEOUT'],
       idempotencyConfirmed: true,
     });
+  });
+
+  it('does not carry the previous tool retry policy into the dialog when the next load fails', async () => {
+    mockApi.adminListMcpServices.mockResolvedValue([service()]);
+    mockApi.adminListMcpTools.mockResolvedValue([
+      tool(),
+      tool({ id: 't2', toolName: 'refund_order' }),
+    ]);
+    mockApi.getMcpToolRetryPolicy.mockResolvedValueOnce({
+      retryEnabled: true,
+      retryMax: 5,
+      retryConditions: ['SERVER_5XX'],
+      idempotencyConfirmed: true,
+      version: 3,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="mcp-tools"]').trigger('click');
+    await flushPromises();
+
+    const openers = document.querySelectorAll<HTMLButtonElement>(
+      '[data-testid="mcp-tool-retry-open"]',
+    );
+    expect(openers).toHaveLength(2);
+
+    // Tool A loads its own policy: 5 retries with the idempotency gate confirmed.
+    openers[0]!.click();
+    await flushPromises();
+    expect(
+      (document.querySelector('[data-testid="mcp-tool-retry-max"]') as HTMLInputElement).value,
+    ).toBe('5');
+
+    // Tool B's policy does not load.
+    mockApi.getMcpToolRetryPolicy.mockRejectedValueOnce(
+      new ApiError({
+        type: 'about:blank',
+        title: 'internal error',
+        status: 500,
+        code: 'INTERNAL_ERROR',
+        detail: '服务内部错误，请稍后重试。',
+        requestId: 'rq-ph83',
+      }),
+    );
+    openers[1]!.click();
+    await flushPromises();
+
+    expect(mockApi.getMcpToolRetryPolicy).toHaveBeenLastCalledWith('m1', 't2');
+    expect(
+      document.querySelector('[data-testid="mcp-tool-retry-error"]'),
+      'the failed load should be reported',
+    ).toBeTruthy();
+
+    // B has no loaded policy, so A's policy must not be presented as B's.
+    expect(
+      (document.querySelector('[data-testid="mcp-tool-retry-max"]') as HTMLInputElement | null)
+        ?.value ?? '',
+    ).not.toBe('5');
+
+    // The form is not silently left editable over A's fields.
+    const save = document.querySelector<HTMLButtonElement>('[data-testid="mcp-tool-retry-save"]');
+    expect(save, 'the save button should render').toBeTruthy();
+    expect(save!.hasAttribute('disabled')).toBe(true);
+
+    // And saving must not write A's policy onto B. dispatchEvent reaches the handler
+    // even on a disabled button, so this asserts the entry guard itself.
+    save!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushPromises();
+    expect(mockApi.putMcpToolRetryPolicy).not.toHaveBeenCalled();
+  });
+
+  it('does not carry the previous service resilience policy into the drawer when the next load fails', async () => {
+    const policy = (retryMax: number): McpResiliencePolicy => ({
+      retryEnabled: true,
+      retryMax,
+      retryConditions: ['SERVER_5XX'],
+      idempotencyConfirmed: true,
+      breakerEnabled: false,
+      breakerWindowSeconds: 10,
+      breakerMinRequests: 10,
+      breakerErrorEnabled: true,
+      breakerErrorRatio: 50,
+      breakerErrorStatusCodes: [500, 502, 503, 504],
+      breakerSlowEnabled: false,
+      breakerSlowCallMs: 3000,
+      breakerSlowRatio: 80,
+      breakerOpenSeconds: 30,
+      breakerProbeCount: 3,
+      breakerProbeSuccess: 2,
+      breakerSkipRetry: true,
+    });
+    mockApi.adminListMcpServices.mockResolvedValue([
+      service({ id: 'svc-1', name: 'weather-mcp' }),
+      service({ id: 'svc-2', name: 'search-mcp' }),
+    ]);
+    mockApi.getMcpServiceResilience.mockResolvedValueOnce(policy(5));
+    const wrapper = mountView();
+    await flushPromises();
+
+    const openers = wrapper.findAll('[data-testid="mcp-resilience"]');
+    expect(openers).toHaveLength(2);
+
+    // Service A loads its own policy: 5 retries.
+    await openers[0]!.trigger('click');
+    await flushPromises();
+    expect(
+      (document.querySelector('[data-testid="mcp-res-retry-max"]') as HTMLInputElement).value,
+    ).toBe('5');
+
+    // Service B's policy does not load.
+    mockApi.getMcpServiceResilience.mockRejectedValueOnce(
+      new ApiError({
+        type: 'about:blank',
+        title: 'internal error',
+        status: 500,
+        code: 'INTERNAL_ERROR',
+        detail: '服务内部错误，请稍后重试。',
+        requestId: 'rq-ph83b',
+      }),
+    );
+    await openers[1]!.trigger('click');
+    await flushPromises();
+
+    expect(mockApi.getMcpServiceResilience).toHaveBeenLastCalledWith('svc-2');
+    expect(
+      document.querySelector('[data-testid="mcp-resilience-error"]'),
+      'the failed load should be reported',
+    ).toBeTruthy();
+
+    // B has no loaded policy, so A's policy must not be presented as B's.
+    expect(
+      (document.querySelector('[data-testid="mcp-res-retry-max"]') as HTMLInputElement | null)
+        ?.value ?? '',
+    ).not.toBe('5');
+
+    // The drawer body is collapsed and the save affordance is disabled, not a live button.
+    expect(document.querySelector('[data-testid="mcp-res-breaker-enabled"]')).toBeNull();
+    const save = document.querySelector<HTMLButtonElement>('[data-testid="mcp-resilience-save"]');
+    expect(save, 'the save button should render').toBeTruthy();
+    expect(save!.hasAttribute('disabled')).toBe(true);
+
+    // dispatchEvent reaches the handler even on a disabled button, so this asserts
+    // the entry guard itself: B must not receive A's 17-field draft.
+    save!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushPromises();
+    expect(mockApi.putMcpServiceResilience).not.toHaveBeenCalled();
   });
 
   it('previews the upstream tools/list sync and applies it on confirm', async () => {

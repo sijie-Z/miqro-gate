@@ -105,10 +105,11 @@ public class InternalServiceRepositoryImpl implements InternalServiceRepository 
 
     @Override
     @Transactional
-    public InternalService update(InternalService service, long expectedVersion) {
+    public InternalService replace(InternalService service, long expectedVersion) {
         int rows = jdbc.update("""
                 UPDATE services
-                SET description = :description, base_url = :baseUrl, status = :status, health_status = :healthStatus,
+                SET name = :name, kind = :kind, description = :description, base_url = :baseUrl,
+                    status = :status, health_status = :healthStatus,
                     health_checked_at = :checkedAt, consecutive_failures = :failures,
                     consecutive_successes = :successes, check_interval_seconds = :interval,
                     check_timeout_seconds = :timeout, fail_threshold = :failThreshold,

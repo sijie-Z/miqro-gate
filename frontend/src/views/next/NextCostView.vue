@@ -300,9 +300,15 @@ const budgetFormError = ref('');
 const budgetForm = ref({ projectId: '', amount: '', alertThresholdPct: '80' });
 const editingBudget = ref<BudgetView | null>(null);
 
+// #1291: 后端把 month=YYYY-MM 解释成 **UTC 日历月**窗口
+// （AdminBudgetService.spend() → atDay(1).atStartOfDay(ZoneOffset.UTC)），
+// 告警引擎按同一个窗口评估 BUDGET_THRESHOLD。这里曾用本地 getter 造月名：
+// UTC+8 的浏览器在本地 10-01 00:00–08:00 会请求 2026-10，而那个 UTC 窗口还没开始——
+// 面板显示「已用 0 / 正常」，告警此刻评估的却仍是 2026-09。与 #1234 的前端
+// UTC 口径（lib/quota-window-usage.ts）保持一致。
 const budgetMonth = computed(() => {
   const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 });
 
 const budgetTotalAmount = computed(() =>

@@ -3,6 +3,24 @@
 MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；版本号语义化（MAJOR.MINOR.PATCH）。
 
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
+### 2026-09-22
+
+- **用量删除不再悄悄解封超限配额（#1316）**：`quota_enforcement` 是网关 429 的**唯一**来源（快照 `quotaBlockedUserIds`/
+  `quotaBlockedProjectIds` → `QuotaGate`），而控制面 `QuotaEnforcementService` 每 60 秒用**实时**水位重算它——水位又是
+  从 `usage_event` 现算的。于是一次保留策略的 `USAGE_DELETE` 把当前窗口的用量行物理删掉之后，下一轮评估算出的水位归零、
+  规则不再 EXCEEDED、判定行消失、**流量重新放行**；而 ADR-0020 D2 给用户的承诺是「直到配额重置或提高限额才恢复」。
+  现在判定**粘在窗口里**：跨轮结转 `window_end` 与 `blocked_at`，实时水位掉下去也不解除；只有 ①窗口滚过去
+  ②管理员把限额提到记录在案的读数 `observed_used` 之上（V76 增列 `quota_enforcement.observed_used`）
+  ③规则被停用/删除，这三条能解掉 block。**恢复路径的比较基准是表里那条读数，不是 `quota_rules.updated_at`**：
+  任何一次保存都会把 `updated_at` 顶到当下，而评估器 60s 才跑一轮，于是「保存 → 删用量 → 下一轮评估」这个顺序
+  先给恢复路径上膛、再扣扳机——限额仍然低于当时的读数，block 却被解掉。记录读数每轮跟着实时水位上移，不会退化成
+  过期下界、让后来的提额错判成「已恢复」；采样边界与触发判定的那句「达到限额即 EXCEEDED」一致（`used >= limit`，
+  不是严格大于）。真库集成用例把这条时间线造了出来（`QuotaBlockSurvivesUsageDeletionIntegrationTest`，7 例：
+  删除不解除、跨窗口、提额解除、限额恰好提到读数、编辑后删除……），另有 12 例单元用例覆盖计算异常隔离、
+  记录读数上移与 V76 之前的旧行回退。
+
+- **缓存键新增 wire-protocol 维度（#1236 / #1395）**：响应缓存与请求合并（coalescer）的键现在包含入口协议族（`/v1/messages` / `/v1/responses` / `/v1/chat/completions` 各自独立），同一份 body 跨协议不再互相命中，更不会把一种协议的响应重放给另一种协议的客户端。**升级影响**：旧缓存条目不会被删除、也不会被改写，只是不再被命中，随各自 TTL 自然过期——升级后的短时间窗口内缓存命中率（及请求合并率）会有一次短暂下降，随后回到正常水平；无数据迁移，也无需人工清理。
+
 ### 2026-09-21
 
 - **模型广场 + 试调台：自助侧补上「我能用哪些模型」（#1201）**：新增 `GET /api/v1/me/plaza/models` —— 对调用者每把 ACTIVE 密钥给出 `key.models ∩ grant.models ∩ ACTIVE model_catalog` 的可用模型（与网关 `/v1/models` 同门；另附产品展示名、目录元数据与**最新单价快照**——与成本报表同价，无快照=null 不出 0），并列出「目录里有、密钥上还没有」的**可申请集合**（审批流的原料）。前端新增 **模型广场**（搜索/产品筛选/价格/上下文/可用密钥 chips/行内「试调」；下半区「可申请模型」一键带入申请表单）与 **试调台**（粘贴 Virtual Key 仅存页面内存 → 网关 `/v1/models` 读取该 Key 的真实可用模型 → `POST /v1/chat/completions` 发起真实调用，展示回复/延迟/tokens/目录价估算成本；调用与普通流量同规计量、审计并计入配额；错误按网关 `{"error":{…}}` 信封原样呈现，429 附 Retry-After 提示）。普通导航组新增两项；模型申请页支持 `?model=&keyId=` 深链预填。

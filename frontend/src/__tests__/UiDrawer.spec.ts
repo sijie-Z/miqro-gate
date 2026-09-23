@@ -138,14 +138,17 @@ describe('UiDrawer modal focus contract', () => {
       // not reach for a global that is already gone — that throws *after* every
       // test passed, failing the run with exit code 1 and no failing test to
       // point at (exactly how this reached CI).
-      (globalThis as { document?: Document }).document = undefined;
+      // jsdom 30 exposes `document` as a getter-only accessor, so a plain
+      // assignment now throws; stubGlobal swaps in a real data property and
+      // unstubAllGlobals restores the original descriptor.
+      vi.stubGlobal('document', undefined);
       vi.advanceTimersByTime(500);
       expect(removeListener).toHaveBeenCalledWith('focusin', expect.any(Function), true);
     } finally {
       // Undo everything unconditionally: a throw above is the failure this test
       // hunts for, and it must not become the reason later cases fail (leaked
       // fake timers starve the next test's macrotasks into a timeout).
-      (globalThis as { document?: Document }).document = doc;
+      vi.unstubAllGlobals();
       removeListener.mockRestore();
       vi.useRealTimers();
       wrapper.unmount();

@@ -694,4 +694,124 @@ describe('NextUsageView', () => {
     expect(wrapper.findAll('[data-testid="my-quota-row"]')).toHaveLength(1);
     expect(panel.find('[data-testid="my-quota-error"]').exists()).toBe(false);
   });
+
+  it('#PH69: a failed page change must not be silent while the pager claims the new page', async () => {
+    mockApi.usageRecords.mockResolvedValue({ ...records, total: 45 });
+    const wrapper = mountView();
+    await flushPromises();
+
+    mockApi.usageRecords.mockRejectedValueOnce(
+      new (await import('@/api/http')).ApiError({
+        type: 'about:blank',
+        status: 500,
+        code: 'INTERNAL',
+        detail: '数据库不可用',
+        requestId: 'req-records',
+        title: 'Error',
+      }),
+    );
+    await wrapper.find('[data-testid="records-next"]').trigger('click');
+    await flushPromises();
+
+    // The pager has already moved on …
+    expect(wrapper.text()).toContain('第 2 / 3 页');
+    // … while the rows on screen are still page 1's. Those two facts together are
+    // the misleading part: the panel presents page 1's rows as page 2's answer.
+    expect(wrapper.find('[data-testid="records-table"]').text()).toContain('deepseek-v4-flash');
+    // So the failure has to be legible somewhere. `recordsError` is already wired to
+    // the table's :error for exactly this, but Table.vue renders rows ahead of errors
+    // so that block is unreachable while stale rows exist — hence the page-level
+    // banner. The detail must reach the user either way.
+    const banner = wrapper.find('[data-testid="records-load-error"]');
+    expect(banner.exists()).toBe(true);
+    expect(banner.text()).toContain('数据库不可用');
+    expect(banner.text()).toContain('req-records');
+  });
+
+  it('#PH69: a failed window change must surface the summary failure too', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    mockApi.usageSummary.mockRejectedValueOnce(
+      new (await import('@/api/http')).ApiError({
+        type: 'about:blank',
+        status: 503,
+        code: 'UNAVAILABLE',
+        detail: '汇总服务暂时不可用',
+        requestId: 'req-summary',
+        title: 'Error',
+      }),
+    );
+    await wrapper.find('[data-testid="usage-range-7"]').trigger('click');
+    await flushPromises();
+
+    // The old window's totals are still on screen — that is deliberate (#643 keeps
+    // data visible across reloads), so the failure has to say so.
+    expect(wrapper.find('[data-testid="summary-table"]').text()).toContain('Core AI');
+    const banner = wrapper.find('[data-testid="summary-load-error"]');
+    expect(banner.exists()).toBe(true);
+    expect(banner.text()).toContain('汇总服务暂时不可用');
+    expect(banner.text()).toContain('req-summary');
+  });
+
+  // #PH89: the CSV is the table, in a file — every other column is copied
+  // verbatim, so the 时间 column has to be the time the exporter read on screen.
+  // `occurredAt` arrives as a UTC ISO string; writing it raw means the same
+  // record says 09:30 in the table and 01:30Z in the file.
+  it('#PH89: 导出 CSV 的时间列与屏幕同口径，不写后端 UTC 串', async () => {
+    const occurredAt = '2026-09-22T01:30:00Z';
+    mockApi.usageRecords.mockResolvedValue({
+      ...records,
+      items: [{ ...records.items![0]!, occurredAt }],
+    });
+
+    // jsdom's Blob has no .text(); capture the source string at construction.
+    const parts: string[] = [];
+    const RealBlob = globalThis.Blob;
+    class CapturingBlob extends RealBlob {
+      constructor(partList: BlobPart[], options?: BlobPropertyBag) {
+        super(partList, options);
+        parts.push(partList.join(''));
+      }
+    }
+    vi.stubGlobal('Blob', CapturingBlob);
+    Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() });
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="usage-export"]').trigger('click');
+    await flushPromises();
+    vi.unstubAllGlobals();
+
+    expect(parts).toHaveLength(1);
+    // The blob opens with a UTF-8 BOM so Excel reads it as UTF-8.
+    const raw = parts[0]!.split(String.fromCharCode(0xfeff)).join('');
+    const lines = raw.split('\n');
+    const header = lines[0]!.split(',');
+    expect(header[0]).toBe('"时间"');
+
+    const timeCell = lines[1]!.split(',')[0]!;
+    // Derived with local getters, so this holds in whatever zone it runs in.
+    const d = new Date(occurredAt);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const localDate = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const localClock = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+    expect(timeCell).toContain(localDate);
+    expect(timeCell).toContain(localClock);
+    // ...and the offset is written down. A bare local time in a file that will
+    // be read in another zone is ambiguous; this is what makes the cell an
+    // unambiguous instant again.
+    const offset = -d.getTimezoneOffset();
+    const abs = Math.abs(offset);
+    expect(timeCell).toContain(
+      `${offset < 0 ? '-' : '+'}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`,
+    );
+    // The raw UTC instant must not be what leaves the console. Only meaningful
+    // where it differs from the local rendering (at UTC+0 they are the same
+    // string and asserting absence would fail against correct code).
+    if (!localDate.startsWith(occurredAt.slice(0, 10)) || localClock !== '01:30') {
+      expect(timeCell).not.toContain(occurredAt);
+    }
+  });
 });

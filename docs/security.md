@@ -133,9 +133,15 @@
   无 CSRF（非 cookie 承载；读面全 GET）。
 - 会话规则：门户会话访问开放面仅限 SYSTEM_ADMIN（403 `ADMIN_API_FORBIDDEN`），会话租户即开放面租户
   （与机器密钥同一请求属性契约）。
-- 范围与边界：开放面现为租户级只读（usage/audit/api-keys/quota-rules/export-tasks 元数据/mcp 日志）；
-  写面待 ADR-0016（机器执行者语义）拍板；导出文件字节永不进入机器面。
-- 审计：机器调用全部进既有哈希链审计（动作命名空间 `ADMIN_API_KEY_*` 等），跨租户不可见。
+- 范围与边界：读子集为租户级只读（usage/audit/api-keys/quota-rules/export-tasks 元数据/mcp 日志）；
+  写面已在 ADR-0016（机器执行者语义，2026-09-08 Accepted）下按批开放——批 2 v1 含告警规则与 Webhook
+  端点全生命周期（候选 C）与导出创建（候选 A，`created_by` 记发行管理员）；导出文件字节永不进入机器面。
+- 审计：机器**写**操作全部进既有哈希链审计（动作命名空间 `ADMIN_API_KEY_*` 等），跨租户不可见，可沿链回到
+  「哪把密钥」→「谁发行」（ADR-0016 的可追溯性承诺，口径即「任何机器写操作」）。**有意不进审计的三类**
+  （不是缺陷，详见 issue #1409）：① 成功的只读调用；② 凭据缺失/无效的 401（`ADMIN_API_KEY_INVALID`）——
+  此时没有可归属的租户，而 `admin_audit_events.tenant_id` 是 `NOT NULL REFERENCES tenants(id)`；
+  ③ 门户非 SYSTEM_ADMIN 会话打开放面的 403（`ADMIN_API_FORBIDDEN`）。越权拒绝（`ADMIN_API_KEY_SCOPE_DENIED`）
+  **是**留痕的。若要连只读调用一并审计，属于扩大审计面的新决策，需新 ADR 与容量/留存评估。
 
 ## 供应链与发布门禁（G6.3）
 

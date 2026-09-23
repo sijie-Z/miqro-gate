@@ -188,6 +188,74 @@ describe('NextProjectsView', () => {
     expect((mockApi.listProjectMembers as ReturnType<typeof vi.fn>).mock.calls.length).toBe(2);
   });
 
+  it('#PH78: the 成员 count in the row follows the roster after an add', async () => {
+    mockApi.listProjectMembers.mockResolvedValue([member()]);
+    mockApi.addProjectMember.mockResolvedValue(undefined);
+    mockApi.listUsers.mockResolvedValue([
+      user({ id: 'u1', username: 'alice', displayName: 'Alice' }),
+      user({ id: 'u2', username: 'bob', displayName: 'Bob' }),
+    ]);
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.findAll('[data-testid="project-member-count"]')[0]!.text()).toBe('1');
+
+    await wrapper.find('[data-testid="project-members-open"]').trigger('click');
+    await flushPromises();
+
+    // The add lands server-side: the next roster read returns two members.
+    mockApi.listProjectMembers.mockResolvedValue([
+      member(),
+      member({ userId: 'u2', username: 'bob', displayName: 'Bob' }),
+    ]);
+
+    const select = wrapper.findComponent(UiSelect);
+    select.vm.$emit('update:modelValue', 'u2');
+    await flushPromises();
+    (document.querySelector('[data-testid="project-member-add"]') as HTMLButtonElement).click();
+    await flushPromises();
+
+    // The roster the user is looking at now holds two people...
+    expect(document.querySelector('[data-testid="project-members-table"]')!.textContent).toContain(
+      'bob',
+    );
+    // ...so the project row behind it must not still be advertising the old count.
+    expect(wrapper.findAll('[data-testid="project-member-count"]')[0]!.text()).toBe('2');
+  });
+
+  it('#PH78: the 成员 count in the row follows the roster after a remove', async () => {
+    mockApi.listProjectMembers.mockResolvedValue([
+      member(),
+      member({ userId: 'u2', username: 'bob', displayName: 'Bob' }),
+    ]);
+    mockApi.removeProjectMember.mockResolvedValue(undefined);
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.findAll('[data-testid="project-member-count"]')[0]!.text()).toBe('2');
+
+    await wrapper.find('[data-testid="project-members-open"]').trigger('click');
+    await flushPromises();
+
+    // The removal lands server-side: the next roster read returns one member.
+    mockApi.listProjectMembers.mockResolvedValue([member()]);
+
+    (document.querySelector('[data-testid="project-member-remove"]') as HTMLButtonElement).click();
+    await flushPromises();
+    const confirm = (Array.from(document.querySelectorAll('button')) as HTMLButtonElement[]).find(
+      (b) => b.textContent?.trim() === '移除' && b.className.includes('ui-btn--danger'),
+    );
+    confirm!.click();
+    await flushPromises();
+
+    // The roster behind the drawer shrank...
+    expect(
+      document.querySelector('[data-testid="project-members-table"]')!.textContent,
+    ).not.toContain('bob');
+    // ...so the row must not keep advertising the pre-removal headcount.
+    expect(wrapper.findAll('[data-testid="project-member-count"]')[0]!.text()).toBe('1');
+  });
+
   it('shows the routing-tag hint on the create form (#617)', async () => {
     const wrapper = mountView();
     await flushPromises();
@@ -298,5 +366,47 @@ describe('NextProjectsView', () => {
 
     expect(mockApi.listUsers).toHaveBeenCalledTimes(2);
     expect(document.querySelector('[data-testid="project-users-error"]')).toBeNull();
+  });
+
+  it('#PH69: a failed member load must not leave the drawer claiming「还没有成员」', async () => {
+    mockApi.listProjectMembers.mockRejectedValue(
+      new (await import('@/api/http')).ApiError({
+        type: 'about:blank',
+        status: 500,
+        code: 'INTERNAL',
+        detail: '数据库不可用',
+        requestId: 'req-members',
+        title: 'Error',
+      }),
+    );
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="project-members-open"]').trigger('click');
+    await flushPromises();
+
+    const drawer = document.querySelector('[data-testid="project-members-drawer"]');
+    expect(drawer).toBeTruthy();
+    // Before the fix the drawer's only signal was a toast, gone after
+    // DURATION_ERROR (7 s) while the drawer stays open. What is left is an
+    // assertion about the project's roster that the failed read never
+    // established. #1160 — 加载中 → 失败 → 空 → 有数据 — and the sibling users
+    // list above in this same drawer already honours it.
+    expect(drawer!.textContent).not.toContain('还没有成员');
+    expect(drawer!.textContent).toContain('数据库不可用');
+    expect(drawer!.textContent).toContain('req-members');
+
+    // And the failure carries a way out, instead of 关掉抽屉再点开一次.
+    const retry = document.querySelector(
+      '[data-testid="project-members-drawer"] [data-testid="table-load-retry"]',
+    );
+    expect(retry, 'the members table must offer a retry').toBeTruthy();
+    mockApi.listProjectMembers.mockResolvedValue([member()]);
+    (retry as HTMLButtonElement).click();
+    await flushPromises();
+
+    const after = document.querySelector('[data-testid="project-members-drawer"]');
+    expect(after!.textContent).toContain('alice');
+    expect(after!.textContent).not.toContain('数据库不可用');
   });
 });

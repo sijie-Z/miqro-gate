@@ -173,6 +173,66 @@ describe('NextAdminWebhooksView', () => {
     expect(deps!.textContent).toContain('已启用');
   });
 
+  it('#1307: does not present the aggregate rate as complete when one history is unknown', async () => {
+    mockApi.listWebhooks.mockResolvedValue([
+      endpoint({ id: 'w1' }),
+      endpoint({ id: 'w2', name: 'sre-hook' }),
+    ]);
+    mockApi.webhookDeliveries.mockImplementation(async (id: string) => {
+      if (id === 'w2') {
+        throw new ApiError({
+          type: 'about:blank',
+          title: 'internal error',
+          status: 500,
+          code: 'INTERNAL_ERROR',
+          detail: '服务内部错误，请稍后重试。',
+          requestId: 'rq-1307',
+        });
+      }
+      return [delivery({ id: 'd1', httpStatus: 200 }), delivery({ id: 'd2', httpStatus: 200 })];
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    // The per-row cell is honest about the endpoint whose history did not load.
+    const unknownRow = wrapper.findAll('tr').find((r) => r.text().includes('sre-hook'));
+    expect(unknownRow, 'sre-hook row should render').toBeTruthy();
+    expect(unknownRow!.text()).toContain('—');
+
+    // The aggregate must not claim "全部端点" health from one endpoint's data.
+    const donut = wrapper.find('[data-testid="webhook-rate-donut"]');
+    expect(donut.exists()).toBe(true);
+    expect(donut.text()).not.toContain('100%');
+    expect(donut.text()).toContain('—');
+
+    const summary = wrapper.find('[data-testid="webhook-rate-dist"]');
+    expect(summary.text()).toContain('1 个端点的历史未取到，未计入');
+  });
+
+  it('#1307: an aggregate with no readable history still says so instead of vanishing', async () => {
+    mockApi.listWebhooks.mockResolvedValue([endpoint({ id: 'w1' })]);
+    mockApi.webhookDeliveries.mockRejectedValue(
+      new ApiError({
+        type: 'about:blank',
+        title: 'internal error',
+        status: 500,
+        code: 'INTERNAL_ERROR',
+        detail: '服务内部错误，请稍后重试。',
+        requestId: 'rq-1307b',
+      }),
+    );
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const summary = wrapper.find('[data-testid="webhook-rate-dist"]');
+    expect(summary.exists()).toBe(true);
+    expect(summary.text()).toContain('1 个端点的历史未取到，未计入');
+    expect(summary.text()).toContain('投递历史未能读取，无法统计成功率。');
+    expect(wrapper.find('[data-testid="webhook-rate-donut"]').text()).toContain('—');
+  });
+
   it('shows the recent-20 delivery success rate per endpoint', async () => {
     mockApi.listWebhooks.mockResolvedValue([endpoint()]);
     mockApi.webhookDeliveries.mockResolvedValue([
@@ -185,5 +245,84 @@ describe('NextAdminWebhooksView', () => {
     const badge = wrapper.find('[data-testid="webhook-rate-w1"]');
     expect(badge.exists()).toBe(true);
     expect(badge.text()).toContain('2/3');
+  });
+
+  describe('row actions while a request is still in flight', () => {
+    it('sends one test delivery when 测试 is clicked twice before the first returns', async () => {
+      mockApi.listWebhooks.mockResolvedValue([endpoint()]);
+      // never resolves: both clicks land while the first request is in flight
+      mockApi.testWebhook.mockReturnValue(
+        new Promise<{ httpStatus?: number; errorMessage?: string }>(() => {}),
+      );
+      const wrapper = mountView();
+      await flushPromises();
+
+      const button = wrapper.find('[data-testid="webhook-test"]');
+      await button.trigger('click');
+      await button.trigger('click');
+      await flushPromises();
+
+      // one click is one real outbound signed delivery to the customer's receiver
+      expect(mockApi.testWebhook).toHaveBeenCalledTimes(1);
+    });
+
+    it('sends one PATCH when the enable/disable toggle is clicked twice before the first returns', async () => {
+      mockApi.listWebhooks.mockResolvedValue([endpoint()]);
+      mockApi.updateWebhook.mockReturnValue(new Promise<WebhookEndpointView>(() => {}));
+      const wrapper = mountView();
+      await flushPromises();
+
+      // Locate by row text + button label rather than by `data-testid="webhook-toggle"`:
+      // that testid is introduced by the fix, so keying on it would make this test fail on
+      // the unfixed revision at the selector, not at the call count it is meant to prove.
+      const row = wrapper.findAll('tr').find((r) => r.text().includes('ops-alerts'));
+      expect(row, 'endpoint row should render').toBeDefined();
+      const toggle = row!.findAll('button').find((b) => ['停用', '启用'].includes(b.text()));
+      expect(toggle, 'enable/disable toggle should render').toBeDefined();
+
+      await toggle!.trigger('click');
+      await toggle!.trigger('click');
+      await flushPromises();
+
+      expect(mockApi.updateWebhook).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows the in-flight row as busy instead of silently swallowing the click', async () => {
+      mockApi.listWebhooks.mockResolvedValue([endpoint()]);
+      mockApi.testWebhook.mockReturnValue(new Promise<{ httpStatus?: number }>(() => {}));
+      const wrapper = mountView();
+      await flushPromises();
+
+      const button = wrapper.find('[data-testid="webhook-test"]');
+      expect(button.attributes('disabled')).toBeUndefined();
+
+      await button.trigger('click');
+      await flushPromises();
+
+      expect(button.attributes('disabled')).toBeDefined();
+      expect(button.attributes('aria-busy')).toBe('true');
+    });
+
+    it('does not let one pending row block an action on a different row', async () => {
+      mockApi.listWebhooks.mockResolvedValue([
+        endpoint({ id: 'w1' }),
+        endpoint({ id: 'w2', name: 'sre-hook' }),
+      ]);
+      mockApi.testWebhook.mockReturnValue(new Promise<{ httpStatus?: number }>(() => {}));
+      const wrapper = mountView();
+      await flushPromises();
+
+      const tests = wrapper.findAll('[data-testid="webhook-test"]');
+      expect(tests).toHaveLength(2);
+
+      await tests[0]!.trigger('click');
+      await flushPromises();
+      await tests[1]!.trigger('click');
+      await flushPromises();
+
+      expect(mockApi.testWebhook).toHaveBeenCalledTimes(2);
+      expect(mockApi.testWebhook).toHaveBeenNthCalledWith(1, 'w1');
+      expect(mockApi.testWebhook).toHaveBeenNthCalledWith(2, 'w2');
+    });
   });
 });

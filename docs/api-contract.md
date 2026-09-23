@@ -214,6 +214,8 @@
 
 `status` ∈ `ACTIVE | ROTATING | REVOKED | DISABLED`。`cachePolicy` 默认 `DISABLED`（显式开启才可参与响应缓存）。
 
+**归属与例外**：`/api/v1/me/virtual-keys/**` 默认只作用于调用者自己的 Key——非属主请求 `/{id}` 一律 `404 KEY_NOT_FOUND`（不区分「不存在」与「不是你的」，反枚举）。唯一例外是 `SYSTEM_ADMIN`：安全闸按前缀放行后，管理员可对该面上**任意** Key 执行 `GET`/`PATCH`/`disable`/`enable`/`rotate`/`revoke`（实现为 `VirtualKeyService.ownedKey()` 的 `SYSTEM_ADMIN` 豁免；对应 `virtual-key-lifecycle.md` §4/§5「管理员可以禁用或吊销任意 Key」）。**注意这是 `{id}` 级运维面**：要「按用户列出某人的 Key」，会话面没有对应端点（§5 序言那条 `/api/v1/admin/virtual-keys` 仍未实现，见 #1377）；`GET /api/v1/me/virtual-keys` 对管理员也严格自限。管理员代为 `rotate` 会一次性拿到新明文 Secret（§4.3），需按凭证处置。
+
 ### 4.3 轮换与吊销
 
 `POST /api/v1/me/virtual-keys/{id}/rotate` 原子轮换：旧 Key 立即停止接受新请求，在配置宽限期（`miqrokey.virtual-key-rotate-grace`，默认 `PT0S`）内仍可路由，宽限结束后失效。响应与创建响应相同（`CreateVirtualKeyResponse`，新 Secret 仅本次出现一次）。
@@ -390,13 +392,14 @@
 - `/api/v1/admin/teams`、`/projects`：组织与项目。
 - `/api/v1/admin/provider-products`：供应商产品实例、Base URL、协议族、目录版本。
 - `/api/v1/admin/subscriptions`：PAYG、个人 Plan、团队 Plan、企业 Plan。
-- `/api/v1/admin/subscriptions/{id}/members`：席位、成员 Key 或共享池成员关系。
+- `/api/v1/admin/subscriptions/{id}/seats`：席位、成员 Key 或共享池成员关系（详见 §5.0b）。
 - `/api/v1/admin/credentials`：创建、测试、轮换、禁用真实凭证。
 - `/api/v1/admin/grants`：向用户授予项目、产品、凭证和模型范围。
-- `/api/v1/admin/virtual-keys`：全局查询、吊销；仍不返回明文。
+- `/api/v1/admin/virtual-keys`：**未实现（#1377）**——该路由在代码中不存在，请求一律 `404 NOT_FOUND`（本机实例实测：四形状 `GET` / `GET ?userId=` / `GET /{id}` / `POST /{id}/revoke` 全部 404）。管理员的密钥运维实际落在 §4 的自助面上：`VirtualKeyService.ownedKey()` 对 `SYSTEM_ADMIN` 豁免归属校验，故管理员可对**任意** Key 调 `GET`/`PATCH /api/v1/me/virtual-keys/{id}` 与 `/{id}/disable|enable|rotate|revoke`（对应 `virtual-key-lifecycle.md` §4/§5「管理员也可以代为轮换」「管理员可以禁用或吊销任意 Key」的要求），代价是必须**已知目标 Key 的 UUID**；非管理员对他人 Key 仍是 `404 KEY_NOT_FOUND`（反枚举口径不变）。该面的**读响应不含明文**（只有 `displayPrefix`/`lastFour`），`revoke` 只回 `{"message":"Virtual key revoked"}`；只有 `create`/`rotate` 会一次性返回明文 Secret（`shownOnce`，§4.2/§4.3）——管理员代为 `rotate` 他人的 Key，也会拿到一次新明文，需按凭证处置。
+  - **跨用户列表在会话面不存在**：`GET /api/v1/me/virtual-keys` 严格只返回调用者自己的 Key（管理员亦然）。按用户查列表目前只有机器密钥面 `GET /api/v1/admin-api/virtual-keys?userId=`（§9；需机器密钥且先知道 `userId`）。`VirtualKeyRepository.findAllByTenantId()` 虽已存在但无生产调用方——即本条承诺的「全局查询」在**任何会话面都没有实现**，是否补一个会话面管理员端点属产品决定，见 #1377。
 - `/api/v1/admin/usage/**`：全局汇总、差异视图、解析失败队列。
 - `/api/v1/admin/exports`：创建和下载原始记录导出任务。
-- `/api/v1/admin/reconciliation/**`：导入官方账单并生成匹配结果。
+- `/api/v1/admin/reconciliations/**`：导入官方账单并生成匹配结果（详见 §5.27）。
 - `/api/v1/admin/webhooks`：目标、签名 Secret、测试和投递记录。
 - `/api/v1/admin/audit-events`：不可修改的管理审计事件（读面可选 `action`/`targetType`/`actorId`/
   `from`/`to` 精确筛选 + `beforePosition` cursor）；每行带**只读** `targetName`（#389，doc 27）：按页内
@@ -457,13 +460,13 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `GET /api/v1/admin/provider-products/{id}` | 产品详情 |
 | `GET /api/v1/admin/provider-products/providers` | 供应商列表 |
 | `GET /api/v1/admin/subscriptions` / `/{id}` | 订阅列表/详情（含产品名） |
-| `POST /api/v1/admin/subscriptions` | 创建（`providerProductId`/`name`/`billingMode`/`planScope`/价格/配额） |
-| `PATCH /api/v1/admin/subscriptions/{id}` | 更新（价格/币种/配额/状态） |
+| `POST /api/v1/admin/subscriptions` | 创建（`providerProductId`/`name`/`billingMode`/`planScope`/价格/配额/账期 `periodStart`+`periodEnd`+`renewalAt`） |
+| `PATCH /api/v1/admin/subscriptions/{id}` | 更新（价格/币种/配额/状态/账期三字段）；未提交或 `null` 的字段保留原值（本 PATCH 无清空入口） |
 | `GET /api/v1/admin/subscriptions/{id}/seats` | 席位列表（含分配用户） |
 | `POST /api/v1/admin/subscriptions/{id}/seats` | 创建席位（`externalSeatRef`/`displayName`/`assignedUserId`） |
 | `PATCH /api/v1/admin/subscriptions/{id}/seats/{seatId}` | 分配/释放/禁用席位 |
 
-错误码：`PRODUCT_NOT_FOUND`（404）、`SUBSCRIPTION_NOT_FOUND`（404）、`SEAT_NOT_FOUND`（404）。写操作审计 `SUBSCRIPTION_CREATE/UPDATE`、`SEAT_CREATE/UPDATE`。成员 Key（席位凭证）继续由 `/api/v1/admin/credentials` 管理（`seat_id` 关联）。
+错误码：`PRODUCT_NOT_FOUND`（404）、`SUBSCRIPTION_NOT_FOUND`（404）、`SEAT_NOT_FOUND`（404）、`TIME_RANGE_INVALID`（400，账期须成对提交且 start 严格早于 end；PATCH 按合并后的最终值判定）。写操作审计 `SUBSCRIPTION_CREATE/UPDATE`、`SEAT_CREATE/UPDATE`。成员 Key（席位凭证）继续由 `/api/v1/admin/credentials` 管理（`seat_id` 关联）。
 
 ### 5.1 上游凭证
 
@@ -624,7 +627,7 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `GET /api/v1/admin/subscriptions/{subscriptionId}/cost-allocation?from&to` | 已持久化的分摊行（不重算） |
 | `POST /api/v1/admin/subscriptions/{subscriptionId}/cost-allocation/allocate?from&to` | 计算并持久化分摊，返回行 |
 
-行字段：`targetType`（当前 `PROJECT`）、`targetId`、`fixedCost`（订阅价按窗口/周期天数比例折算）、`usageCost`（本地 usage × 最新价格快照，每百万 token 单价）、`weightTokens`、`allocatedAmount`、`currency`、`algorithmVersion`（当前 `1`）、`generatedAt`。
+行字段：`targetType`（当前 `PROJECT`）、`targetId`、`fixedCost`（订阅价按窗口时长占订阅周期的份额折算，毫秒精度、不截断到整天；订阅无账期或 PAYG 时为 0）、`usageCost`（本地 usage × 最新价格快照，每百万 token 单价）、`weightTokens`、`allocatedAmount`、`currency`、`algorithmVersion`（当前 `1`）、`generatedAt`。
 
 语义：
 
@@ -887,11 +890,13 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `GET /api/v1/admin/skills/{id}/revisions?limit=` | **I14 版本历史**（新→旧，默认 20/上限 50）：`{revision, version, description, author, license, tags, examples, contentSha256, contentBytes, createdBy, createdAt, activatedAt}`——**只回元数据，不回包体**；`activatedAt` 非空即当前版本 |
 | `POST /api/v1/admin/skills/{id}/revisions/{revision}/activate` | **I14 回滚/切换**：激活指定修订（幂等，不产生新版本号），并把该修订的元数据+包体镜像回 `skills`（目录/下载即时生效）；审计 `SKILL_REVISION_ACTIVATE`（发布审计 `SKILL_REVISION_PUBLISH`） |
 
-**格式校验（上传时）**：zip 必须只含一个技能目录（`skill-name/`），含 `SKILL.md`（YAML frontmatter：`name` 必填且为小写 kebab-case、与目录名一致、不含 claude/anthropic 保留词；`description` 必填 ≤ 1024 字符；可选 `author`/`license`/`tags`/`examples`；`tags` ≤5 个 × ≤20 字符（重复去重）；`examples` ≤10 条 × ≤512 字符）。包上限 5MB、条目上限 200、SKILL.md 上限 512KB（防 zip 炸弹——只读 SKILL.md，不解压）。`version` 必填语义化（`\d+\.\d+\.\d+`）。
+**格式校验（上传时）**：zip 必须只含一个技能目录（`skill-name/`），含 `SKILL.md`（YAML frontmatter：`name` 必填且为小写 kebab-case、与目录名一致、不含 claude/anthropic 保留词；`description` 必填 ≤ 1024 字符；可选 `author`/`license`/`tags`/`examples`；`tags` ≤5 个 × ≤20 字符（重复去重）；`examples` ≤10 条 × ≤512 字符）。包上限 5MB、条目上限 200、SKILL.md 上限 512KB、解压后总体积上限 64MB（防 zip 炸弹——逐条目流式走过计数、不落盘解压；条目流与中央目录两视图必须相互核对，不一致即拒绝；EOCD 记录必须位于文件末尾 22+65535（注释）+65535（填充）字节窗口内，且注释之后的填充区不得再出现第二条 EOCD 记录）。`version` 必填语义化（`\d+\.\d+\.\d+`）。
+
+**支持的 ZIP 子集**：仅接受 canonical 布局——`[局部头链][中央目录][EOCD(+注释)]` 无缝铺满、两视图逐条目全等、**条目路径唯一**（两个条目规范化到同一交付路径即拒：不同读者对重复条目的取舍不同，解包结果无法与校验结论一致）；中央目录记录经「局部头相对偏移」指回局部头（**记录顺序不限**，偏移是配对的权威依据）。下列合法结构**明确不支持**、一律 400 拒绝：**ZIP64**（含 zip64 EOCD 定位器与 extra 字段，`SKILL_ZIP64_UNSUPPORTED`）、**多卷（multi-disk）**、**Archive Extra Data Record**、**中央目录数字签名（CD digital signature）**及其余非 canonical 扩展记录（`SKILL_ZIP_STRUCTURE_INVALID`）。EOCD 注释是按 `commentLength` 声明的任意数据：其中出现 `PK\x05\x06` 字节序列不算第二条 EOCD 记录（注释区不参与第二记录扫描；注释之后的填充区仍全文扫描）。
 
 **下载授权语义**：无 `skill_access` 行 = 公开；有行 = 仅授权 TEAM/PROJECT 成员（及管理员）可下载；非成员 `403 SKILL_DOWNLOAD_FORBIDDEN`；归档技能对目录/详情/下载一律 `404 SKILL_NOT_FOUND`。
 
-**错误码**：`SKILL_NOT_FOUND`（404）、`SKILL_DOWNLOAD_FORBIDDEN`（403）、`VERSION_INVALID`（400）、`SKILL_EMPTY`/`SKILL_TOO_LARGE`/`SKILL_TOO_MANY_ENTRIES`/`SKILL_ZIP_INVALID`/`SKILL_ENTRY_PATH_INVALID`/`SKILL_DECOMPRESSED_TOO_LARGE`/`SKILL_MD_MISSING`/`SKILL_MD_TOO_LARGE`/`SKILL_FRONTMATTER_INVALID`/`SKILL_NAME_INVALID`/`SKILL_NAME_MISMATCH`/`SKILL_DESCRIPTION_INVALID`/`SKILL_TAGS_INVALID`/`SKILL_EXAMPLES_INVALID`/`SKILL_QUERY_INVALID`（400）、`SCOPE_INVALID`（400）。视图（列表/详情）含 `examples` 与 `createdBy`/`createdByName`（创建人姓名，服务端解析）。
+**错误码**：`SKILL_NOT_FOUND`（404）、`SKILL_DOWNLOAD_FORBIDDEN`（403）、`VERSION_INVALID`（400）、`SKILL_EMPTY`/`SKILL_TOO_LARGE`/`SKILL_TOO_MANY_ENTRIES`/`SKILL_ZIP_INVALID`/`SKILL_ZIP_STRUCTURE_INVALID`/`SKILL_ZIP64_UNSUPPORTED`/`SKILL_ENTRY_PATH_INVALID`/`SKILL_DECOMPRESSED_TOO_LARGE`/`SKILL_MD_MISSING`/`SKILL_MD_TOO_LARGE`/`SKILL_FRONTMATTER_INVALID`/`SKILL_NAME_INVALID`/`SKILL_NAME_MISMATCH`/`SKILL_DESCRIPTION_INVALID`/`SKILL_TAGS_INVALID`/`SKILL_EXAMPLES_INVALID`/`SKILL_QUERY_INVALID`（400）、`SCOPE_INVALID`（400）。视图（列表/详情）含 `examples` 与 `createdBy`/`createdByName`（创建人姓名，服务端解析）。
 
 ### 5.13 Agent 管理（P3.1，对标阿里 AI 网关 Agent 拓扑）
 
@@ -956,7 +961,7 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 | `GET /api/v1/admin/mcp-services` / `/{id}` | 列表/详情（含健康状态与检查配置） |
 | `POST /api/v1/admin/mcp-services` | 注册：`{ "name", "description"?, "endpoint", "transport"?, "checkIntervalSeconds"?, "checkTimeoutSeconds"?, "failThreshold"?, "recoverThreshold"?, "checkPath"?, "upstreamTimeoutMs"? }`（默认 STREAMABLE_HTTP / 30s / 5s / 3 / 1 / `/health` / 60000ms；注册即自动生成 default 路由，见 5.23） |
 | `POST /api/v1/admin/mcp-services/{id}/status?status=ONLINE\|OFFLINE` | 手动上下线（重复切换 `409 MCP_STATUS_UNCHANGED`；并发编辑乐观锁竞争 → `409 CONCURRENT_MODIFICATION`，#415） |
-| `POST /api/v1/admin/mcp-services/{id}/health-config` | 健康探测配置部分更新：`{ "checkIntervalSeconds"?, "checkTimeoutSeconds"?, "failThreshold"?, "recoverThreshold"?, "checkPath"?, "checkMode"? }`。**#387 探测方式**：`HEALTH_PATH`（默认，GET `endpoint + checkPath` 2xx 健康）| `JSONRPC_INITIALIZE`（标准 MCP 服务无 HTTP 健康路径时使用：POST `endpoint` JSON-RPC 2.0 `initialize` 信封，2xx 且响应体含 `"jsonrpc"` 健康——兼容 SSE 帧包裹；API_KEY 后端自动携带解密 Bearer，凭证不可用 fail-closed）。非法值 `400 MCP_CHECK_MODE_INVALID` |
+| `POST /api/v1/admin/mcp-services/{id}/health-config` | 健康探测配置部分更新：`{ "checkIntervalSeconds"?, "checkTimeoutSeconds"?, "failThreshold"?, "recoverThreshold"?, "checkPath"?, "checkMode"? }`。**#387 探测方式**：`HEALTH_PATH`（默认，GET `endpoint + checkPath` 2xx 健康）| `JSONRPC_INITIALIZE`（标准 MCP 服务无 HTTP 健康路径时使用：POST `endpoint` JSON-RPC 2.0 `initialize` 信封，2xx 且响应体含 `"jsonrpc"` 健康——兼容 SSE 帧包裹；API_KEY 后端自动携带解密 Bearer，凭证不可用 fail-closed）。非法值 `400 MCP_CHECK_MODE_INVALID`。数值/长度与注册端点同口径：`checkIntervalSeconds` ∈ [5,3600]、`checkTimeoutSeconds` ∈ [1,60]、`failThreshold`/`recoverThreshold` ∈ [1,20]、`checkPath` ≤ 512 字符；越界 → `400 VALIDATION_FAILED`（`fieldErrors` 指明字段，#1348） |
 | `PUT /api/v1/admin/mcp-services/{id}/backend-auth` | 上游后端鉴权（#320，腾讯 raw 03）：body `{"mode":"VISITOR\|API_KEY","secret"?}`——
   `VISITOR` 清除已存密钥；`API_KEY` 必填 `secret`（≤4096）。密钥**只写不读**：任何读面（列表/详情/审计）永不返回；
   存储 AES-GCM 加密（AAD 绑定 tenant+service）；网关向上游注入固定 `Authorization: Bearer <secret>`；变更即时生效（快照刷新）。
@@ -1002,6 +1007,7 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 | `POST /api/v1/admin/model-approvals/{id}/reject` | 驳回（`{ "reviewNote"? }`） |
 
 - `status` ∈ `PENDING\|APPROVED\|REJECTED`，缺省返回全部；`size` 默认 20、上限 100；`before` 为上一页 `nextCursor`（不透明，编码 `(created_at, id)`；非法游标 `400 PARAM_INVALID`）。倒序返回 `{ "items": [ModelApprovalView], "nextCursor" }`。
+- **游标精度（#1392）**：游标按 `(created_at, id)` 键集比较，而 `created_at` 是 `timestamptz`（微秒精度），因此游标携带**微秒**——毫秒会丢掉边界行自身的亚毫秒部分，把同一毫秒内的其它行永久跳过、并让队列提前翻到底。要读完整队列必须沿 `nextCursor` 逐页走，**不要**数页数；`nextCursor` 为服务端产出的不透明串，无下一页时为 `null`。客户端不得解析其内容，也不得跨版本缓存（精度变化时旧游标仍可解，但应重新从首页开始）。
 - **通过语义**：写入 `virtual_key_models`（申请 Key）+ 若模型不在 Grant 中先写入 `project_provider_grant_models`（网关按 `key.models ∩ grant.models ∩ model_catalog(ACTIVE)` 三层放行，缺一不可），随后**立即**触发路由快照刷新（不等 30s 定时）。同 Grant 其它 Key 不受影响（各自 Key 快照独立）。
 - **批准前复核目录（#506）**：提交与批准两个时点都校验模型在该产品的 `model_catalog` 中有 ACTIVE 行——提交后模型被移出/停用目录时，批准返回 `409 MODEL_NOT_IN_CATALOG`（否则将"批准成功但网关不可见"）。
 - 仅 PENDING 可审批：重复审批 `409 ALREADY_REVIEWED`（乐观锁，并发评审只有一个成功）；Key 已吊销/停用 → `409 KEY_NOT_ACTIVE`（含轮换后的旧 Key：申请永远无法生效，提示会指引管理员改为「驳回」）；Grant 已停用 → `409 GRANT_INACTIVE`；不存在 → `404 APPROVAL_NOT_FOUND`。
@@ -1048,8 +1054,8 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 - **水位口径（读时计算，非预聚合）**：TOKENS = 当期窗口 usage 事件全部 token（input+output+cacheRead+cacheCreation，与个人用量 TotalTokens 同口径）；REQUESTS = 当期到达上游的请求数（缓存命中不达上游、不计入，与腾讯「不计入缓存命中」档语义一致）；COST = 当期窗口按价格快照估算的上游实付（与成本报表同口径，缺价记 0）。窗口为 UTC 切片：DAILY=当日 / WEEKLY=周一起 / MONTHLY=当月（与月度预算同约定）/ YEARLY=自然年（1 月 1 日起）。水位计算走内部无上限窗口路径，不受公开查询 93 天窗口约束。
 - `level`：`NORMAL` → `WARNING`（≥ warnPercent）→ `NEAR_LIMIT`（≥ 90%，固定提示档，对标腾讯「即将超限」）→ `EXCEEDED`（≥ 100%），按严重度判定。
 - **COST 水位的定价口径（#943）**：`used` 是**已定价部分之和**——窗口内若有用量在发生时没有生效价目，它对 `used` 的贡献是 0。为免「未定价的窗口」与「确实没花钱」读成同一个数，**COST 规则**的响应额外带 `pricingStatus`（`COMPLETE`/`PARTIAL`/`UNAVAILABLE`）与 `unpriced`（同 `usage/summary` 的 `PricingGap`：`unpricedEvents`/`unavailableEvents`/`unpricedHitEvents` 及各维度 token 数）——字段名与口径都取自用量 API（#766），两页对同一个窗口的说法因此一致；`pricingStatus != COMPLETE` 时 `used` 是**下界**，管理端配额页与「我的配额」都在数字旁标「未定价」（hover 说明缺口）。TOKENS/REQUESTS 规则的这两个字段为 `null`：token 与请求数与定价无关。**执法语义不变**——`level`/`EXCEEDED` 仍只按 `used` 判定，「未定价窗口该不该拒绝 `REJECT` 规则」属 #943 待决问题②，本版未动。
-- **超限动作（#684，ADR-0020）**：`ALERT`（默认）只体现水位、永不阻断；`REJECT` 由控制面评估器（`QuotaEnforcementService`，默认 60s 固定延迟）把超限作用域写入 `quota_enforcement` → 随路由快照下发 → 网关在准入处（Key 解析后、读 body 前）查内存集合，命中即 `429` + 标准错误信封（`type=quota_exceeded`，文案含恢复路径）+ **`Retry-After`**（秒：该作用域最早可自愈的窗口结束时刻；多规则拦同一作用域取最早），`/v1/models` 同受此门。**软着陆语义**：Key 不失效、不自动禁用；**跨入新窗口**或**提高限额/停用规则**后判定自然消失、流量自动恢复。
-- **近似语义（必须知道）**：判定按周期刷新，不含评估间隔内新产生的用量——额度可能被超出一个评估周期内的量；页面水位与网关判定在一个周期内可能不一致。不承诺"恰好卡在 100%"，不做限流（速率语义另议）。
+- **超限动作（#684，ADR-0020）**：`ALERT`（默认）只体现水位、永不阻断；`REJECT` 由控制面评估器（`QuotaEnforcementService`，默认 60s 固定延迟）把超限作用域写入 `quota_enforcement` → 随路由快照下发 → 网关在准入处（Key 解析后、读 body 前）查内存集合，命中即 `429` + 标准错误信封（`type=quota_exceeded`，文案含恢复路径）+ **`Retry-After`**（秒：该作用域最早可自愈的窗口结束时刻；多规则拦同一作用域取最早），`/v1/models` 同受此门。**软着陆语义**：Key 不失效、不自动禁用；**跨入新窗口**或**提高限额（提到判定记录在案的读数之上）/停用/删除规则**后判定自然消失、流量自动恢复。**#1316**：判定粘到窗口结束，**删除用量行不是恢复路径**——用量被保留策略清掉后判定不会因此解除，「只保存一遍规则」也不算提高限额（判定记录读数仍 ≥ 改后限额就继续拦），理由见 ADR-0020 §4。**升级残留**：V76 之前写下的判定行没有记录读数，这些行在第一次「仍超限」的评估轮会被补上读数（此后按上句口径）；补上之前它们仍按升级前的「规则自判定定下后是否被保存过」判定，保存一次即解除——只影响升级前就存在、且此后一直没被观察到仍超限的判定，窗口滚过去即归零。
+- **近似语义（必须知道）**：判定按周期刷新，不含评估间隔内新产生的用量——额度可能被超出一个评估周期内的量。**页面水位与网关判定会持续不一致，且这是粘性语义的一部分**（不是抖动）：页面按 `usage_event` 现算，网关按判定集放行，所以用量行被保留策略删掉之后，页面会显示低于限额而网关**继续返回 429 直到窗口滚过去**（#1316）；反过来，管理员提额超过记录读数、或停用/删除规则后，下一轮评估即恢复，页面水位先动、网关后动（一轮之内）。不承诺"恰好卡在 100%"，不做限流（速率语义另议）。
 - DISABLED 规则保留计划并展示水位，页面按停用渲染。
 - 审计：`QUOTA_RULE_CREATE` / `QUOTA_RULE_UPDATE` / `QUOTA_RULE_DELETE`（摘要含 `action`）。
 - 视图含 `scopeName`（用户显示名/项目名）与 `scopeTag`（用户名/项目 code）。
@@ -1243,7 +1249,7 @@ detail_currency, detail_occurred_at, detail_status, detail_bucket_key, detail_pr
 - 客户端必须且只能提供**一个**凭证 Header：`Authorization: Bearer <key>`（或裸值）、`x-api-key`、`api-key`。零个或多个凭证 Header → `401`（错误体不区分具体原因，防枚举）。
 - **凭据值错误的统一语义**：未知 / 畸形（含缺失后缀、后缀含点）的 Virtual Key → `404 virtual_key_invalid`——各场景响应逐字一致、与"未知 Key"不可区分（防枚举；见 `VirtualKeyAuthContractTest`）。注意与 MCP 数据面（消费者 Key/JWT）同场景的 `401 invalid_api_key` 口径不同：`/v1` 用 404、MCP 用 401，均为各通道既定设计。
 - Key 格式 `mqk_live_<publicKeyId>_<secret>.<projectTag>`（后缀在解析级必填）：点号后缀是**路由选择器**（明文，用于在 Key 的多个项目绑定间选择），鉴权权威是数据库中的 `key_project_binding`，标签本身不承载权限。HMAC 摘要不包含标签。
-- `GET /v1/context-registry`（CAA，#639）：本地 Agent 的 repo → 项目映射来源。虚拟 Key 认证（**identity-only**，#641：只做凭证抽取/解析/HMAC，不走归属阶梯——多绑定 Key 带任意（含不匹配）后缀都可读取；统一 404/401 失败语义）；**只返回该 Key ACTIVE 绑定项目**下的 `project_repositories` 行——`{ entries: [{ repoKey, projectId, projectTag }] }`；无持久化时返回空表。注册表读取发生在 Agent 同步（非热路径），直接查库、不占快照。
+- `GET /v1/context-registry`（CAA，#639）：本地 Agent 的 repo → 项目映射来源。虚拟 Key 认证（**identity-only**，#641：只做凭证抽取/解析/HMAC，不走归属阶梯——多绑定 Key 带任意（含不匹配）后缀都可读取；统一 404/401 失败语义）；**只返回该 Key ACTIVE 绑定项目**下的 `project_repositories` 行——`{ entries: [{ repoKey, projectId, projectTag }] }`；无持久化时返回空表。注册表读取发生在 Agent 同步（非热路径），直接查库、不占快照。读与热路径共用 `credential-decrypt` 有界调度器并带语句级上限（8 s，`REGISTRY_TIMEOUT` 减 2 s；#1400），失败分两种 503 信封：`context_registry_unavailable`（放弃等待：语句级中止或 10 s 到点）与 `context_registry_error`（数据库故障非超时）——**两者不可互相顶替**，"超时"是对本网关自身截止的断言。
 - **请求上下文解析阶梯（CAA，#633）**：身份（Key/HMAC）与归属（本请求计入哪个项目）分离，归属按固定阶梯裁决，首个命中生效：
   1. `X-Miqro-Project-Id` 声明（**不可信输入**，仅当目标项目确为该 Key 的绑定时生效）→ `RESOLVED_HEADER`；
   2. 点号后缀标签命中该 Key 的某个绑定 → `RESOLVED_SUFFIX`；
@@ -1265,6 +1271,7 @@ detail_currency, detail_occurred_at, detail_status, detail_bucket_key, detail_pr
 - 用量记录：每个请求写入 `usage_event`（幂等，`provider_request_id` 在 tenant 内唯一）；usage 缺失时标记 `usage_missing=true`；正文（prompt、代码、工具、回答）永不进入持久化。
 - 生命周期记录（G2.4）：每个**到达上游**的请求在 `request_usage_records` 打开 `IN_FLIGHT` 行并恰好 finalize 一次——包括客户端取消、上游错误与超时（状态见 usage-accounting §2）；鉴权失败与缓存命中不打开记录。usage 从 SSE 事件或非流式 JSON 正文解析（仅计数）；SUCCEEDED 但无 usage 时 `usage_missing=true`，绝不静默记零。
 - 上游目标门控（G2.6 SSRF）：仅转发路由快照提供的 Base URL；`https` 是硬要求（除非目标命中 `MIQROKEY_UPSTREAM_ALLOWED_CIDRS`），URL 携带 `userinfo` 一律拒绝，DNS 解析后的每个地址必须是公网地址（环回、链路本地、RFC1918、CGNAT `100.64/10`、组播、any-local、IPv6 ULA `fc00::/7` 均拒绝，除非命中 allowlist）。被拒绝时返回 `502 route_unavailable`，错误体、日志与审计**不包含目标 URL 或主机名**（`UpstreamTargetValidator` 的拒绝原因只有稳定类别 token）。
+- 上游传输失败与网关自有截止（#1375）：上游不可达（连接失败/首字节前连接中断）、首字节超时（reactor-netty `ReadTimeoutException`，来源是 `MIQROKEY_UPSTREAM_FIRST_BYTE_TIMEOUT`——`ProxyConfig#proxyWebClient` 把它接成 WebClient 的 `responseTimeout`，因此**响应头已到达、但正文首字节迟迟不来**时也会到点，#1375 修的就是这条路径逃出类型化子句链）以及网关自己的两个截止——整体 `MIQROKEY_UPSTREAM_RESPONSE_TIMEOUT` 与流式空闲 `MIQROKEY_UPSTREAM_STREAM_IDLE_TIMEOUT`——在**响应尚未提交**（尚无正文字节下发）时统一返回 `502 upstream_unavailable` 协议兼容信封（Anthropic/OpenAI 各自形状）；错误体不回显上游正文，也不含目标 URL/主机名。**响应已提交后不再追写信封**（已发出的字节保持完整，连接以中断告终），此时生命周期按 `architecture.md` 的请求生命周期记录记为 `STREAM_INTERRUPTED`（已出首字节）或 `TIMEOUT_BEFORE_FIRST_BYTE`（未出首字节）。信封的 `Content-Length` 描述**信封自身**的字节数，且不继承上游的 `Content-Encoding`：上游响应头可能已先一步原样复制到客户端响应上，但描述「永远不会到达的正文」的实体头必须在写信封前清除（#1416）。`X-MiQroKey-Request-Id` 的注入与「上游响应头复制」同点发生（`ProxyController#callUpstreamOnce`；缓存/合流回放见 `SseReplayEngine#replay`），因此**在上游响应头到达之前**就失败的那部分信封（连接被拒、首字节前连接中断）**不带**该 Header——这些请求的 ID 只出现在用量记录、生命周期记录与网关日志中。四个超时之间不做启动期量级校验：`response-timeout` 短于 `first-byte-timeout` 时后者不可达，属运维配置责任（客户端仍得到同一 `502` 信封）。
 - 路径白名单：数据面只暴露 `POST /v1/messages`、`POST /v1/responses`、`POST /v1/chat/completions`。正确方法之外的请求 → `405 method_not_allowed`；其他 `/v1/**` 路径 → `404 unsupported_path`；两者都不连接上游。嵌入式 `..` 段按字面处理（`/v1/**` 之外不匹配）；`//` 由服务器归一化为规范路径后按正常请求处理，不构成走私。
 - 输入上限：入站 Header 超过 `MIQROKEY_MAX_INBOUND_HEADER_BYTES`（默认 `32KB`）由 Netty 在路由前拒绝 → `431`；请求体超过 `MIQROKEY_MAX_PROXY_BUFFER_BYTES`（默认 `256KB`）→ `413 payload_too_large`。超限请求不连接上游。
 - 请求前置预检（#553）：鉴权与模型授权通过后、缓存查询与上游调用之前，按 **UTF-8 码点**统计整个已缓冲 body（含 JSON 结构、工具 schema、base64）的字符数；超过 `MIQROKEY_GATEWAY_CONTEXT_LIMIT_THRESHOLD_CHARS`（默认 `200000`）→ `413`，错误码 `context_limit_exceeded`（Anthropic/OpenAI 各自协议兼容的错误体，`message` 只回报实测字符数与阈值，**不含请求内容**）。该预检**只读**：通过时转发字节与无预检时完全一致，不 tokenize、不重排、不补写；拒绝时不连接上游、不查缓存、不产生用量与生命周期记录。`MIQROKEY_GATEWAY_CONTEXT_LIMIT_ENABLED=false` 时完全关闭（行为与引入前一致）。裁决顺序为 鉴权 → 模型授权 → 体量预检，因此超限 body 不构成绕过或探测手段。阈值是**字符数**而非 token 数：对合法 UTF-8，整个序列化 body（含 JSON 结构与 base64 膨胀）都计入，是该 body 的字符上界；**非法 UTF-8 字节序列按字节长度计**（严格 UTF-8 校验不通过即整段回退为字节数），字符数不会超过字节数，因此计数**整体不低估**——不会低于任何宽松解码器解出的字符数（已有 1–2 字节穷举与定种子模糊测试固定）。这类 body 本身不是合法 JSON，且仍受缓冲上限约束。由此引入本预检后，**200001–262144 字符的请求由「缓冲上限放行」变为 413**（256KB 缓冲上限可容纳约 262144 字节）——这是刻意收紧，会同时挡掉同尺寸但上游本可接受的合法请求，运维可用 `enabled` / `threshold-chars` 调整。阈值高于缓冲上限时后者先拒绝；每 Key 阈值不在本版本范围内。覆盖范围限于 LLM 数据面三个 `/v1/**` 路径；MCP 数据面（`/mcpservers/{service}/mcp`、`/mcpservers/{service}/message`）本版本仍只有既有缓冲上限（`payload_too_large`），套用同一预检为后续项。合规留存旁路（ADR-0014，默认关闭）在预检**之前**捕获入站 body，因此开启留存时被 413 拒绝的请求仍可能已按留存策略入库；预检自身不写任何持久化。
@@ -1277,7 +1284,8 @@ Gateway 生成 `X-MiQroKey-Request-Id`。若供应商已有 request ID，两个 
 
 ## 8. OpenAPI 与兼容性
 
-- Control Plane 生成 **OpenAPI 3.1**（F09 已实现）：`GET /v3/api-docs`（springdoc，无 swagger-ui；`springdoc.api-docs.version=OPENAPI_3_1`）。机器可读基线提交于 `docs/openapi/openapi-3.1.json`；CI（backend-integration job）对每次生成结果跑破坏性 diff（`deploy/openapi/check-openapi-breaking.py`：删除 path/operation/response code/参数、属性变 required 即失败）。本文仍是业务语义事实源；生成物是机器可读镜像，OpenAPI 不得改变本文语义。
+- Control Plane 生成 **OpenAPI 3.1**（F09 已实现）：`GET /v3/api-docs`（springdoc，无 swagger-ui；`springdoc.api-docs.version=OPENAPI_3_1`）。机器可读基线提交于 `docs/openapi/openapi-3.1.json`；CI（backend-integration job）对每次生成结果跑破坏性 diff（`deploy/openapi/check-openapi-breaking.py`）。判定为破坏的改动：删除 path/operation/response code/参数，属性变 required 或从 required 消失，属性或 schema 被删，类型/格式变化（按类型集合比较，拓宽到接受 `null` 视为放宽），枚举值减少，约束收紧（下界抬高、上界压低、`pattern` 新增或改变），默认值变化，可空性丢失。新增与放宽一律放行并只打印摘要。该 diff 的每条判定由 `deploy/tests/openapi_breaking_regression.py` 固定（CI `openapi-guard` job），因此门禁本身被改松时会红。
+  门禁比较的是**生成的 head** 与**提交的基线**：同一 commit 里既改 DTO 又刷新基线时 base == head，门禁必然通过（实测 34/45 个 DTO 提交属此类，见 #1315）。它挡的是「忘记刷新基线」，不是「有意破坏」——有意破坏需要新的 major 与一条显式豁免通路，后者尚未实现。本文仍是业务语义事实源；生成物是机器可读镜像，OpenAPI 不得改变本文语义。
 - 前端 TypeScript client **目前由手写 `frontend/src/api` + `types/api` 维护**（未从 OpenAPI 生成——规格愿景；codegen 迁移列为发布前候选，届时删除手写 DTO）。
 - 同一 major 版本只允许新增可选字段和新端点；删除、改名、改变含义必须进入下一 major。
 - 推理入口不进入管理 API 的 DTO 生成流程，以透明代理契约和 fixtures 验证。
@@ -1351,5 +1359,6 @@ NULL scope = 全量（存量兼容）。强制层按「开放面路径 → 能�
 **鉴权规则（批 1b 硬化）**
 - 机器密钥：无效/吊销/过期 → 401 `ADMIN_API_KEY_INVALID`；密钥身份租户化，跨租户不可见。
 - 门户会话：仅 SYSTEM_ADMIN 可访问开放面（403 `ADMIN_API_FORBIDDEN`，其他角色）；会话租户即开放面租户。
-- 安全红线不变：密钥只存摘要、吊销即时、机器调用走审计（操作审计沿用既有链）、正文不落库、导出文件字节
-  不上机器面。批 3 作用域/频控可选。
+- 安全红线不变：密钥只存摘要、吊销即时、机器**写**调用走审计（操作审计沿用既有链；口径见
+  `docs/security.md` §11——成功的只读调用、401 凭据无效、403 非管理员会话有意不留痕）、正文不落库、
+  导出文件字节不上机器面。批 3 作用域/频控可选。

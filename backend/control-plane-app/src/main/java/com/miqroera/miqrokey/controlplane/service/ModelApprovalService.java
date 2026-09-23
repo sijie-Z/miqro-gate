@@ -18,13 +18,18 @@ import com.miqroera.miqrokey.domain.repository.ProjectRepository;
 import com.miqroera.miqrokey.domain.repository.UserRepository;
 import com.miqroera.miqrokey.domain.repository.VirtualKeyRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -60,6 +65,13 @@ import java.util.function.Function;
  * generic 404 (no enumeration).</li>
  * <li>Only PENDING requests can be reviewed (409 ALREADY_REVIEWED); the
  * optimistic {@code version} column makes the transition race-safe.</li>
+ * <li>One (key, model) pair carries at most one request awaiting review — the
+ * pre-insert SELECT alone cannot see concurrent writers (#1305), so overlapping
+ * submits are serialised by a per-(key, model) advisory lock (#1333) and the
+ * partial unique index {@code uq_model_approval_pending} stays as the
+ * structural backstop. The lock also covers the whitelist branch, which flips
+ * the row to APPROVED inside the same transaction and would otherwise release
+ * that index slot while a loser's INSERT is still waiting on it.</li>
  * <li>Review summaries never contain key material.</li>
  * </ul>
  */
@@ -67,6 +79,14 @@ import java.util.function.Function;
 public class ModelApprovalService {
 
     private static final String AUTO_APPROVE_NOTE = "Auto-approved: model on the approval whitelist";
+
+    /**
+     * One (key, model) pair carries at most one request awaiting review — the
+     * message is shared by the two paths that can observe the violation, so a retry
+     * that overlaps another in-flight submit reads exactly like the sequential
+     * retry (#1305).
+     */
+    private static final String DUPLICATE_PENDING_MESSAGE = "该模型在此密钥上已有待审批的申请，请等待管理员处理，无需重复提交";
 
     private final ModelApprovalRepository approvalRepository;
     private final VirtualKeyRepository keyRepository;
@@ -106,6 +126,18 @@ public class ModelApprovalService {
                     "该虚拟密钥当前状态为「" + keyStatusLabel(key.status()) + "」，无法接收新模型；请在状态为「可用」的密钥上提交申请");
         }
         String modelId = validatedModel(request.modelId());
+        // #1333: everything below is a check-then-act pair with the insert at the
+        // end, and READ COMMITTED lets two overlapping submits both pass. On the
+        // default path the loser is still stopped by uq_model_approval_pending
+        // (V73), but the whitelist branch flips the winner's row to APPROVED
+        // inside this same transaction, which releases that partial index slot —
+        // the loser's INSERT then re-evaluates against a committed APPROVED row
+        // and succeeds, stacking a duplicate approval, audit record and alert
+        // event. A transaction-scoped advisory lock serialises the pair per
+        // (key, model); the loser re-reads after the winner commits and leaves
+        // through DUPLICATE_PENDING or MODEL_ALREADY_AVAILABLE. Same mechanism as
+        // ReconciliationService#findOrCreateReport and the audit chain.
+        lockSubmit(key.id(), modelId);
         Set<String> keyModels = keyRepository.findModelIds(key.id());
         if (keyModels.contains(modelId)) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "MODEL_ALREADY_AVAILABLE", "该模型已在此密钥的可用范围内，无需重复申请");
@@ -113,7 +145,7 @@ public class ModelApprovalService {
         boolean pendingDuplicate = approvalRepository.findAllByVirtualKeyId(key.id()).stream()
                 .anyMatch(a -> a.status() == ModelApprovalStatus.PENDING && a.modelId().equals(modelId));
         if (pendingDuplicate) {
-            throw new ApiException(HttpStatus.CONFLICT, "DUPLICATE_PENDING", "该模型在此密钥上已有待审批的申请，请等待管理员处理，无需重复提交");
+            throw new ApiException(HttpStatus.CONFLICT, "DUPLICATE_PENDING", DUPLICATE_PENDING_MESSAGE);
         }
         // #506: the /v1/models gate requires the model to be ACTIVE in the
         // provider's model_catalog — without it an approval could never take
@@ -129,7 +161,16 @@ public class ModelApprovalService {
         Instant now = Instant.now();
         ModelApproval approval = new ModelApproval(UUID.randomUUID(), tenantId, key.id(), modelId, user.id(),
                 ModelApprovalStatus.PENDING, null, trimmed(request.reason()), null, 0L, now, now);
-        approvalRepository.insert(approval);
+        try {
+            approvalRepository.insert(approval);
+        } catch (DuplicateKeyException e) {
+            // #1305: the check above reads a snapshot, and READ COMMITTED lets two
+            // overlapping submits both pass it. uq_model_approval_pending (V73) is
+            // the structural guard; the loser of that race lands here and gets the
+            // same 409 as a sequential retry — instead of stacking a second pending
+            // row, a second audit record and a second alert event.
+            throw new ApiException(HttpStatus.CONFLICT, "DUPLICATE_PENDING", DUPLICATE_PENDING_MESSAGE);
+        }
         auditService.record(tenantId, user.id(), "MODEL_APPROVAL_SUBMITTED", "MODEL_APPROVAL", approval.id(),
                 auditSummary("virtualKeyId", key.id(), "modelId", modelId, "autoApproved",
                         approvalProperties.getWhitelistModels().contains(modelId)),
@@ -158,12 +199,14 @@ public class ModelApprovalService {
     }
 
     /**
-     * Admin queue page. {@code status} null returns every status; ordering is
-     * newest-first with a keyset cursor handled by the controller.
+     * Admin queue page: the tenant's own requests only. {@code status} null returns
+     * every status; ordering is newest-first with a keyset cursor handled by the
+     * controller.
      */
     public List<ModelApprovalView> listQueue(User admin, ModelApprovalStatus status, int limit, Instant beforeCreatedAt,
             UUID beforeId) {
-        return views(approvalRepository.findPage(status, limit, beforeCreatedAt, beforeId), admin.tenantId());
+        return views(approvalRepository.findPage(admin.tenantId(), status, limit, beforeCreatedAt, beforeId),
+                admin.tenantId());
     }
 
     /**
@@ -456,8 +499,50 @@ public class ModelApprovalService {
         return sb.append('}').toString();
     }
 
+    /**
+     * #1382: delegates to the one escaper instead of re-implementing it. The
+     * hand-rolled version here covered only the three short escapes, so any other
+     * control character in a model id reached the {@code ::jsonb} round-trip in
+     * {@code AuditServiceImpl} raw and aborted the whole {@code @Transactional}
+     * write with no audit row.
+     */
     private static String escapeJson(String s) {
-        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t",
-                "\\t");
+        return AuditSummaries.escapeJson(s);
+    }
+
+    /**
+     * Takes the per-(key, model) submit lock for the current transaction. Must run
+     * before the first read of {@link #submit}'s check-then-act pair; released by
+     * the commit or rollback of that same transaction.
+     */
+    private void lockSubmit(UUID virtualKeyId, String modelId) {
+        // Fail loudly instead of degrading to a no-op. Outside a transaction the
+        // connection is in autocommit, so pg_advisory_xact_lock is released the
+        // moment the statement returns and the check-then-act pair in #submit is
+        // unserialised again while every observable symptom says "locked"
+        // (same guard and reasoning as AuditServiceImpl#acquireChainLock).
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("lockSubmit() must run inside a transaction: outside one the advisory "
+                    + "lock is released as soon as the call returns, which would silently drop the serialisation "
+                    + "this lock exists to establish (#1333)");
+        }
+        jdbc.getJdbcTemplate().query("SELECT pg_advisory_xact_lock(?)", rs -> {
+        }, submitLockKey(virtualKeyId, modelId));
+    }
+
+    /**
+     * 64-bit advisory-lock key for one (key, model) submit identity. Hashing keeps
+     * the key in range; a collision between unrelated identities only queues two
+     * submits that were never going to be duplicates (#1333).
+     */
+    static long submitLockKey(UUID virtualKeyId, String modelId) {
+        String identity = virtualKeyId + "|" + modelId;
+        try {
+            return ByteBuffer
+                    .wrap(MessageDigest.getInstance("SHA-256").digest(identity.getBytes(StandardCharsets.UTF_8)))
+                    .getLong();
+        } catch (Exception e) {
+            throw new IllegalStateException("SHA-256 not available", e);
+        }
     }
 }

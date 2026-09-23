@@ -26,8 +26,11 @@ import {
   UiTable,
   toast,
 } from '@/ui';
+import { useAuthStore } from '@/stores/auth';
 import type { UserRole } from '@/types/api';
 import type { AdminUser, Project, UserProjectMembership } from '@/types/generated-api';
+
+const auth = useAuthStore();
 
 const users = ref<AdminUser[]>([]);
 const loading = ref(true);
@@ -414,6 +417,9 @@ async function saveEdit() {
   editError.value = '';
   try {
     await api.updateUser(target.id!, { displayName: name });
+    // #PH78: 改的是自己时，store 里那份身份副本也得跟上 —— 概览页问候语读的是它，
+    // 而概览页自己不会重读身份，只重载用户表格的话它就一直是旧名字。
+    auth.applyDisplayName(target.id!, name);
     editOpen.value = false;
     toast.success('显示名已更新');
     await load();

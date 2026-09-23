@@ -20,24 +20,37 @@ const q = ref('');
 const selectedTags = ref<string[]>([]);
 const tagOptions = ref<string[]>([]);
 
+// #1245: request-sequence guard — 连按回车/连点「搜索」/连点标签 chip 时，慢的旧响应
+// 落在新响应之后会把卡片和标签条一起画回上一次关键字的结果。
+let loadRequestSeq = 0;
+
 async function load() {
+  const seq = ++loadRequestSeq;
   loading.value = true;
   loadError.value = '';
   try {
-    skills.value = await api.listSkills(q.value.trim() || undefined, selectedTags.value);
+    const list = await api.listSkills(q.value.trim() || undefined, selectedTags.value);
+    if (seq !== loadRequestSeq) {
+      return; // a newer search won — this response is stale
+    }
+    skills.value = list;
     if (!q.value.trim() && !selectedTags.value.length) {
       // Tag options come from the unfiltered catalog and stay stable while filtering.
-      tagOptions.value = [...new Set(skills.value.flatMap((skill) => skill.tags ?? []))].sort();
+      tagOptions.value = [...new Set(list.flatMap((skill) => skill.tags ?? []))].sort();
     }
   } catch (error) {
-    if (error instanceof ApiError) {
-      loadError.value = error.message;
-      loadRequestId.value = error.requestId ?? '';
-    } else {
-      loadError.value = '加载技能目录失败。';
+    if (seq === loadRequestSeq) {
+      if (error instanceof ApiError) {
+        loadError.value = error.message;
+        loadRequestId.value = error.requestId ?? '';
+      } else {
+        loadError.value = '加载技能目录失败。';
+      }
     }
   } finally {
-    loading.value = false;
+    if (seq === loadRequestSeq) {
+      loading.value = false;
+    }
   }
 }
 

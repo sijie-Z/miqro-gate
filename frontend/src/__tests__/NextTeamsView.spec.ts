@@ -227,4 +227,51 @@ describe('NextTeamsView', () => {
     expect(mockApi.listUsers).toHaveBeenCalledTimes(2);
     expect(document.querySelector('[data-testid="team-users-error"]')).toBeNull();
   });
+
+  it('#PH69: a failed member load must not leave the drawer claiming「还没有成员」', async () => {
+    mockApi.listTeamMembers.mockRejectedValue(
+      new (await import('@/api/http')).ApiError({
+        type: 'about:blank',
+        status: 500,
+        code: 'INTERNAL',
+        detail: '数据库不可用',
+        requestId: 'req-members',
+        title: 'Error',
+      }),
+    );
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="team-members-open"]').trigger('click');
+    await flushPromises();
+
+    // Before the fix the only signal was a toast, which is gone after
+    // DURATION_ERROR (7 s) while the drawer stays open. Drop every toast and look
+    // at what the drawer still says.
+    toastState.items.splice(0);
+    await flushPromises();
+
+    const drawer = document.querySelector('[data-testid="team-members-drawer"]');
+    expect(drawer).toBeTruthy();
+    // What remains is an assertion about the team's data that the failed read
+    // never established. #1160 — 加载中 → 失败 → 空 → 有数据 — and the sibling
+    // users list three lines up in this same drawer both already honour it.
+    expect(drawer!.textContent).not.toContain('还没有成员');
+    expect(drawer!.textContent).toContain('数据库不可用');
+    expect(drawer!.textContent).toContain('req-members');
+
+    // And the failure carries a way out, instead of 关掉抽屉再点开一次.
+    const retry = document.querySelector(
+      '[data-testid="team-members-drawer"] [data-testid="table-load-retry"]',
+    );
+    expect(retry, 'the members table must offer a retry').toBeTruthy();
+    mockApi.listTeamMembers.mockResolvedValue([member()]);
+    (retry as HTMLButtonElement).click();
+    await flushPromises();
+
+    expect(mockApi.listTeamMembers).toHaveBeenCalledTimes(2);
+    const after = document.querySelector('[data-testid="team-members-drawer"]');
+    expect(after!.textContent).toContain('alice');
+    expect(after!.textContent).not.toContain('数据库不可用');
+  });
 });

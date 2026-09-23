@@ -14,8 +14,10 @@ import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.web.HttpMediaTypeNotAcceptableException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
@@ -89,7 +91,7 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
-    @DisplayName("framework client errors map to 400 / 405 / 415 / 404")
+    @DisplayName("framework client errors map to 400 / 405 / 415 / 406 / 404")
     void frameworkClientErrors() {
         ResponseEntity<Map<String, Object>> missing = handler
                 .handleMissingParam(new MissingServletRequestParameterException("status", "String"), request);
@@ -110,6 +112,25 @@ class GlobalExceptionHandlerTest {
                 new NoResourceFoundException(HttpMethod.GET, "/api/v1/nope", "/api/v1/nope"), request);
         assertThat(noResource.getStatusCode().value()).isEqualTo(404);
         assertThat(body(noResource).get("code")).isEqualTo("NOT_FOUND");
+
+        ResponseEntity<Map<String, Object>> notAcceptable = handler
+                .handleNotAcceptable(new HttpMediaTypeNotAcceptableException("No acceptable representation"), request);
+        assertThat(notAcceptable.getStatusCode().value()).isEqualTo(406);
+        assertThat(body(notAcceptable).get("code")).isEqualTo("UNSUPPORTED_ACCEPT");
+    }
+
+    @Test
+    @DisplayName("#1253: an unacceptable Accept is a WARN, not an ERROR stack trace")
+    void notAcceptableIsNotAnInternalError() {
+        request.addHeader("X-Request-Id", "ph63-406");
+
+        ResponseEntity<Map<String, Object>> response = handler
+                .handleNotAcceptable(new HttpMediaTypeNotAcceptableException("No acceptable representation"), request);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(406);
+        assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_PROBLEM_JSON);
+        assertThat(messages(Level.WARN)).anySatisfy(line -> assertThat(line).contains("ph63-406"));
+        assertThat(messages(Level.ERROR)).isEmpty();
     }
 
     @Test

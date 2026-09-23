@@ -26,10 +26,17 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 
+import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
@@ -56,6 +63,8 @@ class ModelApprovalApiIntegrationTest {
     static final String MODEL_B = "model-beta";
     static final String MODEL_NEW = "model-gamma";
     static final String MODEL_AUTO = "model-auto";
+    /** Marker model id: unique to the foreign-tenant fixture, never catalogued. */
+    static final String FOREIGN_MODEL = "foreign-model-ph62";
 
     static {
         AbstractControlPlaneIntegrationTest.POSTGRES.getJdbcUrl();
@@ -305,6 +314,114 @@ class ModelApprovalApiIntegrationTest {
                 .andExpect(jsonPath("$.detail", containsString("等待管理员处理")));
     }
 
+    /**
+     * The double-click / client-retry shape of the same case (#1305): the guard in
+     * {@code submit} is a SELECT that a concurrent writer cannot see, so before
+     * {@code uq_model_approval_pending} every overlapping request both passed it
+     * and inserted. The assertion that matters is the one on the database — one
+     * pending row, one audit record, one notification — not just the status codes.
+     */
+    @Test
+    @DisplayName("concurrent submits of one model collapse to a single pending request")
+    void concurrentDuplicateSubmitsCollapse() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        UUID keyId = createKey(MODEL_A);
+        String payload = objectMapper
+                .writeValueAsString(Map.of("virtualKeyId", keyId.toString(), "modelId", MODEL_NEW));
+
+        int attempts = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(attempts);
+        List<Integer> statuses = new ArrayList<>();
+        try {
+            CyclicBarrier barrier = new CyclicBarrier(attempts);
+            List<Future<Integer>> pending = new ArrayList<>();
+            for (int i = 0; i < attempts; i++) {
+                pending.add(pool.submit(() -> {
+                    barrier.await(30, TimeUnit.SECONDS);
+                    return mockMvc.perform(post("/api/v1/me/model-approvals").contentType(MediaType.APPLICATION_JSON)
+                            .cookie(adminSession, adminCsrf).header("X-CSRF-Token", adminCsrfToken).content(payload))
+                            .andReturn().getResponse().getStatus();
+                }));
+            }
+            for (Future<Integer> f : pending) {
+                statuses.add(f.get(60, TimeUnit.SECONDS));
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+
+        // The database counts come first on purpose: they are the assertion that
+        // actually pins the defect down ("only one record landed"), and leading
+        // with them means a broken tree fails on the row count itself rather than
+        // on a status-code proxy that a future re-code could keep passing.
+        assertThat(countBy("SELECT count(*) FROM model_approval WHERE virtual_key_id = :key AND model_id = :model"
+                + " AND status = 'PENDING'", keyId, MODEL_NEW)).as("pending rows for one logical submit").isEqualTo(1);
+        assertThat(countBy("SELECT count(*) FROM admin_audit_events WHERE action = 'MODEL_APPROVAL_SUBMITTED'"
+                + " AND target_id IN (SELECT id FROM model_approval WHERE virtual_key_id = :key"
+                + " AND model_id = :model)", keyId, MODEL_NEW)).as("submit audits").isEqualTo(1);
+        assertThat(statuses).containsOnly(201, 409);
+        assertThat(statuses).containsOnlyOnce(201);
+    }
+
+    /**
+     * The whitelist branch of the same case (#1333).
+     * {@code uq_model_approval_pending} only covers rows that stay PENDING, but the
+     * auto-approve branch flips the winner's row to APPROVED inside the submitting
+     * transaction. That releases the partial-index slot while a loser's INSERT is
+     * still waiting on it, so the loser re-evaluates against a committed APPROVED
+     * row and inserts a second record — with its own audit trail and alert event.
+     * The per-(key, model) advisory lock in {@code submit} serialises the pair; the
+     * losers then leave through MODEL_ALREADY_AVAILABLE. As in the PENDING case the
+     * database counts are the assertion that matters, not the status codes.
+     */
+    @Test
+    @DisplayName("concurrent submits of a whitelisted model auto-approve exactly once")
+    void concurrentWhitelistSubmitsAutoApproveOnce() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        UUID keyId = createKey(MODEL_A);
+        String payload = objectMapper
+                .writeValueAsString(Map.of("virtualKeyId", keyId.toString(), "modelId", MODEL_AUTO));
+
+        int attempts = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(attempts);
+        List<Integer> statuses = new ArrayList<>();
+        try {
+            CyclicBarrier barrier = new CyclicBarrier(attempts);
+            List<Future<Integer>> pending = new ArrayList<>();
+            for (int i = 0; i < attempts; i++) {
+                pending.add(pool.submit(() -> {
+                    barrier.await(30, TimeUnit.SECONDS);
+                    return mockMvc.perform(post("/api/v1/me/model-approvals").contentType(MediaType.APPLICATION_JSON)
+                            .cookie(adminSession, adminCsrf).header("X-CSRF-Token", adminCsrfToken).content(payload))
+                            .andReturn().getResponse().getStatus();
+                }));
+            }
+            for (Future<Integer> f : pending) {
+                statuses.add(f.get(60, TimeUnit.SECONDS));
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+
+        // Database counts first, same reasoning as the PENDING case above: the
+        // defect is "N records where there must be one", so the count is what has
+        // to fail on an unfixed tree. Winner: 201 APPROVED. Losers: the model is
+        // on the key by then, so 400.
+        assertThat(countBy("SELECT count(*) FROM model_approval WHERE virtual_key_id = :key AND model_id = :model"
+                + " AND status = 'APPROVED'", keyId, MODEL_AUTO)).as("auto-approved rows for one logical submit")
+                .isEqualTo(1);
+        assertThat(countBy("SELECT count(*) FROM admin_audit_events WHERE action = 'MODEL_APPROVAL_SUBMITTED'"
+                + " AND target_id IN (SELECT id FROM model_approval WHERE virtual_key_id = :key"
+                + " AND model_id = :model)", keyId, MODEL_AUTO)).as("submit audits").isEqualTo(1);
+        assertThat(countBy("SELECT count(*) FROM admin_audit_events WHERE action = 'MODEL_APPROVAL_APPROVED'"
+                + " AND target_id IN (SELECT id FROM model_approval WHERE virtual_key_id = :key"
+                + " AND model_id = :model)", keyId, MODEL_AUTO)).as("auto-approve audits").isEqualTo(1);
+        assertThat(statuses).containsOnly(201, 400);
+        assertThat(statuses).containsOnlyOnce(201);
+    }
+
     @Test
     @DisplayName("approve refuses when the key or the grant is no longer active")
     void approveRefusesInactiveTargets() throws Exception {
@@ -455,6 +572,81 @@ class ModelApprovalApiIntegrationTest {
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("PARAM_INVALID"));
     }
 
+    @Test
+    @DisplayName("the cursor walk returns a whole sub-millisecond burst (#1392)")
+    void queuePaginationReturnsRowsInsideOneMillisecond() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        UUID keyId = createKey(MODEL_A);
+
+        // Four requests in one millisecond — 500us, 400us, 300us, 200us past the
+        // second. `Instant.now()` under concurrent submits produces exactly this,
+        // and `created_at` is a timestamptz, so PostgreSQL keeps the microseconds.
+        Instant base = Instant.parse("2026-06-01T00:00:00.000500Z");
+        List<UUID> expected = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            expected.add(insertPendingApproval(keyId, "burst-" + i, base.minusNanos(i * 100_000L)));
+        }
+
+        // Walk the queue the way the approval console does: size=1 plus whatever
+        // nextCursor came back, until the server stops offering one.
+        List<String> seen = new ArrayList<>();
+        String before = null;
+        for (int page = 0; page < 10; page++) {
+            Map<?, ?> body = page("/api/v1/admin/model-approvals?status=PENDING&size=1"
+                    + (before == null ? "" : "&before=" + before));
+            for (Object item : (List<?>) body.get("items")) {
+                seen.add((String) ((Map<?, ?>) item).get("id"));
+            }
+            Object next = body.get("nextCursor");
+            if (next == null) {
+                break;
+            }
+            before = (String) next;
+        }
+
+        // A millisecond-truncating cursor dropped three of the four: the walk
+        // returned page 1, skipped past the rows still inside that millisecond and
+        // reported no next page at all.
+        assertThat(seen).as("every PENDING row must be handed out exactly once")
+                .containsExactlyInAnyOrderElementsOf(expected.stream().map(UUID::toString).toList());
+    }
+
+    // ------------------------------------------------------------------
+    // tenant isolation
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("admin queue shows only its own tenant's requests (#1250)")
+    void queueIsTenantScoped() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        UUID keyId = createKey(MODEL_A);
+
+        // Tenant A's own pending request — the row that must be the only page item.
+        MvcResult submit = postJson("/api/v1/me/model-approvals",
+                Map.of("virtualKeyId", keyId.toString(), "modelId", MODEL_NEW)).andExpect(status().isCreated())
+                .andReturn();
+        UUID ownId = UUID.fromString(
+                (String) objectMapper.readValue(submit.getResponse().getContentAsString(), Map.class).get("id"));
+
+        // A PENDING request owned by a foreign tenant. It is written straight to
+        // the table because no principal can authenticate outside the seed tenant
+        // (AuthenticationService pins it), and the composite (tenant_id, id)
+        // foreign keys force the whole parent chain to carry that tenant too.
+        UUID foreignId = insertForeignPendingApproval();
+
+        Map<?, ?> page = page("/api/v1/admin/model-approvals?status=PENDING");
+        List<?> items = (List<?>) page.get("items");
+        assertThat(items).hasSize(1);
+        assertThat(((Map<?, ?>) items.get(0)).get("id")).isEqualTo(ownId.toString());
+        assertThat(page.toString()).doesNotContain(foreignId.toString()).doesNotContain(FOREIGN_MODEL);
+
+        // Both rows are really in the table — the page is short because the query
+        // filters, not because there was nothing to leak.
+        assertThat(approvalCount()).isEqualTo(2);
+    }
+
     // ------------------------------------------------------------------
     // helpers
     // ------------------------------------------------------------------
@@ -481,6 +673,93 @@ class ModelApprovalApiIntegrationTest {
 
     private Long approvalCount() {
         return jdbc.queryForObject("SELECT count(*) FROM model_approval", new MapSqlParameterSource(), Long.class);
+    }
+
+    /**
+     * A PENDING approval written straight to the table at an exact
+     * {@code created_at}. Going through the API would stamp the row with
+     * {@code Instant.now()}, and the #1392 regression is about timestamps that only
+     * differ below the millisecond.
+     */
+    private UUID insertPendingApproval(UUID keyId, String modelId, Instant createdAt) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO model_approval (id, tenant_id, virtual_key_id, model_id, requested_by, status, version,
+                                            created_at, updated_at)
+                VALUES (:id, :tenantId, :keyId, :modelId, :requestedBy, 'PENDING', 0, :createdAt, :createdAt)
+                """,
+                new MapSqlParameterSource("id", id).addValue("tenantId", fx.tenantId).addValue("keyId", keyId)
+                        .addValue("modelId", modelId).addValue("requestedBy", fx.userId)
+                        .addValue("createdAt", Timestamp.from(createdAt)));
+        return id;
+    }
+
+    /** Row count for a statement parameterised on the key/model pair under test. */
+    private int countBy(String sql, UUID keyId, String modelId) {
+        Integer n = jdbc.queryForObject(sql, new MapSqlParameterSource("key", keyId).addValue("model", modelId),
+                Integer.class);
+        return n == null ? 0 : n;
+    }
+
+    /**
+     * A PENDING approval belonging to a brand-new tenant, inserted row by row
+     * because the {@code (tenant_id, id)} foreign keys require a same-tenant parent
+     * chain. Returns the approval id.
+     */
+    private UUID insertForeignPendingApproval() {
+        UUID tenant = UUID.randomUUID();
+        UUID user = UUID.randomUUID();
+        UUID project = UUID.randomUUID();
+        UUID subscription = UUID.randomUUID();
+        UUID credential = UUID.randomUUID();
+        UUID grant = UUID.randomUUID();
+        UUID key = UUID.randomUUID();
+        UUID approval = UUID.randomUUID();
+        MapSqlParameterSource p = new MapSqlParameterSource("tenant", tenant).addValue("user", user)
+                .addValue("project", project).addValue("subscription", subscription).addValue("credential", credential)
+                .addValue("grant", grant).addValue("key", key).addValue("approval", approval)
+                .addValue("product", fx.productId).addValue("hash", passwordHasher.hash("NotARealPassword1!"))
+                .addValue("publicKeyId", "pk_" + key.toString().replace("-", ""));
+        jdbc.update("""
+                INSERT INTO tenants (id, code, name, status, version, created_at, updated_at)
+                VALUES (:tenant, :code, 'Foreign Tenant', 'ACTIVE', 0, now(), now())
+                """, p.addValue("code", "foreign-" + tenant.toString().substring(0, 8)));
+        jdbc.update("""
+                INSERT INTO users (id, tenant_id, username, display_name, password_hash, role, status,
+                                   must_change_password, version)
+                VALUES (:user, :tenant, 'foreign_user', 'Foreign', :hash, 'USER', 'ACTIVE', FALSE, 0)
+                """, p);
+        jdbc.update("""
+                INSERT INTO projects (id, tenant_id, code, name, status, project_tag, version)
+                VALUES (:project, :tenant, 'FOREIGN', 'Foreign Project', 'ACTIVE', 'foreign-tag', 0)
+                """, p);
+        jdbc.update("""
+                INSERT INTO upstream_subscriptions
+                    (id, tenant_id, provider_product_id, name, billing_mode, status, version)
+                VALUES (:subscription, :tenant, :product, 'Foreign Sub', 'PAYG', 'ACTIVE', 0)
+                """, p);
+        jdbc.update("""
+                INSERT INTO upstream_credentials (id, tenant_id, subscription_id, credential_name, status, version)
+                VALUES (:credential, :tenant, :subscription, 'Foreign Cred', 'ACTIVE', 0)
+                """, p);
+        jdbc.update("""
+                INSERT INTO project_provider_grants
+                    (id, tenant_id, project_id, provider_product_id, upstream_credential_id, status, created_by,
+                     version)
+                VALUES (:grant, :tenant, :project, :product, :credential, 'ACTIVE', :user, 0)
+                """, p);
+        jdbc.update("""
+                INSERT INTO virtual_keys (id, tenant_id, public_key_id, secret_digest, display_prefix, last_four,
+                                          user_id, project_id, grant_id, upstream_credential_id, purpose, name,
+                                          status, version)
+                VALUES (:key, :tenant, :publicKeyId, :hash, 'fk_foreig', 'e1gn', :user, :project, :grant, :credential,
+                        'CUSTOM', 'Foreign Key', 'ACTIVE', 0)
+                """, p);
+        jdbc.update("""
+                INSERT INTO model_approval (id, tenant_id, virtual_key_id, model_id, requested_by, status, version)
+                VALUES (:approval, :tenant, :key, :model, :user, 'PENDING', 0)
+                """, p.addValue("model", FOREIGN_MODEL));
+        return approval;
     }
 
     private List<String> keyModelIds(UUID keyId) {

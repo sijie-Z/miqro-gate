@@ -8,6 +8,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import * as api from '@/api';
 import { countWhenLoaded } from '@/utils/load-state';
+import { localDateTime } from '@/utils/datetime';
 import { ApiError } from '@/api/http';
 import {
   UiButton,
@@ -220,6 +221,8 @@ async function openModels(product: ProviderProductView) {
   probeStatus.value = null;
   try {
     const rows = await api.adminListModels(product.id);
+    // #PH78: 行上的计数与抽屉名单同源 —— 抽屉被抢占也照写（计数按产品 id 归档）。
+    setCatalogForProduct(product.id, rows);
     if (seq !== modelsRequestSeq) {
       return; // a newer dialog target won — this response is stale
     }
@@ -255,6 +258,8 @@ async function probeModels() {
     const report = await api.adminProbeModels(target.id);
     toast.success(`探测完成：发现 ${report.modelCount} 个模型`);
     const rows = await api.adminListModels(target.id);
+    // #PH78: 探测刚改过这张表，同一次读数也要喂给行上的计数。
+    setCatalogForProduct(target.id, rows);
     if (seq === modelsRequestSeq) {
       models.value = rows;
     }
@@ -262,6 +267,13 @@ async function probeModels() {
     probeError.value = error instanceof ApiError ? error.message : '探测失败，请稍后重试。';
   } finally {
     probing.value = false;
+    // #1347 (#440 family): the probe re-lists the catalogue, so it also
+    // supersedes an in-flight catalogue load — which can no longer clear its
+    // own spinner. Guarded: a newer dialog target owns its own loader and must
+    // keep it.
+    if (seq === modelsRequestSeq) {
+      modelsLoading.value = false;
+    }
   }
   try {
     const status = await api.adminModelProbeStatus(target.id);
@@ -295,6 +307,8 @@ async function addManualModel() {
     toast.success('人工模型已录入');
     const seq = ++modelsRequestSeq;
     const rows = await api.adminListModels(target.id);
+    // #PH78: 录入改动了这张表，行上的计数必须跟着走。
+    setCatalogForProduct(target.id, rows);
     if (seq === modelsRequestSeq) {
       models.value = rows;
     }
@@ -314,6 +328,8 @@ async function removeManualModel(row: ModelCatalogRow) {
     if (target) {
       const seq = ++modelsRequestSeq;
       const rows = await api.adminListModels(target.id);
+      // #PH78: 删除改动了这张表，行上的计数必须跟着走。
+      setCatalogForProduct(target.id, rows);
       if (seq === modelsRequestSeq) {
         models.value = rows;
       }
@@ -359,6 +375,23 @@ const grantCountByProduct = computed(() => {
 
 function catalogCountOf(productId: string): number {
   return catalogCountByProduct.value.get(productId) ?? 0;
+}
+
+/**
+ * #PH78: 行上的「N 个模型」与抽屉里的模型列表是同一实体的两份副本。抽屉每次重读
+ * 拿到的都是**该产品的完整目录**（`adminListModels` 的 providerProductId 只是对同
+ * 一张表过滤，不是第二个数据源），所以同一份读数必须同时喂给两份副本 —— 否则关掉
+ * 抽屉看到的还是旧数字，管理员会以为刚才那次探测或增删没生效。
+ *
+ * 只替换这个产品的那一段，别的产品不受影响。计数以产品 id 归档，因此这一行写在抽
+ * 屉的 `modelsRequestSeq` 守卫**之外**：守卫保护的是「当前打开的那个抽屉」的列表，
+ * 而一次已经落地的读数对它所读产品而言始终是真的。
+ */
+function setCatalogForProduct(productId: string, rows: ModelCatalogRow[]) {
+  catalogModels.value = [
+    ...catalogModels.value.filter((row) => row.providerProductId !== productId),
+    ...rows,
+  ];
 }
 
 function credentialCountOf(productId: string): number {
@@ -591,12 +624,12 @@ onMounted(load);
         >
           <template v-if="probeStatus.status === 'SUCCEEDED'">
             上次探测成功：{{ probeStatus.modelCount }} 个模型（{{
-              probeStatus.probedAt.slice(0, 16).replace('T', ' ')
+              localDateTime(probeStatus.probedAt)
             }}）
           </template>
           <template v-else>
             上次探测失败：{{ probeStatus.error || '未知原因' }}（{{
-              probeStatus.probedAt.slice(0, 16).replace('T', ' ')
+              localDateTime(probeStatus.probedAt)
             }}）
           </template>
         </span>

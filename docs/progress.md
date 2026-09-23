@@ -2,6 +2,64 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 会话交接点 2026-09-22（PH87 多实例部署一致性：两个控制面副本共用一个 PG，本机实测）
+
+- **形态**：猎线（审计+修复），不是 Goal。真起**两个控制面实例**（不同端口、同一个 PostgreSQL 15524）逐条核 §1 五类多副本风险：定时任务重复执行 / 分布式锁 / 投递重复 / 本地缓存视图不一致 / 启动竞态。确认 2 个缺陷（#1383、#1394），其余逐条否证（否证清单见 `_orchestrate/reports/ph87_report.md` §5）。
+- **#1383 告警重试跨副本重复外发**：`AlertEvaluator.evaluateAll()` 是 `@Scheduled`，**每个 JVM 副本各有一条调度线程**，仓库内无 ShedLock/选主；`AlertEventDispatcher.retryDue()` 的 SELECT 是普通读（无 `FOR UPDATE`/`SKIP LOCKED`），两副本同时扫到同一到期行 → **各发一次 POST**。原始红证据：接收端 16ms 内收到 2 条 POST（body 逐字节相同，sha256 `87efc2af…`），两个 JVM 各自打印 `delivery attempt 2`；而投递表**只有 2 行**——`recordAttempt` 的 upsert 按 `(event_id, endpoint_id, attempt)` 覆盖，重复外发在账本上不可见。影响：接收端按次计费/按次动作的场景重复执行；文档承诺的「最多 3 次」在 n 副本下实际是 3n 次。
+- **修复坐标**：`AlertEventDispatcher.claimRetry()`（新增）+ `retryDue()` 发送前调用。发送前一句条件 UPDATE 抢占：`next_retry_at` 推后到 `now() + (endpoint.timeoutMs() + CLAIM_SLACK_MS)/1000`，`WHERE … AND attempt = 待发次数 AND next_retry_at IS NOT NULL AND next_retry_at <= now()`，`UPDATE` 只可能影响一行，`claimed == 1` 才发。**抢占必须在发送前一刻**（不能提前到 SELECT 时）：提前抢占的行若发送从未发生会一直卡到租约到期。租约 = 端点超时 + 60s 松弛，必须**长出它所守护的那次 POST**，否则先发者还在发、后发者已抢到 → 修复失效。
+- **崩溃语义（真杀实例验证）**：租约到期后下一个扫描按**同一个 attempt 号**重发——崩溃代价是一个退避周期的延迟，**不消耗 `MAX_ATTEMPTS` 的次数**。`pg_advisory_xact_lock` 全库仅 4 处非调度用途；事务级咨询锁随后端终止自动释放（真杀实例后 `pg_locks` advisory 计数为 0），故调度类任务**不能**用事务级咨询锁覆盖一次出站 POST。
+- **真库证据**：`AlertDeliveryConcurrentSweepIntegrationTest`（2 例，真 PostgreSQL，`@Tag("integration")`）——两副本并发扫同一到期行，接收端计数 `received.get() == 2`（首投 + 一次重试），投递表 2 行。**注意跑法**：`control-plane-app/pom.xml:161` 有 `<excludedGroups>integration</excludedGroups>`，普通 `verify` 会报 `Tests run: 0` 且 `BUILD SUCCESS`（假绿）；必须 `-Pintegration`。绿色原始输出 `Tests run: 2, Failures: 0, Errors: 0, Skipped: 0` + `BUILD SUCCESS`。双实例真进程侧的绿证据：修复版**对同一次 attempt 2 只有实例 A 打印**（14:42:03.986），实例 B 在同一时刻该事件无输出，接收端 1 条；且 attempt=1 的 `next_retry_at` 被推后到 arm 时刻 +360s（= 端点 300s 超时 + 60s 松弛的租约指纹）。**口径须知（勿误读成「B 永远不投」）**：实例 B 后来在 14:46:04 投了同事件的 **attempt 3**——那是租约到期后**另一次独立抢占**，属正确行为。本修复的断言是「同一个 attempt 号只被一个副本发一次」，不是「同一事件只由同一副本发」。
+- **文档**：`database-schema.md` 投递表补「重试外发前必须在数据库上抢占」+ 租约语义 + 「upsert 覆盖致重复外发在账本上不可见」；`configuration-reference.md` 的 `MIQROKEY_WEBHOOK_MAX_ATTEMPTS=3` 口径不变（多副本下的 3n 由抢占修复，不改上限）。
+- **遗留（未立案，报告 §6 逐条声明）**：**#1394** `ReconciliationService.recoverInterruptedRuns()` 在第二个副本启动时会把第一个副本**正在跑**的对账标记成 `INTERRUPTED`（启动即恢复没有「实例已死」的判据）；其余候选（本地缓存视图不一致、启动迁移竞态、告警评估的重复计算）逐条否证。
+- 分支 `fix/ph87-multi-instance-consistency`；issue #1383 / #1394；#1383 的修复 PR **#1404**（https://github.com/sijie-Z/miqro-gate/pull/1404，base `develop`）。
+
+## 会话交接点 2026-09-22（PH79 配置项默认值与文档一致性·幽灵配置第二轮：#1371）
+
+- **形态**：猎线（机械化全量比对 + 实测生效性），不是 Goal。三份清单（代码/yml/文档）逐键比对 + 5 次本机启动的 A/B 实测。**确认 1 个缺陷、否证 9 类候选**，未凑数立案（上限 3，用 1）。
+- **#1371 `MIQROKEY_PRICE_CATALOG_PATH` 是幽灵配置项**：文档 :228 给出默认 `/etc/miqrokey/prices` 与说明「版本化价格目录」，但**全仓零读取点**。红证据（原始输出）：`grep -rn "MIQROKEY_PRICE_CATALOG_PATH" .` → 唯一命中就是 `./docs/configuration-reference.md:228` 自己；`grep -rniE "catalog[-_.]?path|catalogpath" backend deploy scripts` → 零命中；`grep -rniE "price[-_.]?catalog" backend deploy scripts | wc -l` → 19，且 **19/19** 都属 #585 的远程价源机制（`sync|mapper`），即**文件型价格目录根本不存在**。
+  - **静默性（运行时补充证据）**：把该键设成**不存在的目录** `/ph79/ghost/catalog` 启动，应用 10.059 s 正常起来、health UP、日志对键名与值的命中数 **0**、WARN/ERROR **0**。配置一个假目录连一行日志都不给——这是缺陷的实质（不报错、不告警，第 9 行承诺的「未知 `MIQROKEY_` 配置应使启动失败」也兜不住）。
+  - **危害不只是「一个键没用」**：同一份配置参考里存在**两套互相矛盾的价格来源说法**——§5（:161–168）真实生效的是 7 行 `MIQROKEY_PRICE_SYNC_*`（远程价源，默认 `https://openrouter.ai/api/v1/models`），§6 这行却说价格来自本地目录。照 §6 搭的人会搭错一整套机制。
+  - **修复**（`3ac347b0`，纯文档 1 行 1 增 1 删）：取文档 :19 自定策略里的**原地标注**形态，补「（**预留：当前版本未读取**——实现无文件型价格目录；真实价源为 §5 的 `MIQROKEY_PRICE_SYNC_URL`）」。§6 表由 8 行 / 7 标注 → **8 行 / 8 标注**。
+    - **为什么不选「从文档移除」**：那会连带要求确认同一批预留键 `MIQROKEY_CATALOG_PATH`(:22) 的去留，属另一决策，不并入本单。
+  - **非重复提报**：#733（CLOSED 2026-09-17）第 7 条**已点名** `PRICE_CATALOG_PATH`，第一轮收口给它那批 17 个键逐行补标注——**16 个补上了，这是唯一漏网的**（兄弟行 `CATALOG_PATH` 虽无行内标注但有 :19 引用块兜底，这行两个载体都没覆盖）。同族先例 #1116（CLOSED，`MIQROKEY_UPSTREAM_URL`）。
+- **§1-3 实测生效性（PH48 方法：真改一次、看行为变没变）**：5 次本机启动，PG `15513` / 服务 `18743`。
+  - **A 基线**：health UP；110 行；INFO 100 / WARN 0 / ERROR 0；price-sync 相关 **0** 行（跑过默认 60 s initial delay）。
+  - **B** `AUTO_ENABLED=true` + `INITIAL_DELAY_MS=2000` + `URL=http://127.0.0.1:18749/ph79-probe`：`Started 12:18:09.868` → `ERROR … Scheduled price sync failed`（`价格源不可达：ConnectException`）`12:18:11.936`，**Δ=2.068 s**。证明 开关 + 延迟 两个旋钮真实生效。
+  - **C** 同 B 但换 `URL=…/ph79-runC-probe` 指向自建 stub：stub 记到 `2026-09-22T12:20:26.211 GET /ph79-runC-probe`，应用侧报错文本变为 `价格源响应缺少 data 数组`。**URL 旋钮端到端钉死**（B 只证明「它在联网」，C 才证明「它去的是我指定的那个地址」）。
+  - **D** `MIQROKEY_LOG_LEVEL=DEBUG`：DEBUG 行 **0 → 1975**，总行 **110 → 3995**。
+  - **E** 全默认 + 幽灵键指向不存在目录：见上，**零效果**。
+  - **行数 110 vs 30 的差异已解释**（不是异常）：A 是**首次**启动，Flyway 逐条打 76 行 `Migrating schema …` + 4 行汇总；E 启动时 schema 已在 v76。扣除后 A=30 / E=26，余下 4 行是采样时长差。
+- **§1-2 默认值三方比对：真·不一致 0 个**。139 个文档键 / 70 个 yml 桥默认 / 43 个代码侧默认 / **22 个三处都有** → 22/22 语义一致。脚本按字面比对抛出的 **29 组「不一致」全部是「Java 表达式 vs 字面量」的书写形态差**：`Duration.ofSeconds(10)`≡`10s`≡`10000`、`1024 * 1024`≡`1048576`、`new BigDecimal("7.2")`≡`7.2`、`Duration.ofMinutes(30)`≡`PT30M`、`List.of()`≡空，另有 3 处是我把 `compose.prod.yaml` 的 `${VAR:-默认}` 部署层示例值当成了 yml 默认。归一后 **0**。
+- **§1-4 重启要求**：`grep -rnE "@RefreshScope|spring-cloud-context|devtools" backend/` **零命中** ⇒ **没有任何热生效通道，全部配置项都需重启**。文档只在 §4.3 密钥轮换 runbook（:75/76/79）提到重启，无全局说明。**判非缺陷**：这是**遗漏**而非**错误陈述**（没有任何一句声称某键热生效，运维不会因此做错事），且对所有键一视同仁；计为缺陷属凑数。留档备后续若要补全局说明。
+- **被否候选（9 类，逐条理由见报告 §5）**：① 文档 :19 引用块内的 12 个「预留」键；② `MIQROKEY_BACKUP_{PATH,DAILY_KEEP,WEEKLY_KEEP,KEY_FILE}` —— 读取点在 `deploy/backup/*.sh`，**是我第一版扫描器只走 `backend/` 漏了 `deploy/`**（已修，reachable 104→108）；③ 2 个 OIDC 键 —— 我的解析器把文档简写行 `A / _B / _C` 错误拼接成不存在的名字；④ `MIQROKEY_MODEL_CATALOG_REPROBE_ENABLED` —— **`@ConditionalOnProperty` 的键名藏在字符串字面量里，`${}` 扫描器看不见**（任务书点名要单扫这一类的原因）；⑤ 3 个 webhook 键 —— #733 第 3 条已刻意改写为「与实现一致」，真实旋钮是每端点的 DB 列；⑥ 死线 31 处 —— 全是 Spring 框架属性与 compose `services.*` 路径，**`miqrokey.*` 零命中**；⑦ 默认值差异（见上）；⑧ 重启说明；⑨ 文档 :9 的启动校验承诺 —— 已在 #733 第 9 项闭环，不重开。
+- **方法论三条（踩坑留档）**：① 环境变量优先级**高于** `application.yml` 且走 relaxed 归一，所以**「yml 里没有 `${ENV:...}` 桥」不等于幽灵**；② `@ConditionalOnProperty` 必须单独扫；③ 文档简写行会骗过机械解析，必须人工确认展开。
+- 分支 `fix/ph79-config-defaults-consistency`；issue #1371；PR #1373。
+
+## 会话交接点 2026-09-22（PH67 数据保留/清理正确性：配额判定不得被用量删除解封，#1316）
+
+- **缺陷**：`quota_enforcement` 是网关 429 的唯一来源，控制面 `QuotaEnforcementService` 每 60s 用**实时**水位（`QuotaWatermarks` → `usage_event` 聚合）重算它。于是保留策略的 `UsageDeletionService.confirm()` 物理删掉当前窗口的 `usage_event` 行之后，下一轮水位归零 → 规则不再 EXCEEDED → 判定行消失 → **流量重新放行**。ADR-0020 D2 承诺的恢复路径只有「窗口滚过去」与「管理员提高限额」，删除用量不在其中。
+- **机制坐标**：`QuotaEnforcementService.evaluate()`（判定集重算）、`QuotaWatermarks.evaluate()`（水位口径）、`UsageDeletionService.confirm()`（删 `usage_event`）、`JdbcRouteSnapshotLoader` → `QuotaGate`（429 出口）。
+- **修复（四轮收敛，每轮都先证红）**：① 判定粘在窗口里（结转 `window_end`/`blocked_at`，实时水位掉下去不解除）；② 规则仍超限时判定时刻不刷新（保存规则不算恢复）；③ **恢复路径的比较基准从 `quota_rules.updated_at` 换成表里那条读数 `observed_used`**（V76 增列）——`updated_at` 的比较会被「保存 → 删用量 → 下一轮评估」这个顺序利用：保存先上膛、删用量扣扳机，规则其实仍超限，block 却没了；读数比较没有这个时间窗（读数仍不低于改后限额就保持）；④ 规则仍超限时每轮就地刷新 `observed_used`（判定集不变 → 不广播、不触发快照重载），否则读数会退化成过期下界、让后来的提额错判成「已恢复」。
+- **边界口径**：采样边界与触发判定那句一致——`used >= limit` 即 EXCEEDED（百分比先四舍五入到 2 位再比 100），所以「限额恰好提到记录读数」**仍然是 block**，只有严格提到读数之上才解除。`QuotaWatermarks.reachesTheLimit` 是这条边界的唯一实现，两侧共用。
+- **可空列的理由**：V76 的 `observed_used` 可空——V76 之前的旧行没有读数，服务退回按 `blocked_at`/`updated_at` 比较；若默认 0，升级时每一行都会读成「低于任何限额」，现存的 block 会被静默丢弃。
+- **真库证据**：`QuotaBlockSurvivesUsageDeletionIntegrationTest`（7 例，真 PostgreSQL）——改前红：`adminEditThatKeepsTheRuleExceededStillSurvivesTheDeletion:253 expected: 1L but was: 0L`，stdout `block rows=0`；改后绿：同一行 `block rows=1`。单元侧 `QuotaEnforcementServiceStickyVerdictTest`（12 例）覆盖异常隔离、读数上移、旧行回退。
+- **文档**：ADR-0020 §2 D2 / §4 后果改写（比较基准换成读数）；`database-schema.md` 的 `quota_enforcement` 补 `window_end`/`observed_used`，并更正「可重建的派生数据」——清空会丢掉结转的判定；CHANGELOG 2026-09-22 条目。
+## 会话交接点 2026-09-21（PH65 写操作幂等猎线：#1305 + #1333）
+
+- **形态**：猎线（审计+修复），不是 Goal。枚举全部写端点的重复提交防护，对代表性端点做真实 API + 真实 PG 的并发双发实测。确认 2 个缺陷、否证 8 条（否证清单见猎线报告 §5），未凑数立案。
+- **#1305 `model_approval` 无任何唯一约束**：`ModelApprovalService#submit` 是纯 check-then-act，6 个 barrier 同步请求全落库。修复 = **V73** 部分唯一索引 `uq_model_approval_pending ON model_approval (virtual_key_id, model_id) WHERE status = 'PENDING'` + 捕获 `DuplicateKeyException` → 与串行重复同一句 409 `DUPLICATE_PENDING`。
+  - 迁移**先**把历史重复 PENDING 行收敛到 `(created_at, id)` 最小的一条再建索引（避免重演 #1249 的「建索引失败 → Flyway 中止 → 控制面卡死」形状）。语义边界：只约束 PENDING，「申请 → 驳回 → 再次申请」历史不受影响。
+- **#1333 白名单直批路径绕过 V73**（本线对抗评审的「非阻塞观察」转正）：部分索引的谓词是 `WHERE status='PENDING'`，而直批分支在**同一事务内**把行翻成 `APPROVED` → **槽位被释放**，等锁的输家在赢家提交后重新求值、照插不误。实测白名单模型并发 6 发 `{"201": 6}` / 6 条 APPROVED，非白名单对照模型 `{"201": 1, "409": 5}` / 1 条 PENDING——唯一变量是模型名。
+  - **这不是 #1305 修复的疏漏，而是部分索引的语义边界**。加全量唯一索引会挡死「申请→驳回→再申请」，所以修复必须把 check-then-act 那一对读+写串行化。
+  - 修复 = `submit` 在**第一处读之前**取事务级 `pg_advisory_xact_lock`，键 = `SHA-256(virtualKeyId + "|" + modelId)` 前 8 字节；`submit` 本身 `@Transactional`，锁随提交/回滚释放。索引**保留**作纵深防御，两者互补不互替。
+  - `lockSubmit()` 入口加 `isActualTransactionActive()` 守卫（不在事务里直接抛，与既有先例 `AuditServiceImpl#acquireChainLock` 同构）——自动提交连接上该锁**取到即释放**，是本修复最危险的失效模式。
+- **影响如实收窄**：#1333 **不产生重复授权**（`project_provider_grant_models` 实测仍 1 行，写授权走 `ON CONFLICT DO NOTHING`）。重复的是**记录 / 审计 / 告警选通**，不是越权或重复计费。
+- **校准（红/绿都取原始日志，不引二手数字）**：红检必须在**两棵不同的树**上各跑一次——#1305 用 `3c134a9f`（develop，无 V73）服务层 **且** V73 从 `src/main/resources/db/migration/` 与 `target/classes/db/migration/` 两处移出（Maven `process-resources` 不清旧副本，不移会带着幽灵 V73 跑）；#1333 用 `acecdda0`（有索引、无锁）服务层。红日志分别是 `[pending rows for one logical submit] expected: 1 but was: 4` / `[auto-approved rows for one logical submit] expected: 1 but was: 5`，均为**行数断言**失败（断言顺序刻意改成计数优先，避免用响应码代理当证据）。绿：`Tests run: 16, Failures: 0, Errors: 0, Skipped: 0` + `BUILD SUCCESS`，且是**强制重编译**（`Compiling 244` + `Compiling 172`）而非 `Nothing to compile`，日志自证。
+- **修复后真实 API 复测（2026-09-22，修复版 exec jar 连真实 PG）**：白名单新模型 `ph65-probe-wl3` 冷启动并发 6 发 = `{"201": 1, "400": 5}`、DB 恒 1 条 APPROVED、审计 1 对（红：`{"201": 6}` / 6 条）；非白名单新模型 `ph65-probe-nw2` 并发 6 发 = `{"201": 1, "409": 5}`、DB 恒 1 条 PENDING、审计 1 条。原始输出 `postfix_whitelist_conc_out.txt` / `postfix_pending_out.txt`。**探针实例的 V73 校验和修复**（`DROP INDEX` + 删 `flyway_schema_history` version=73 行后由启动时重放）已在报告 §7 声明。
+- **遗留（报告 §6 逐条声明，均未立案）**：`approve`/`reject` 走原子 CAS 但**不取同一把锁**；`notifyApproval` 在**持锁期间**同步走出站告警投递（`AlertEventDispatcher`），即锁持有时长含一次出站 HTTP；红检均为单样本；`model_approval` 之外另有 5 个部分唯一索引的写路径未按「谓词被状态迁移绕开」这个形状重扫。
+- **已知无法就地修正**：提交 `6605ad64` 尾注写「2 个 `201`」，实际数组是 3 个（`red_no_fix.log:343`）。改它要改写历史，红线禁止，故如实记录在报告 §4.6.6 不修改。
+- 分支 `fix/ph65-write-idempotency`；issue #1305 / #1333；PR #1314。
+
 ## 会话交接点 2026-09-20（配额水位的定价口径：#943）
 
 - **问题形态**：COST 配额水位取 `upstreamPaid`（只含已定价部分），未定价用量计 0 → 一条 `action=REJECT` 的成本封顶对这类用量**完全不起作用**，而水位一直显示 `NORMAL / 0%`。这是「未知被当成零」的运维后果，不是显示层瑕疵。
@@ -1792,7 +1850,7 @@
 
 - `V10__cost_allocations.sql`：按订阅周期/项目对象的成本分摊表；唯一键 `(subscription_id, period_start, period_end, target_type, target_id, algorithm_version)` 使重跑幂等、算法升级另起版本。
 - `domain`：`CostAllocation` + `CostAllocationTargetType` + `CostAllocationRepository`（幂等 upsert、按周期查询）。
-- `control-plane`：`CostAllocationService` —— 管理端触发分摊：本地 usage（按订阅凭证归属，输入+输出 token，按产品/模型计价）→ 每百万 token × 最新价格快照 = usageCost；非 PAYG 订阅价按窗口/周期天数比例折算 fixedCost，按项目 Token 权重分摊；`allocatedAmount = usageCost + fixedShare`；无用量不产出行。
+- `control-plane`：`CostAllocationService` —— 管理端触发分摊：本地 usage（按订阅凭证归属，输入+输出 token，按产品/模型计价）→ 每百万 token × 最新价格快照 = usageCost；非 PAYG 订阅价按窗口/周期时长份额（毫秒）折算 fixedCost，按项目 Token 权重分摊；`allocatedAmount = usageCost + fixedShare`；无用量不产出行。
 - `AdminCostAllocationController`：`GET/POST /api/v1/admin/subscriptions/{id}/cost-allocation[/allocate]?from&to`（SYSTEM_ADMIN only）。
 
 ### 测试（本 Goal 新增 8 个）
@@ -1803,7 +1861,7 @@
 ### 风险与边界
 
 - 价格取分配时刻最新快照；逐事件价格快照为 usage_event 延后列（database-schema §6），价格变更后重跑同版本会覆盖历史——文档已注明。
-- 分摊只覆盖经 Gateway 且归属该订阅凭证的流量；固定成本按窗口天数折算（非精确到小时）。
+- 分摊只覆盖经 Gateway 且归属该订阅凭证的流量；固定成本按窗口时长占订阅周期的**份额**折算（毫秒级，非整天截断——原实现用 `Duration.toDays()` 向下取整到整天，<24h 窗口算 0，已由 #1311 / PR #1317 修正为 `toMillis()`）。
 - 用户维度（target_type=USER）预留，当前只产出 PROJECT 行。
 
 ### 验证
@@ -5907,3 +5965,192 @@ booking 一笔 `outputTokensDelta=-300`：观测 1000 tokens（600 in / 400 out�
 - 前端：vitest **642/642**（新增 8 条）、typecheck、lint（改动文件）、build、e2e **66/66**（新增 4 条：
   广场渲染/空态/试调全链含「密钥不落 storage」断言/拒绝信封）。
 - OpenAPI 基线随测试重生成（`/me/plaza/models` 入 spec），`gen:types` 同步，前端类型切 `generated-api`。
+
+## 2026-09-22 PH65：模型审批提交的重复提交防护只是「一次 SELECT 的运气」（#1305）
+
+### 缺陷
+
+`POST /api/v1/me/model-approvals` 的「同 Key 同模型只能有一条待审」防护，是**先 SELECT 再无条件 INSERT**
+（`ModelApprovalService.submit`），`model_approval` 表从建库起只有主键。隔离级别是 PG 默认的 READ COMMITTED，
+读到的快照约束不了并发写入 —— 并发到达的 N 个相同申请全部通过检查、全部落库。
+
+服务自己那句 409 文案「…请等待管理员处理，**无需重复提交**」说明代码意图就是「至多一条」，所以这是实现没跟上
+意图，不是设计留白。
+
+### 红证据（本地隔离环境：真控制面 + 真 PG，非生产）
+
+- 顺序两次相同请求 → 第 1 次 `201`、第 2 次 `409 DUPLICATE_PENDING`（顺序路径本来就对，缺陷只在并发窗口）；
+- `threading.Barrier(6)` 同时发 6 个相同请求 → **6/6 HTTP 201**，6 个不同 id；库内 `model_approval` 6 条
+  `PENDING`、`MODEL_APPROVAL_SUBMITTED` 审计 6 条、`alert_events` 6 条（配了 webhook 即 6 次对外投递）；
+  管理端队列里 6 条一模一样的待办，需逐条拒绝。
+- 回归测试在**未修复**的 `origin/develop` 上同样红（独立 worktree 跑新测试，`--force` 后 `worktree remove` 回收）：
+  `Expecting actual: [409, 409, 201, 201, 201, 201, 409, 409] to contain only once: [201]`。
+
+影响是**多**不是**少**：`approve`/`reject` 的单行状态迁移有 `version` CAS 兜底（`OptimisticLockingFailureException`
+→ 409 `ALREADY_REVIEWED`），缺陷只在 submit 这条路径上。
+
+### 改动
+
+- **V73**（新增迁移）：先收敛存量重复 PENDING（保留 `(created_at, id)` 最小的一条），再建部分唯一索引
+  `uq_model_approval_pending (virtual_key_id, model_id) WHERE status = 'PENDING'`。先删后建是**刻意**的：
+  存量环境里重复行正是本缺陷造出来的，直接建索引会以 `could not create unique index ... is duplicated`
+  中止整轮迁移、卡死控制面启动且不留迁移记录——正是 #1249 的形状，不再重演。只约束 PENDING，终态行不参与，
+  「申请 → 驳回 → 再申请」不受影响。
+- `ModelApprovalService`：插入包 `try/catch (DuplicateKeyException)`，翻译成与顺序路径**同一个** 409
+  `DUPLICATE_PENDING`（文案提为常量，两条路径共用），并发输家与顺序重试对客户端完全同形。
+- `docs/database-schema.md` 的「无重复申请的数据库约束」一句改为索引描述。
+
+### 验证
+
+- `./mvnw -f backend/pom.xml -Pintegration -pl control-plane-app -am test -Dtest=ModelApprovalApiIntegrationTest`
+  **15/15 绿**（新增 `concurrentDuplicateSubmitsCollapse`：8 线程 barrier 同步同一请求，断言恰好一个 201、
+  其余 409，且库内 PENDING 行 = 1、审计 = 1）；同一条测试在 `origin/develop` 上必红（见上）。
+- spotless 已过（`spotless:apply` 后无残留 diff）。
+
+### 追加缺陷 #1333：白名单直批分支绕开同一个索引（V73 之后的第二个红证据）
+
+V73 的索引用 `WHERE status = 'PENDING'` 作部分谓词，而白名单分支在**同一个事务内**把刚落库的行翻成
+`APPROVED`——行随即离开谓词、**索引槽位被释放**。并发输家在等赢家 xid 之后重新求值，看到的是已提交的
+`APPROVED` 行，于是照插不误。换言之 V73 只对「留在 PENDING」的路径有效，对直批路径是结构性盲区。
+
+该缺口最早由本线自己的对抗评审以「非阻塞观察」提出（报告 `_orchestrate/reports/ph65_review.md` 观察 1，
+原文未改动），随后用真实 API + 真库 A/B 对照坐实并转正为独立 issue #1333。
+
+- **红证据（真实 API + 真 PG，A/B 只差「模型是否在白名单」）**：白名单模型并发 6 发 → `{"201": 6}`、
+  `APPROVED=6`、`MODEL_APPROVAL_APPROVED=6` + `MODEL_APPROVAL_SUBMITTED=6`、6 条告警事件；非白名单对照模型
+  同参数并发 6 发 → `{"201": 1, "409": 5}`、`PENDING=1`。窗口只在并发内：已存在 6 条 APPROVED 后串行再发
+  两次，两次都是 `400 MODEL_ALREADY_AVAILABLE`，`APPROVED` 不增。
+- **影响如实收窄**：**不产生重复授权**——`project_provider_grant_models` 实测仍只有 1 行（写授权走
+  `ON CONFLICT (grant_id, model_id) DO NOTHING`）。重复的是记录 / 审计 / 告警投递，不是越权或重复计费。
+- **改动**：`ModelApprovalService.java:139` 在 check-then-act 的第一处读**之前**取事务级
+  `pg_advisory_xact_lock(SHA-256(virtualKeyId + "|" + modelId) 前 8 字节)`（`#lockSubmit` `:511-514`、
+  `#submitLockKey` `:521-531`）。`submit` 本身 `@Transactional`，锁随事务提交/回滚自动释放。输家等赢家提交后
+  重新过预检，经 `DUPLICATE_PENDING`(409) / `MODEL_ALREADY_AVAILABLE`(400) 离场，对外与顺序重试不可区分。
+  同款写法仓库内已有先例（`ReconciliationService#findOrCreateReport`、审计链）。V73 索引**保留**作纵深防御。
+  **不需要新 migration**（纯服务层串行化，不动表结构）。
+- **验证**：新增 `concurrentWhitelistSubmitsAutoApproveOnce`（8 线程 barrier；断言状态只能是 `201`/`400`、
+  `201` 恰好一次、`APPROVED` 行数 1、`MODEL_APPROVAL_SUBMITTED` 1、`MODEL_APPROVAL_APPROVED` 1）。
+  未修复的树上该用例必红：`Expecting actual: [400, 400, 400, 201, 201, 400, 201, 400] to contain only once:
+  [201]`（`ModelApprovalApiIntegrationTest.java:405`）；修复后
+  `Tests run: 16, Failures: 0, Errors: 0, Skipped: 0` + `BUILD SUCCESS`。原始日志
+  `_orchestrate/_logs/ph65_probe/redcheck/{red_no_fix.log,green_with_fix.log}`。
+- 提交：`6605ad64`（修复）、`3c019c64`（V73 注释更正，见下）。issue #1333，PR #1314。
+- **V73 注释更正（`3c019c64`）**：原注释称「同 (Key, 模型) 的 PENDING 不可能来自不同的人」，被 `ownedKey`
+  的角色分支证伪（`SYSTEM_ADMIN` 可对他人名下的密钥提交，`ModelApprovalService#ownedKey`）。只改注释、
+  **不动一行 SQL**：删除仍安全（同一诉求的重复提交、两份审计都独立留在 append-only 的 `admin_audit_events`），
+  但结论收窄为「不要用本表行数或行内容反推谁申请过」。该迁移从未进入共享环境（`git branch -a --contains
+  acecdda0` 只有本分支；`origin/develop` 最新为 V72），故不属于「禁止修改已进入共享环境的迁移」。
+
+## 2026-09-22 三处判据「等的不是被测对象」：#934 / #1163 / #1150（PR #1125 / #1164 / #1167）
+
+同一天收掉的三条独立缺陷，形状是同一个：**判据指向了一个顺手的邻居，而不是本次请求/本次响应本身**。
+三条都在合入前用「红先证明」校准，且每条都跑了全新上下文的对抗评审（评审员的改法建议另经独立复验，见下）。
+
+### ① #934 熔断集成测试把自己钉在时序上（PR #1125）
+
+`LlmCircuitBreakerIntegrationTest` 在 `Thread.sleep(1_200)` 之后断言「熔断已打开、探针已放出」，并用
+`hasSize(3)` / `hasSize(4)` 这类**绝对条数**描述「开窗期间拒绝了几次」。两者都不是在描述被测契约，而是在描述
+「这台机器上 1200ms 够不够」：慢机上 sleep 不够 → 探针未放出 → 红；快机上多跑一次 → 条数变 → 红。
+所以它不是「偶发」，而是**必然在某个速度上失败的确定性缺陷**，本机只是正好落在能过的那一档。
+
+**改动**：删掉 sleep，改有界轮询 —— `awaitRejection()` / `awaitSuccess()`（`MAX_ATTEMPTS=40`、`RETRY_PAUSE_MS=50`），
+绝对条数改相对基线（`>= contactsWhileOpen + 2`）。**步数语义**（几次失败开窗 / 探针何时放出 / 成功关闭 / 失败重开）
+**不在本类钉** —— 它 pin 在 `McpCircuitBreakerTest`（注入 `Clock`）与 `LlmCircuitBreakerRegistryTest`；本类只钉 HTTP
+形状契约。这个分工写进了 javadoc，**覆盖变化是显式标注的，不是漏的**。
+
+**验证**：
+
+- 红先证明：未修复的 `origin/develop` 上注入 300ms 滞后即复现 `expected:<200 OK> but was:<503>`；自然时序下余量
+  只有 1.88–5.88 ms（9/9 为正），所以本机从不显形。
+- 「它有牙吗」变异校准：`min-requests` → 1000（熔断永不打开）、`open-seconds` → 1e6（探针永不放出），断言
+  **必须红且响亮** —— 两处都验证为「响亮失败」，排除了「轮询把真故障掩盖成绿灯」这一最坏情形。
+- 「顺序无关性」反向实验：注入跨过阈值的滞后（300 ms / 1500 ms），期望变绿。
+
+> 一条方法学收获：本轮评审员 r2 建议「加一次不等候的调用以恢复鉴别力」并称其**顺序无关**；我照做后 r3 它自己用
+> 同一个实验反转了结论（漏洞在 #451 半开回收分支：探针 `afterCall` 滞后 ≥ `open-seconds` 时，第二次观测到的 2xx
+> 来自被回收放出的新探针，breaker 仍是 `HALF_OPEN` —— 阈值正好是 `open-seconds`，1500 ms 红 / 300 ms 绿）。
+> **评审建议分两类：「指出现有代码的问题」通常可信；「提出改法」必须自己独立验。**
+
+### ② #1163 终态屏障等的是「集合非空」而不是「本次请求的记录」（PR #1164）
+
+`ChatProxyContractTest` 的 `UsageFactGuard` 用 `awaitOrFail(bus)` 等「usage 事件集合非空」。这个屏障**任何一条**
+记录都能满足 —— 包括测试自己先前那发产生的邻居。于是「模型缺失的请求不产生 usage 事实」这条断言可能**是被邻居
+喂饱的**，与被测请求无关：断言恒真，等于没测。
+
+**改动**：屏障键在**网关自己铸的 request id** 上 —— 它由 `ProxyController` 回显在代理响应的 `X-MiQroKey-Request-Id`
+头（流式与非流式都发）。`requestIdOf(proxied)` 从响应头取；`awaitTerminal` / `awaitUsage` 按该 id 等到**属于本次
+请求的那一条**；只用 `usageFor(...)`（快照、不等待）做否定断言。`awaitOrFail` 删除。
+
+**验证**：红先证明的形态是**交叉轮次 A/B** —— 同一个变异（把「模型缺失即不记事实」改坏），**旧设计的钥匙下 GREEN、
+新钥匙下 RED**，证明旧屏障确实可以被邻居满足。
+
+> 踩过的坑：初版我**替换掉了等待本身**（把三处 `awaitOrFail` 换成快照 `usageFor`），滞后 400 ms 的写者下必然红，
+> 而「修好」的代码也红。缓存读的语义必须保留等待。
+
+### ③ #1150 更新端点把桶项目的 `system` 回显成库里的反面（PR #1167）
+
+`AdminOrgService.updateProject` 用 **11 参便捷构造器**重建 `Project` —— 那个构造器的语义是「普通项目」
+（`Project` 的 javadoc 即 "Regular (non-system) project"），`system` 取默认 `false` —— 而它 `return` 的正是这个重建对象。
+结果：同一个项目在**列表端点**是 `system:true`、在**更新端点的响应**里是 `false`，库里那行始终是 `true`。
+**响应说了一件库里不是的事。**
+
+**改动**：改用 **12 参规范构造器**并带上刚读到的 `project.system()`。**没有**改 `ProjectRepositoryImpl.update` ——
+那一列不该经本路径变成可写，这是本次唯一的语义边界（注释里写明）。
+
+**验证**：
+
+- 红先证明：`AdminOrgApiIntegrationTest.unattributedPolicyLifecycle` 先只加断言、不改 service →
+  `JSON path "$.system" expected:<true> but was:<false>`；改后 16/16 绿。删掉 `, project.system()` 复现同一句红。
+- **同族扫描**：全仓 `new Project(` 仅 3 处 —— `AdminOrgService` 的**新建**（`system=false` 正确，不动）、本次修的
+  **重建**、`ProjectRepositoryImpl` 的 `ROW_MAPPER`（**读**库、已带 `system` 列）⇒ **无第二个实例**，家族闭合。
+- 对抗评审**临时插桩打印真实响应体**（随后还原，两文件 md5 与实验前逐字节一致）确认 `create` / `PATCH` / `list`
+  三条路径的 `system` 现在一致；并核了 `createProject` 的 `system=false` 是对的（桶项目只由
+  `UnattributedPolicyService` 的裸 SQL 以 `TRUE` 建，`ProjectRepositoryImpl.insert` 根本不写该列）。
+
+### 一处与 issue 不符，如实标注
+
+#1150 的复现步骤与验收写的是 `PUT /api/v1/admin/projects/{id}`，**实际端点是 `PATCH`**
+（`AdminProjectController` `@PatchMapping("/{projectId}")`；全仓 `/projects/` 下唯一的 PUT 是预算端点）。
+现象与根因不受影响，仅动词写错。
+
+### 伴生
+
+- **#1166**（#1150 复审时的范围外发现，另立）：`BUCKET_CODE = "UNATTRIBUTED"` 不是保留字 —— `createProject` 只校验
+  「非空 + 全租户唯一」，不拒绝该 code，而 `ensureBucketProject` 按 code **收养**已存在的项目。于是「先建
+  `UNATTRIBUTED` 项目、后配置未归属策略」会让桶项目停在 `system=false`，**绕过 `VirtualKeyService` 的
+  `PROJECT_NOT_SELECTABLE` 守卫**。先于本次改动存在，不由本次引入或加重；后由 #1171 修复并合入。
+
+## 2026-09-23 报 bug 的环境信息从手填改为一条命令：Issue Forms + 部署诊断脚本（#1443）
+
+### 改动
+
+- `.github/ISSUE_TEMPLATE/` 由两份 Markdown 模板改为 GitHub Issue Forms：`bug_report.yml`（描述 / 诊断输出 /
+  复现步骤 / 复现频率 / 期望 / 实际 / requestId / 日志 / 截图 / 补充 + 两项提交前确认）、`feature_request.yml`
+  （背景 / 期望能力 / 参考 / 验收标准 / 优先级 / 备注）、`config.yml`（关闭空白 issue；contact_links 指向文档
+  地图与 SECURITY.md——安全问题不走公开 issue）。两份旧 `.md` 删除。
+- 新增 `deploy/diagnose.sh`（POSIX sh）与 `deploy/diagnose.ps1`（Windows）：只读采集主机 / Docker / 容器状态 +
+  镜像 digest / `deploy.log` 留痕 / 健康探针（portal `/healthz`、cp、gw 的 `/actuator/health`、`pg_isready`）/
+  `.env` 与 `deploy/secrets` 的**存在性**（只报有无、权限、字节数，不读值）/ 各容器日志尾部（每容器截 8000
+  字符，整报控制在 issue 正文长度内）。全程脱敏：`sk-` 形密钥、Bearer/Basic、URL 内嵌密码、URL 查询参数
+  `key=`（企微 webhook 的典型形态）、`KEY/SECRET/TOKEN=` 赋值、私钥头；不写任何文件，docker 只问
+  ps/inspect/logs/exec(wget|pg_isready)/stats/system df。
+- `deploy/tests/diagnose_script_regression.py` + 挂进既有 `deploy-script` CI job（job 名不动——它是必过检查）。
+
+### 验证
+
+- shellcheck（CI 同款 `-S warning`，经 `koalaman/shellcheck:stable` 容器）零告警；`deploy/security/check-secrets.sh` 通过。
+- 真机两次：演示机（Linux、`/opt/miqrokey`、sudo——ubuntu 不在 docker 组，报告如实标出）与 Windows 开发机
+  （PowerShell 5.1）。报告结构完整、深扫零泄漏。
+- 该轮修掉两处**实测**出来的 PS 5.1 缺陷：`SilentlyContinue` 会把 `2>&1` 合并的原生命令 stderr 静默丢弃
+  （redpanda 日志整段为空）；`Get-Content` 默认按 ANSI 解码无 BOM 的 UTF-8 文件（git 提交信息乱码）。
+- 回归测试自有牙齿：种子 8 类假凭证必须全部缺席、对照串（origin allowlist / requestId / model）必须原样存活；
+  stub docker 记录每次调用，只读动词白名单之外判红。变异校准各红一次：删一条脱敏规则 → 对应检查红；
+  插入 `docker restart` → 只读检查红。
+- 表单 YAML 经 SchemaStore `github-issue-forms.json` 校验 + 本仓 label 存在性校验（`assignees: []` 被 schema 拒，已删）。
+
+### 说明
+
+- Issue Forms 只在**默认分支（main）**渲染：合入 develop 后需等 main 同步 PR 才在 GitHub 界面生效。
+- `.ps1` 腿在 CI（ubuntu runner 自带 pwsh）执行；Windows 本地因 PATHEXT 跳过无扩展名 stub 故 SKIP（避免误碰真
+  daemon），Windows 侧由人工实跑覆盖。
+

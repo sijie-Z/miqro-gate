@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -27,6 +28,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -263,6 +265,91 @@ class AdminMcpAccessApiIntegrationTest {
                 "SELECT action FROM admin_audit_events" + " WHERE action LIKE 'MCP_ACCESS_%' ORDER BY created_at",
                 new MapSqlParameterSource(), (rs, i) -> rs.getString(1));
         assertThat(actions).containsExactly("MCP_ACCESS_MODE", "MCP_ACCESS_GRANTS", "MCP_ACCESS_RESET");
+    }
+
+    @Test
+    @DisplayName("a repeated consumer id in the server list is stored once (#1339)")
+    void serverLevelListDeduplicatesRepeatedConsumers() throws Exception {
+        putJson("/api/v1/admin/mcp-services/" + serviceId + "/access/mode", Map.of("mode", "ALLOW"))
+                .andExpect(status().isOk());
+
+        // The whole server list is one scope, and tool_id is NULL for it. The
+        // table's uq_mcp_access_grant (service_access_id, tool_id, consumer_id)
+        // therefore cannot deduplicate: PostgreSQL treats NULLs as distinct, so
+        // every row of the list passes the constraint. Sending the same consumer
+        // twice used to store two identical grants and list the consumer twice.
+        putJson("/api/v1/admin/mcp-services/" + serviceId + "/access/grants",
+                Map.of("mode", "ALLOW", "consumerIds", List.of(consumerA.toString(), consumerA.toString())))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.serverConsumers.length()").value(1));
+
+        assertThat(grantRows(null, consumerA)).isOne();
+    }
+
+    @Test
+    @DisplayName("a repeated consumer id in a tool override is accepted, not a 409 (#1339)")
+    void toolLevelOverrideDeduplicatesRepeatedConsumers() throws Exception {
+        // Same body as above — only toolId differs. Here tool_id is non-NULL, so
+        // the UNIQUE does fire and the second row became
+        // DataIntegrityViolationException → 409 RESOURCE_CONFLICT. A whole-scope
+        // replace is idempotent by definition; which status a caller gets must
+        // not depend on whether the nullable column happens to be set.
+        putJson("/api/v1/admin/mcp-services/" + serviceId + "/access/grants", Map.of("toolId", toolId.toString(),
+                "mode", "ALLOW", "consumerIds", List.of(consumerA.toString(), consumerA.toString())))
+                .andExpect(status().isOk());
+
+        assertThat(grantRows(toolId, consumerA)).isOne();
+        String view = mockMvc.perform(get("/api/v1/admin/mcp-services/" + serviceId + "/access").cookie(sessionCookie))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertThat(toolAccess(view, "query_order").consumers()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("the audit record counts stored consumers, not requested entries (#1339)")
+    void auditCountsStoredConsumers() throws Exception {
+        putJson("/api/v1/admin/mcp-services/" + serviceId + "/access/mode", Map.of("mode", "ALLOW"))
+                .andExpect(status().isOk());
+        putJson("/api/v1/admin/mcp-services/" + serviceId + "/access/grants",
+                Map.of("mode", "ALLOW", "consumerIds",
+                        List.of(consumerA.toString(), consumerA.toString(), consumerB.toString())))
+                .andExpect(status().isOk());
+
+        Integer counted = jdbc.queryForObject("SELECT (change_summary ->> 'consumers')::int FROM admin_audit_events"
+                + " WHERE action = 'MCP_ACCESS_GRANTS'", new MapSqlParameterSource(), Integer.class);
+        assertThat(counted).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("the database rejects a duplicate server-level grant even without the service check (V75 backstop)")
+    void databaseBackstopRejectsDuplicateServerListGrant() throws Exception {
+        putJson("/api/v1/admin/mcp-services/" + serviceId + "/access/mode", Map.of("mode", "ALLOW"))
+                .andExpect(status().isOk());
+        putJson("/api/v1/admin/mcp-services/" + serviceId + "/access/grants",
+                Map.of("mode", "ALLOW", "consumerIds", List.of(consumerA.toString()))).andExpect(status().isOk());
+
+        UUID accessId = jdbc.queryForObject("SELECT id FROM mcp_service_access WHERE mcp_service_id = :serviceId",
+                new MapSqlParameterSource("serviceId", serviceId), UUID.class);
+
+        // Straight SQL, i.e. any write path that bypasses AdminMcpAccessService: the
+        // nullable tool_id made uq_mcp_access_grant miss these rows entirely, so the
+        // service-level list had no uniqueness guarantee at all. V75 adds a partial
+        // unique index over exactly the rows the old constraint could not see.
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO mcp_access_grants (id, tenant_id, service_access_id, tool_id, consumer_id,
+                                              mode, created_by)
+                SELECT :id, tenant_id, service_access_id, NULL, consumer_id, mode, created_by
+                  FROM mcp_access_grants
+                 WHERE service_access_id = :accessId AND tool_id IS NULL
+                """, new MapSqlParameterSource("id", UUID.randomUUID()).addValue("accessId", accessId)))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("uq_mcp_access_grant_server_list");
+    }
+
+    private int grantRows(UUID toolId, UUID consumerId) {
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM mcp_access_grants" + " WHERE consumer_id = :consumerId"
+                        + " AND ((:toolId::uuid IS NULL AND tool_id IS NULL) OR tool_id = :toolId::uuid)",
+                new MapSqlParameterSource("consumerId", consumerId).addValue("toolId", toolId), Integer.class);
+        return count == null ? 0 : count;
     }
 
     @Test

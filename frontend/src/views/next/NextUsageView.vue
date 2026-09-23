@@ -10,7 +10,7 @@ import * as api from '@/api';
 import { ChartBarIcon, LayersIcon, MoneyIcon } from 'tdesign-icons-vue-next';
 import { ApiError } from '@/api/http';
 import { csvCell } from '@/utils/csv';
-import { localDayKey, localTzOffsetMinutes } from '@/utils/datetime';
+import { localDateTimeWithOffset, localDayKey, localTzOffsetMinutes } from '@/utils/datetime';
 import {
   UiButton,
   UiDonut,
@@ -512,7 +512,7 @@ async function exportRecords() {
     '供应商请求 ID',
   ];
   const rows = all.map((r) => [
-    r.occurredAt,
+    localDateTimeWithOffset(r.occurredAt),
     r.modelId ?? '',
     keyName.value(r.virtualKeyId),
     cacheLevelLabel[r.cacheLevel ?? ''] ?? r.cacheLevel,
@@ -838,6 +838,13 @@ function formatTime(iso?: string): string {
         </UiButton>
         <span class="next-usage__custom-hint">最长 93 天</span>
       </div>
+      <!-- #1353: once the summary has loaded, a failed reload keeps the old rows and
+           `:loading` stays false, so Table.vue's own error block (which only renders
+           when there are no rows) never appears. Without this banner a failed window
+           change is invisible and the stale numbers look like the new window's. -->
+      <div v-if="summaryError" class="ui-alert ui-alert--error" data-testid="summary-load-error">
+        {{ summaryError }}
+      </div>
       <UiTable
         :columns="summaryColumns"
         :data="summary?.groups ?? []"
@@ -929,6 +936,14 @@ function formatTime(iso?: string): string {
       >
         <div class="ui-panel-head">
           <h2 class="ui-panel-title">最近记录</h2>
+        </div>
+        <!-- #1353: same shape as the summary panel, but here the stakes are higher —
+             `gotoPage` advances `page` before the fetch, so the pager already reads
+             "第 2 / 3 页" while the rows below are still page 1's. The banner is the
+             only thing that tells the user those rows are not the page they asked
+             for; `:error` cannot, because Table.vue renders rows ahead of errors. -->
+        <div v-if="recordsError" class="ui-alert ui-alert--error" data-testid="records-load-error">
+          {{ recordsError }}
         </div>
         <UiTable
           :columns="visibleRecordsColumns"
@@ -1296,6 +1311,20 @@ function formatTime(iso?: string): string {
 .next-usage__busy-hint {
   margin-left: var(--ui-space-2);
   color: var(--ui-foreground-faint);
+}
+
+/* #1353: page-level reload-failure banner, matching the sibling usage/audit pages
+   (the class is not global — each page carries its own copy). */
+.ui-alert {
+  padding: var(--ui-space-3) var(--ui-space-4);
+  margin-bottom: var(--ui-space-4);
+  border-radius: var(--ui-radius-control);
+  font-size: var(--ui-font-size-sm);
+}
+
+.ui-alert--error {
+  background: var(--ui-danger-bg);
+  color: var(--ui-danger-fg);
 }
 
 .next-usage__keyname {

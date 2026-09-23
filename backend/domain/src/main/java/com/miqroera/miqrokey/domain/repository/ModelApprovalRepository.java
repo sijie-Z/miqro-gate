@@ -28,12 +28,14 @@ public interface ModelApprovalRepository {
     List<ModelApproval> findAllByRequestedBy(UUID requestedBy);
 
     /**
-     * Page of approvals ordered newest-first ({@code created_at DESC, id DESC}),
-     * filtered by {@code status} when non-null. Keyset pagination: pass the
-     * {@code created_at}/{@code id} of the last item as {@code beforeCreatedAt}/
-     * {@code beforeId} (both null = first page). The caller clamps {@code limit}.
+     * Page of one tenant's approvals ordered newest-first ({@code created_at DESC,
+     * id DESC}), filtered by {@code status} when non-null. Keyset pagination: pass
+     * the {@code created_at}/{@code id} of the last item as
+     * {@code beforeCreatedAt}/ {@code beforeId} (both null = first page). The
+     * caller clamps {@code limit}.
      */
-    List<ModelApproval> findPage(ModelApprovalStatus status, int limit, Instant beforeCreatedAt, UUID beforeId);
+    List<ModelApproval> findPage(UUID tenantId, ModelApprovalStatus status, int limit, Instant beforeCreatedAt,
+            UUID beforeId);
 
     List<ModelApproval> findAllByStatus(ModelApprovalStatus status);
 

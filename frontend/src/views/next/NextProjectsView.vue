@@ -42,6 +42,11 @@ const memberOpen = ref(false);
 const memberProject = ref<Project | null>(null);
 const memberUsers = ref<MemberView[]>([]);
 const memberLoading = ref(false);
+// #1356: a failed member read has to survive on screen. The toast below is gone
+// after DURATION_ERROR (7 s) while the drawer stays open, so without this the
+// only thing left is `empty-title="还没有成员"` — an assertion about the project
+// that the failed read never established.
+const memberError = ref('');
 
 // #556: add-member picker (mirrors the teams page and users-page quick-join)
 const allUsers = ref<AdminUser[]>([]);
@@ -115,6 +120,18 @@ async function loadMemberCounts(list: Project[]) {
     }
   });
   memberCounts.value = counts;
+}
+
+/**
+ * #PH78: 行上的成员数与抽屉里的成员名单是同一实体的两份副本。增删成员后抽屉会重读
+ * 名单，同一份读数必须同时喂给行上的计数 —— 否则关掉抽屉看到的还是旧数字，用户会
+ * 以为刚才那一下没生效而重复操作。计数与名单同源，不再各读一次。
+ *
+ * 计数以项目 id 归档，所以写在 `membersRequestSeq` 守卫**之外**：那个守卫保护的是
+ * 「当前打开的那个抽屉」的名单，而一次已经落地的读数对它所读的项目而言始终是真的。
+ */
+function setMemberCount(projectId: string, count: number) {
+  memberCounts.value = { ...memberCounts.value, [projectId]: count };
 }
 
 async function load() {
@@ -193,6 +210,7 @@ async function openMembers(project: Project) {
   memberProject.value = project;
   memberOpen.value = true;
   memberLoading.value = true;
+  memberError.value = '';
   pickUserId.value = '';
   if (!usersLoaded.value) {
     void loadUsers();
@@ -203,16 +221,27 @@ async function openMembers(project: Project) {
       return; // a newer drawer target won — this response is stale
     }
     memberUsers.value = rows;
-  } catch {
+  } catch (error) {
     if (seq === membersRequestSeq) {
       memberUsers.value = [];
-      toast.error('加载成员失败');
+      // #1356: keep the failure, not a toast — and keep the backend's message.
+      // The bare `catch {` here threw the ApiError away, so all the user got was
+      // four characters of generic copy with no requestId to quote.
+      memberError.value =
+        error instanceof ApiError
+          ? `${error.message}（requestId: ${error.requestId ?? '-'}）`
+          : '加载成员失败。';
     }
   } finally {
     if (seq === membersRequestSeq) {
       memberLoading.value = false;
     }
   }
+}
+
+/** #1356: the members table's retry entry — same loader, so it also clears the error. */
+function retryMembers() {
+  if (memberProject.value) void openMembers(memberProject.value);
 }
 
 async function addMember() {
@@ -225,8 +254,11 @@ async function addMember() {
     toast.success('成员已添加');
     const seq = ++membersRequestSeq;
     const rows = await api.listProjectMembers(project.id!); // list rows always carry ids
+    // #PH78: 这一次读数同时供抽屉名单与行上的计数，两者不许各说各话。
+    setMemberCount(project.id!, rows.length);
     if (seq === membersRequestSeq) {
       memberUsers.value = rows;
+      memberError.value = ''; // a fresh read supersedes the old failure
     }
   } catch (error) {
     if (error instanceof ApiError) {
@@ -251,8 +283,11 @@ function requestRemove(user: MemberView) {
         toast.success('成员已移除');
         const seq = ++membersRequestSeq;
         const rows = await api.listProjectMembers(project.id!); // list rows always carry ids
+        // #PH78: 同一次读数同时喂抽屉名单与行上的计数。
+        setMemberCount(project.id!, rows.length);
         if (seq === membersRequestSeq) {
           memberUsers.value = rows;
+          memberError.value = ''; // a fresh read supersedes the old failure
         }
       } catch (error) {
         if (error instanceof ApiError) {
@@ -503,13 +538,18 @@ onMounted(load);
         没有可加入的 ACTIVE 用户。
       </p>
 
+      <!-- #1356: `memberError` is what makes the failure outlive the toast. Table.vue
+           renders rows ahead of `error`, so this only shows when the read came back
+           empty-handed — which is exactly the case that used to read as 「还没有成员」. -->
       <UiTable
         :columns="memberColumns"
         :data="memberUsers"
         :loading="memberLoading"
+        :error="memberError"
         row-key="userId"
         empty-title="还没有成员"
         data-testid="project-members-table"
+        @retry="retryMembers"
       >
         <template #username="{ row }">
           <div class="next-projects__member-name">{{ (row as MemberView).username }}</div>

@@ -75,7 +75,7 @@ public class CsrfInterceptor implements HandlerInterceptor {
         byte[] csrfDigest = userContext.getSession().csrfDigest();
 
         if (!sessionService.verifyCsrf(headerToken, csrfDigest)) {
-            LOG.warn("CSRF validation failed for user {}", userContext.getUser().username());
+            LOG.warn("CSRF validation failed for user {}", LogValues.forLog(userContext.getUser().username()));
             sendProblem(response, 403, "CSRF_INVALID", "CSRF validation failed", requestId);
             return false;
         }

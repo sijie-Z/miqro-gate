@@ -483,6 +483,123 @@ class VirtualKeyAuthContractTest {
         }
 
         @Test
+        @DisplayName("wire protocol is part of the key: a chat-cached answer never replays into /v1/messages (#1236)")
+        void wireProtocolIsPartOfTheKey() throws InterruptedException {
+            // Prime the cache through the OpenAI chat endpoint. The body is a
+            // plain chat body whose semantic scope (system + last user message)
+            // is extracted from the bytes alone, so the same bytes sent to a
+            // different endpoint used to produce one shared cache key (#1236).
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
+            String body = """
+                    {"model":"gpt-4o-mini","messages":[{"role":"user","content":"cache probe 1236 cross protocol"}]}""";
+            webTestClient.post().uri("/v1/chat/completions").header(CacheEligibility.CACHEABLE_HEADER, "1")
+                    .bodyValue(body).exchange().expectStatus().isOk().expectHeader()
+                    .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss");
+            awaitCacheFill();
+
+            // The same bytes through the Anthropic endpoint: the wire protocol
+            // decides the response shape — #444's argument one level up — so
+            // this must MISS and fetch its own Anthropic-shaped answer.
+            // Replaying the OpenAI-shaped first response would hand an
+            // Anthropic client a body it cannot parse.
+            String anthropicShaped = "{\"id\":\"msg_1236\",\"type\":\"message\",\"role\":\"assistant\","
+                    + "\"content\":[{\"type\":\"text\",\"text\":\"pong\"}],\"stop_reason\":\"end_turn\"}";
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(anthropicShaped).build());
+            byte[] second = webTestClient.post().uri("/v1/messages").header(CacheEligibility.CACHEABLE_HEADER, "1")
+                    .bodyValue(body).exchange().expectStatus().isOk().expectHeader()
+                    .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss").expectBody().returnResult()
+                    .getResponseBody();
+
+            assertThat(new String(second, StandardCharsets.UTF_8)).isEqualTo(anthropicShaped);
+            assertThat(mockProvider.getCapturedRequests()).hasSize(2);
+        }
+
+        @Test
+        @DisplayName("wire protocol is part of the key for /v1/responses: a responses-cached answer never replays into chat (#1421)")
+        void responsesProtocolIsPartOfTheKey() throws InterruptedException {
+            // Prime the cache through /v1/responses — the third production
+            // mapping (#1236) previously had no HTTP-level assertion. The body
+            // is not a chat shape, so the key falls back to the full normalized
+            // body; only the family dimension separates it from the chat key.
+            String responsesShaped = "{\"id\":\"resp_1421\",\"object\":\"response\",\"status\":\"completed\","
+                    + "\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":"
+                    + "[{\"type\":\"output_text\",\"text\":\"pong\"}]}]}";
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(responsesShaped).build());
+            String body = """
+                    {"model":"gpt-4o-mini","input":"cache probe 1421 responses cross protocol"}""";
+            webTestClient.post().uri("/v1/responses").header(CacheEligibility.CACHEABLE_HEADER, "1").bodyValue(body)
+                    .exchange().expectStatus().isOk().expectHeader()
+                    .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss");
+            awaitCacheFill();
+
+            // The same bytes through the OpenAI chat endpoint: the wire protocol
+            // decides the response shape, so this must MISS and fetch its own
+            // chat-shaped answer. Replaying the Responses-shaped first response
+            // would hand a chat client a body it cannot parse.
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
+            byte[] second = webTestClient.post().uri("/v1/chat/completions")
+                    .header(CacheEligibility.CACHEABLE_HEADER, "1").bodyValue(body).exchange().expectStatus().isOk()
+                    .expectHeader().valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss").expectBody().returnResult()
+                    .getResponseBody();
+
+            assertThat(new String(second, StandardCharsets.UTF_8)).isEqualTo(ChatFixtures.RESPONSE_BASIC);
+            assertThat(mockProvider.getCapturedRequests()).hasSize(2);
+        }
+
+        @Test
+        @DisplayName("same endpoint still hits: the protocol dimension does not disable the cache (#1236)")
+        void sameProtocolStillHits() throws InterruptedException {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
+
+            String body = """
+                    {"model":"gpt-4o-mini","messages":[{"role":"user","content":"cache probe 1236 same protocol"}]}""";
+            webTestClient.post().uri("/v1/messages").header(CacheEligibility.CACHEABLE_HEADER, "1").bodyValue(body)
+                    .exchange().expectStatus().isOk().expectHeader()
+                    .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss");
+            awaitCacheFill();
+
+            // The same bytes to the same endpoint: still an L1 hit — the new
+            // key dimension must not cost the cache its hits (#1236 guard).
+            webTestClient.post().uri("/v1/messages").header(CacheEligibility.CACHEABLE_HEADER, "1").bodyValue(body)
+                    .exchange().expectStatus().isOk().expectHeader()
+                    .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "L1");
+
+            // Exactly one upstream exchange: the second request was served from
+            // the cache.
+            assertThat(mockProvider.getCapturedRequests()).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("same /v1/responses endpoint still hits: the protocol dimension does not disable the cache there (#1421)")
+        void responsesSameProtocolStillHits() throws InterruptedException {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
+
+            String body = """
+                    {"model":"gpt-4o-mini","input":"cache probe 1421 responses same protocol"}""";
+            webTestClient.post().uri("/v1/responses").header(CacheEligibility.CACHEABLE_HEADER, "1").bodyValue(body)
+                    .exchange().expectStatus().isOk().expectHeader()
+                    .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss");
+            awaitCacheFill();
+
+            // The same bytes to the same endpoint: still an L1 hit — the family
+            // dimension must not cost the responses endpoint its cache hits
+            // (the #1236 guard, now proven on the third mapping too).
+            webTestClient.post().uri("/v1/responses").header(CacheEligibility.CACHEABLE_HEADER, "1").bodyValue(body)
+                    .exchange().expectStatus().isOk().expectHeader()
+                    .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "L1");
+
+            // Exactly one upstream exchange: the second request was served from
+            // the cache.
+            assertThat(mockProvider.getCapturedRequests()).hasSize(1);
+        }
+
+        @Test
         @DisplayName("cache I/O runs on the bounded scheduler, never on the event loop (#444)")
         void cacheIoRunsOffTheEventLoop() throws Exception {
             mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
@@ -590,6 +707,56 @@ class VirtualKeyAuthContractTest {
                     .bodyValue(ChatFixtures.REQUEST_NON_STREAMING).exchange().expectStatus().isBadRequest();
 
             assertThat(mockProvider.getCapturedRequests()).hasSize(2);
+        }
+
+        @Test
+        @DisplayName("output-shaping knobs split the key: no replay across budgets, stop strings, logprobs (#1302)")
+        void outputShapingParametersSplitTheKey() throws InterruptedException {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
+
+            // A chat body keeps only system + last user message as its key scope,
+            // so every other output-shaping field must be an explicit key
+            // dimension. Each pair below is identical except for one knob and
+            // carries a message text unique to that pair; before #1302 both
+            // members of a pair produced one key and the second request replayed
+            // the first answer byte-for-byte instead of going upstream.
+            int before = mockProvider.getCapturedRequests().size();
+            assertSplits("""
+                    {"model":"gpt-4o-mini","messages":[{"role":"user","content":"cache probe 1302 budget"}],
+                     "max_completion_tokens":16}""", """
+                    {"model":"gpt-4o-mini","messages":[{"role":"user","content":"cache probe 1302 budget"}],
+                     "max_completion_tokens":4096}""");
+            assertSplits("""
+                    {"model":"gpt-4o-mini","messages":[{"role":"user","content":"cache probe 1302 stop"}],
+                     "stop_sequences":["</answer>"]}""", """
+                    {"model":"gpt-4o-mini","messages":[{"role":"user","content":"cache probe 1302 stop"}]}""");
+            assertSplits("""
+                    {"model":"gpt-4o-mini","messages":[{"role":"user","content":"cache probe 1302 logprobs"}],
+                     "logprobs":true,"top_logprobs":5}""", """
+                    {"model":"gpt-4o-mini","messages":[{"role":"user","content":"cache probe 1302 logprobs"}]}""");
+            assertThat(mockProvider.getCapturedRequests()).hasSize(before + 6);
+        }
+
+        /**
+         * Posts both bodies with the cache opt-in header and asserts the second one is
+         * a MISS with its own upstream exchange — i.e. the two bodies are different
+         * cache keys.
+         */
+        private void assertSplits(String first, String second) throws InterruptedException {
+            webTestClient.post().uri("/v1/chat/completions").header(CacheEligibility.CACHEABLE_HEADER, "1")
+                    .bodyValue(first).exchange().expectStatus().isOk().expectHeader()
+                    .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss");
+            awaitCacheFill();
+            int before = mockProvider.getCapturedRequests().size();
+
+            byte[] replayed = webTestClient.post().uri("/v1/chat/completions")
+                    .header(CacheEligibility.CACHEABLE_HEADER, "1").bodyValue(second).exchange().expectStatus().isOk()
+                    .expectHeader().valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss").expectBody().returnResult()
+                    .getResponseBody();
+
+            assertThat(new String(replayed, StandardCharsets.UTF_8)).isEqualTo(ChatFixtures.RESPONSE_BASIC);
+            assertThat(mockProvider.getCapturedRequests()).hasSize(before + 1);
         }
     }
 

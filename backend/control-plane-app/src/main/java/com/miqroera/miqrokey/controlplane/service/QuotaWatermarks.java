@@ -57,10 +57,9 @@ class QuotaWatermarks {
             case REQUESTS -> BigDecimal.valueOf(summary.totals().requests().upstream());
             case COST -> summary.totals().cost().upstreamPaid();
         };
-        BigDecimal usedPct = used.multiply(HUNDRED).divide(BigDecimal.valueOf(rule.limitValue()), 2,
-                RoundingMode.HALF_UP);
+        BigDecimal usedPct = percentage(used, rule.limitValue());
         // Severity order: full > fixed 90% guidance tier > the rule's own warn.
-        String level = usedPct.compareTo(HUNDRED) >= 0
+        String level = reachesTheLimit(used, rule.limitValue())
                 ? EXCEEDED
                 : usedPct.compareTo(BigDecimal.valueOf(NEAR_LIMIT_PERCENT)) >= 0
                         ? "NEAR_LIMIT"
@@ -71,6 +70,24 @@ class QuotaWatermarks {
         boolean cost = rule.metric() == QuotaMetric.COST;
         return new Watermark(used, usedPct, level, cost ? summary.totals().pricingStatus() : null,
                 cost ? summary.totals().unpriced() : null, window.from(), window.to());
+    }
+
+    /**
+     * The enforcement boundary on the raw reading: the reading {@code used} reached
+     * {@code limitValue} (#684). The percentage is rounded before it is compared,
+     * so the verdict is "at or above the limit", not "strictly above" — the
+     * sticky-verdict evaluator has to decide a recorded block by the same boundary
+     * that raised it, or a limit raised to exactly the recorded reading would read
+     * as a recovery. {@code
+     * limitValue} is guaranteed positive by the {@code quota_rules} check
+     * constraint.
+     */
+    static boolean reachesTheLimit(BigDecimal used, long limitValue) {
+        return percentage(used, limitValue).compareTo(HUNDRED) >= 0;
+    }
+
+    private static BigDecimal percentage(BigDecimal used, long limitValue) {
+        return used.multiply(HUNDRED).divide(BigDecimal.valueOf(limitValue), 2, RoundingMode.HALF_UP);
     }
 
     record Watermark(BigDecimal used, BigDecimal usedPct, String level, PricingStatus pricingStatus,

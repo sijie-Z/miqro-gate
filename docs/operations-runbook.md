@@ -145,6 +145,141 @@
 - 禁止手工修改业务表“修好状态”；使用受审查 SQL/迁移并备份。
 - 恢复后检查 usage 队列、任务锁、会话、目录版本和审计连续性。
 
+## 9b. 迁移失败与恢复（Flyway）
+
+控制面启动时自动执行 Flyway，因此**迁移失败的表现就是控制面起不来**。PostgreSQL 上迁移与 `flyway_schema_history` 插入在**同一个事务**里，脚本中途失败时两者一起回滚——迁移表里**连 `success = false` 的行都不会留下**。由此有三个必须记住的事实：
+
+- `flyway repair` 会输出 `Repair of failed migration ... not necessary. No failed migration detected.`——**空转**，什么都不修；
+- 重启不会自愈：每次启动都在同一个脚本、同一个位置失败；
+- 唯一出路是人工处置（9b.2 / 9b.3），**没有**自动 fallback、没有 undo 迁移。
+
+所以正确做法是把「启动后崩溃循环」提前成「升级前一条命令」。
+
+### 9b.1 升级前前置检查（只读）
+
+```bash
+export MIQROKEY_DB_URL='jdbc:postgresql://<host>:<port>/<db>'
+export MIQROKEY_DB_USERNAME='miqrokey' MIQROKEY_DB_PASSWORD='<password>'
+deploy/preflight/miqrokey-migration-preflight.sh
+```
+
+退出码：`0` 无阻塞项；`1` 发现阻塞项（逐条打印 `BLOCKER | <检查项> | <明细>`）；`2` 工具错误（连不上库、缺 psql 等）。脚本不修改任何业务对象（只建一张会话级 TEMP 表），升级前可重复执行。报阻塞时**先按 9b.2 / 9b.3 处理再升级**。
+
+升级流程就是「前置检查过了再起控制面」，一条命令：
+
+```bash
+deploy/preflight/miqrokey-migration-preflight.sh \
+  && docker compose -f deploy/compose.prod.yaml up -d control-plane
+```
+
+宿主没装 `psql`（本机即如此，直接跑会 `psql: command not found` → 退 2）时，用 `--print-sql` 借 PostgreSQL 容器里的 `psql` 执行；此时**退出码是容器内 `psql` 的**，判定看最后一行：
+
+```bash
+deploy/preflight/miqrokey-migration-preflight.sh --print-sql \
+  | docker compose -f deploy/compose.prod.yaml exec -T postgres \
+      psql -X -q -v ON_ERROR_STOP=1 -U "${MIQROKEY_DB_USERNAME:-miqrokey}" -d "${POSTGRES_DB:-miqrokey}" -f -
+```
+
+检查「重复冲销行」时以 **V70 是否已记录为已应用**为界：未应用才算阻塞项；已应用时 Flyway 不会再执行 V70，残留的重复行不可能让升级失败，脚本把它们降级成 `[info] duplicate reversal kept: ...` 提示。这条分界是必须的——按 9b.3（二）处置过的库如果仍被判 `BLOCKED`，就会**永久拦住之后每一次升级**（同一个库、同一份数据，脚本的旧版本实测 `PREFLIGHT VERDICT=BLOCKED` / 退出码 1，当前版本实测 `PREFLIGHT VERDICT=OK` / 退出码 0）。
+
+### 9b.2 情形一：V70 的唯一索引已存在（带外建过）
+
+`V69__usage_adjustments_fk_check_index.sql:83-86` 建议运维对 FK 检查索引「先带外 `CREATE INDEX CONCURRENTLY` 建好，再把迁移标记为已应用」。若照此对 V70 的索引做过，Flyway 重跑 V70 时报：
+
+```
+ERROR: relation "uq_usage_adjustments_reversal_of" already exists
+```
+
+V70:32 的 `CREATE UNIQUE INDEX` 没有 `IF NOT EXISTS`（同批次的 V69:92-96 有，并写明 *Idempotent on purpose*）。两条出路任选一条：
+
+**（一）删掉带外索引，让 V70 自己建**（推荐——库里索引与迁移定义必然一致）：
+
+```sql
+DROP INDEX uq_usage_adjustments_reversal_of;
+```
+
+之后正常重启即可。实测：`DROP INDEX` 后 `MIGRATE success=true executed=3 initial=69 target=72`，退出码 0，`idx_exists=true`（复现方式见 9b.5 末条）。
+
+**（二）把 V70 标记为已应用**（保留带外索引，但 V70 的那条语句永远不会再执行）：
+
+```sql
+INSERT INTO flyway_schema_history
+    (installed_rank, version, description, type, script, checksum, installed_by, execution_time, success)
+SELECT max(installed_rank) + 1, '70', 'usage adjustment single reversal', 'SQL',
+       'V70__usage_adjustment_single_reversal.sql', -339257963, current_user, 0, true
+  FROM flyway_schema_history;
+```
+
+`checksum` 必须填 `-339257963`（Flyway 12.4.0 实测的 V70 校验和），填错会在下次启动 `validate` 时报 checksum mismatch。实测：之后 `migrate` 到 v72 退出码 0，`validate` 输出 `Successfully validated 72 migrations`（复现方式见 9b.5 末条）。两个前提：**V70 的迁移文件必须仍在部署目录里**——把它删掉，`validate` 会报 `Detected applied migration not resolved locally: 70`；**checksum 必须与部署里那份文件一致**——不一致就是 checksum mismatch。**代价**：V70 可执行语句只有建索引这一条，跳过它就意味着**这条数据库级不变量没有被建立**——只有当你能确认带外索引与 V70:32 的定义（`UNIQUE (tenant_id, reversal_of_id) WHERE reversal_of_id IS NOT NULL`）完全一致时，才等同；不一致就等于没有这条约束。此取舍要写进变更记录。
+
+### 9b.3 情形二：库里存在同一笔原始调整的两条冲销行
+
+V70 建唯一索引时发现重复冲销行：
+
+```
+ERROR: could not create unique index "uq_usage_adjustments_reversal_of"
+DETAIL: Key (tenant_id, reversal_of_id)=(...,...) is duplicated.
+```
+
+这是**数据 + 业务决定**，必须由业主拍板后再动数据。在 V70 还没被记录为已应用时，前置检查会把冲突的 tenant / reversal_of_id 和条数逐条列出，例如：
+
+```
+BLOCKER | duplicate-reversal | tenant 00000000-0000-0000-0000-000000000001, reversal_of 22222222-2222-2222-2222-222222222222: 2 reversal rows (V70 allows exactly 1)
+PREFLIGHT VERDICT=BLOCKED (1 finding(s); see docs/operations-runbook.md section 9b)
+```
+
+**（一）删掉多余冲销行**，然后重启 Flyway。实测（删 1 行后）：`MIGRATE success=true executed=3 initial=69 target=72`，退出码 0，`idx_exists=true`（复现方式见 9b.5 末条）；索引生效后，再插入指向同一原始行的第二条冲销被数据库拒绝：
+
+```
+ERROR: duplicate key value violates unique constraint "uq_usage_adjustments_reversal_of"
+DETAIL: Key (tenant_id, reversal_of_id)=(...) already exists.
+```
+
+**（二）不改数据，按 9b.2（二）把 V70 标记为已应用**。实测：升级能走完（`Successfully validated 72 migrations`、`MIGRATE success=true executed=2 initial=70 target=72`，退出码 0），但 `idx_exists=0`、`duplicate_groups=1`——重复行仍留在库里，**数据库层没有这条不变量**，只能靠服务层（#999 之后）拦住新写入。同样是明确的取舍，需写进变更记录。
+
+走这条路的库**之后升级不会再被前置检查拦住**（见 9b.1：V70 已记录为已应用时，重复行只作 `[info]` 提示）；这是有意的——否则处置过的库会被永久判 `BLOCKED`。
+
+### 9b.4 情形三：V53 项目标签回填撞唯一约束
+
+V53 的标签回填取 `'proj-' || left(uuid 去连字符, 12)`（`V53__key_project_multi_binding.sql:63-65`）。随机 UUIDv4 前 12 位十六进制（48 bit）撞车概率极低；但项目 id 若来自外部导入或脚本（同一前缀连号），同一租户内会**成片**撞上 `uq_projects_tenant_project_tag`：
+
+```
+ERROR: duplicate key value violates unique constraint "uq_projects_tenant_project_tag"
+```
+
+实测（同一租户 5 个项目共用 `200000000000` 前缀）：V52→V72 的升级在 V53 处整笔回滚，库停在 V52——`Message : ERROR: duplicate key value violates unique constraint "uq_projects_tenant_project_tag"`，事后 `head=52 | history_rows=52 | failed_rows=0 | grant_id 列不存在`（即 V53 的 DDL 与历史行**一起**回滚，与 9b 开头说的一致）。修法是先把冲突行改名再重启 Flyway——V53 的回填带 `WHERE project_tag IS NULL`，手工改过的行会被跳过，**升级可重入**：
+
+```sql
+UPDATE projects p SET project_tag = g.tag || '-' || g.rn
+  FROM (SELECT id, 'proj-' || left(replace(id::text,'-',''),12) AS tag,
+               row_number() OVER (PARTITION BY tenant_id, 'proj-' || left(replace(id::text,'-',''),12)
+                                  ORDER BY id::text) AS rn
+          FROM projects WHERE project_tag IS NULL) g
+ WHERE p.id = g.id AND g.rn > 1;
+```
+
+这条 SQL 靠 `row_number()` 加后缀，**不保证全局唯一**：目标 tag（如 `proj-<12位>-2`）若已被该租户的既有行占用，UPDATE 自己会撞 `uq_projects_tenant_project_tag`。那时按报错里的 tag 人工换一个后缀（或整批改用手工指定的 tag）再重跑即可——V53 只回填 `project_tag IS NULL` 的行，重跑安全。
+
+实测（执行上述改名后）：冲突组归零，`MIGRATE success=true executed=20 initial=52 target=72`，升级走完，随后 `null_tags=0 | projects=5`、`collision_groups=0`、`head=72 | failed_rows=0`。
+
+与 9b.2 / 9b.3 的区别：这一条**不是正常运行可达的状态**（应用创建项目的 id 是随机的），只会在导入/脚本造出的数据上出现，所以前置检查不拦它——看到这个报错按本节处置即可。
+
+### 9b.5 边界
+
+- **不要改动任何已进入共享环境的迁移文件**：改一个字节就是校验和变化，所有已升级的库下次启动都会 `validate` 失败。修复只能靠**追加新迁移**或本节的人工处置。
+- **没有 undo / 回滚迁移**：回滚 = 用 §10 的备份恢复到升级前状态。升级前先完成备份。
+  恢复到**线上那个已有库**时必须走 `miqrokey-restore.sh --replace <备份> <库名>`（先把目标库 DROP 再重建，因为 `pg_restore` 会重建每一个对象，撞上已存在的对象就整笔回滚；#1423）。不带 `--replace` 的恢复只接受**空库**，目标库非空时脚本在 pre-flight 直接拒绝并说明怎么改。`--replace` 需要该角色有 `CREATEDB` 权限，并会强制断开目标库上的活动连接——推荐顺序仍是**先停控制面与 Gateway，再回滚，最后启动**。对象级明细与实测见 §10。
+- 处置前先备份；处置后确认 `flyway_schema_history` 的最大已应用版本符合预期，且 `SELECT * FROM flyway_schema_history WHERE success = false` 为空。
+- 本节结论的实测环境：PostgreSQL 17.11 + Flyway 12.4.0（与 `backend/` 的 Spring Boot 4.1.1 BOM 同版本）。
+- 本节各条「实测」的复现方式（在**本地** PG 17 容器上，逐条命令与原始输出见 #1249 与 PR #1288 的复现记录）：
+  1. 用 Flyway 12.4.0 把空库升到 V69/V52（之前全部成功）；
+  2. 造出触发条件 —— 9b.2：手工 `CREATE UNIQUE INDEX ... uq_usage_adjustments_reversal_of`；
+    9b.3：向 `usage_adjustments` 插入两条指向同一原始行的冲销行（或按 9b.3（二）把 V70 标记为已应用）；
+    9b.4：插入 5 个 id 前 12 位十六进制相同的项目，令 V53 的标签回填撞 `uq_projects_tenant_project_tag`；
+  3. 跑一次完整 `migrate`（到 V72）观察失败点与历史表残留，再按本节 9b.2/9b.3/9b.4 的处置做一次，重跑同一个 `migrate`。
+  另：`deploy/preflight/miqrokey-migration-preflight.sh` 的四种库状态（无历史 / 干净 V69 / 重复冲销行 / 索引带外存在）与处置后状态，
+  可用同一套方法逐个复现。
+
 ## 10. 备份与恢复
 
 每日 02:00 备份，保留 7 个每日和 4 个每周副本；备份使用与在线 master key 分离的密钥，并存放于独立介质。备份包含 PostgreSQL、目录/价格版本、必要配置和加密凭证密文，不包含运行日志正文。
@@ -292,8 +427,9 @@ Master key 丢失无法从数据库恢复真实凭证；使用受保护备份恢
 |---|---|
 | `miqrokey-backup.sh` | pg_dump(custom) → gzip → AES-256-CBC(PBKDF2 200k) → `<BACKUP_PATH>/miqrokey-<UTC 时间戳>.sql.gz.enc` + SHA-256 manifest；保留（#438）：最新 `DAILY_KEEP` 个日备份（默认 7）+ 其余中每 ISO 周（周一起）最新 1 个、至多 `WEEKLY_KEEP` 周（默认 4）——同一次备份只计一次，其余连 manifest 剪除；失败不残留半成品。成功/失败经 Webhook（可选 HMAC-SHA256 签名 `X-MiQroKey-Signature: sha256=...`）通知 |
 | `miqrokey-verify.sh <file>` | 校验 manifest + 解密干跑（`pg_restore --list`），不触碰任何库 |
-| `miqrokey-restore.sh <file> [target-db]` | 校验 manifest → 解密 → `pg_restore --exit-on-error --single-transaction`（**单事务原子恢复**：#438，中途失败整体回滚、目标库不留半程状态）；恢复前目标库必须存在 |
-| `test-restore.sh` | 真实恢复演练：双 Postgres 容器 → 播种 1000 行 → 真备份 → 校验 → 恢复 → 行数一致断言（已验证 PASS） |
+| `miqrokey-restore.sh <file> [target-db]` | 校验 manifest → 解密 → `pg_restore --exit-on-error --single-transaction`（**单事务原子恢复**：#438，中途失败整体回滚、目标库不留半程状态）。恢复前目标库必须存在，且**必须为空**（`pg_restore` 会重建每个对象，非空库上必然在第一个对象失败）；非空时脚本在 pre-flight 拒绝并提示改用 `--replace` |
+| `miqrokey-restore.sh --replace <file> <target-db>` | **灾难回滚模式**（#1423）：先 `DROP DATABASE ... WITH (FORCE)` 再按原 owner/encoding/collation 从 `template0` 重建，然后恢复——这是 §9b.5「回滚 = 恢复到升级前状态」能落地的唯一路径。破坏性：必须显式给出库名（绝不从 URL 默认值推断）、需要 `MIQROKEY_RESTORE_CONFIRM=yes`、拒绝作用于 `postgres/template0/template1`，且该角色要有 `CREATEDB` 权限 |
+| `test-restore.sh` | 真实恢复演练：双 Postgres 容器 → 播种 1000 行 → 真备份 → 校验 → 恢复 → 行数一致断言；**再加回滚腿**：先删光目标表数据（schema 完好，即真实灾难形态）→ 断言不带 `--replace` 的恢复被拒且目标库未被改动 → 断言 `--replace` 把 1000 行原样找回（已验证 PASS） |
 | `test-retention.sh` | 保留语义夹具测试（无 Docker）：日历周精确保留集（20 → 10：最新 7 日 + W36/W35/W34 各 1）+ 幂等 + 失败零残留断言（已验证 PASS） |
 | `test-retention-webhook.sh` | 保留上限与 Webhook 签名通知测试（已验证 PASS） |
 
@@ -309,6 +445,7 @@ Master key 丢失无法从数据库恢复真实凭证；使用受保护备份恢
 ### 恢复演练要求
 
 - 每季度至少一次 `test-restore.sh` 或对最新备份执行 `verify + restore` 到隔离实例。
+- **演练的目标库必须是「非空」的那种**才算覆盖回滚路径：恢复到空库只验证了备份本身能不能解开，验证不了出事时那条路（#1423）。`test-restore.sh` 现在两条腿都跑。
 - 上面这三个 `test-*.sh` 是**人工演练脚本，未接入 CI**（它们要起真实 Postgres 容器，属于季度演练而非每次提交的闸门）。**别把「已验证 PASS」读成「每次提交都会跑」**——这里的 PASS 是人工执行、记录在案的结果。
 - 备份加密密钥离线/分离保管；`restore` 与 `verify` 均强校验 SHA-256 manifest。
 
