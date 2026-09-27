@@ -66,6 +66,17 @@ const summary: UsageSummary = {
   },
 };
 
+/**
+ * 当月 1 日 00:00:00Z，秒级 ISO。用 UTC getter 独立算出，不调被测代码；因此
+ * 在任何时区（含 CI 的 UTC）都是同一个值，不会变成时区相关的 flaky 断言。
+ */
+function utcMonthStartIso(): string {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
+    .toISOString()
+    .replace(/\.\d{3}Z$/, 'Z');
+}
+
 describe('NextProfileView', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -118,6 +129,29 @@ describe('NextProfileView', () => {
     await flushPromises();
 
     expect(wrapper.find('[data-testid="profile-cost-caveat"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  // #PH89: 卡片自称「本月」，请求就必须带本月的窗口。不带 from/to 时后端按
+  // MAX_WINDOW=93 天解析（UsageStatsService.java:127），于是「本月成本」画的其实是
+  // 近三个月的花费。仓库对「本月」的口径是当月 1 日 00:00:00Z 起
+  // （@/lib/quota-window-usage，与后端 AdminQuotaRuleService.window() 同口径）。
+  it('#PH89: 本月卡片向后端要当月窗口，而不是服务器默认的 93 天', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    const [, from, to] = mockApi.usageSummary.mock.calls[0]!;
+    expect(from).toBe(utcMonthStartIso());
+    // to = 此刻；必须严格晚于 from。只断言「已定义」是空断言：退化成 from == to 的窗口
+    // 也能过，而后端会按 TIME_RANGE_INVALID 拒掉它（边界见 quota-window-usage.spec.ts）。
+    // 缺参数走 NaN，两条断言都会红——「没传」照样 fail。
+    const fromMs = from === undefined ? Number.NaN : Date.parse(from);
+    const toMs = to === undefined ? Number.NaN : Date.parse(to);
+    expect(toMs).toBeGreaterThan(fromMs);
+    // 上界留 1s 容差：只有当月头一秒 secondWindow 会把 to 撑到 from+1s，那一下 to 比
+    // 「现在」最多晚 <1s。写死 <= Date.now() 的话，每月 1 日 00:00:00.0–.999Z 这 1 秒
+    // 里跑 CI 会误报。
+    expect(toMs).toBeLessThanOrEqual(Date.now() + 1_000);
     wrapper.unmount();
   });
   it('renders account facts and password form', async () => {

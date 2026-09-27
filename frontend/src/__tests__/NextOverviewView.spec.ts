@@ -102,6 +102,17 @@ const LEDGER_PAIRS: Record<string, Record<string, [number, number]>> = {
 /** The frozen Monday all ledger tests read their windows at. */
 const FROZEN_MONDAY = new Date('2026-09-21T13:47:00Z');
 
+/**
+ * 当月 1 日 00:00:00Z，秒级 ISO。用 UTC getter 独立算出，不调被测代码；因此在任何
+ * 时区（含 CI 的 UTC）都是同一个值，不会变成时区相关的 flaky 断言。
+ */
+function utcMonthStartIso(): string {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
+    .toISOString()
+    .replace(/\.\d{3}Z$/, 'Z');
+}
+
 /** The admin summary read the page makes for itself (no subscription filter). */
 function pageSummary() {
   return { groupBy: 'project', groups: [], totals: summary.totals } as unknown as UsageSummary;
@@ -167,7 +178,20 @@ describe('NextOverviewView', () => {
     const wrapper = mountView();
     await flushPromises();
 
-    expect(mockApi.usageSummary).toHaveBeenCalledWith('project');
+    // #PH89: 卡片自称「本月」，请求就必须带本月的窗口。此前这里是
+    // `toHaveBeenCalledWith('project')` —— 断言把缺陷一起钉住了：不带 from/to 时后端按
+    // MAX_WINDOW=93 天解析（UsageStatsService.java:127），「本月成本」画的是近三个月。
+    const [, from, to] = mockApi.usageSummary.mock.calls[0]!;
+    expect(from).toBe(utcMonthStartIso());
+    // to = 此刻；必须严格晚于 from，且不能落到未来。只断言「已定义」是空断言：
+    // 退化成 from == to 的空窗口也能过，而后端会按 TIME_RANGE_INVALID 拒掉它
+    // （边界见 quota-window-usage.spec.ts 的 empty-window guard）。
+    // 上界留 1s 容差——只有当月头一秒 secondWindow 会把 to 撑到 from+1s。
+    // 缺参数走 NaN，两条断言都会红——「没传」照样 fail。
+    const fromMs = from === undefined ? Number.NaN : Date.parse(from);
+    const toMs = to === undefined ? Number.NaN : Date.parse(to);
+    expect(toMs).toBeGreaterThan(fromMs);
+    expect(toMs).toBeLessThanOrEqual(Date.now() + 1_000);
     const stats = wrapper.find('[data-testid="overview-stats"]');
     expect(stats.text()).toContain('虚拟密钥');
     expect(stats.text()).toContain('2');
@@ -598,6 +622,14 @@ describe('NextOverviewView', () => {
         from: '2026-09-01T00:00:00Z',
         to: '2026-09-21T13:47:00Z',
       });
+
+      // #PH89: 同一页上「本月」只能有一个窗口。账本的 本月 行（上面）读的是
+      // 2026-09-01T00:00:00Z，那么三个自称 本月 的卡片就必须读同一段——它们此前
+      // 完全不带窗口，于是后端给 93 天：同一个词、同一页、两个区间。
+      const cardCall = mockApi.adminUsageSummary.mock.calls
+        .map((c) => c[0])
+        .find((q) => !q.subscriptionId);
+      expect(cardCall).toMatchObject({ groupBy: 'project', from: '2026-09-01T00:00:00Z' });
     } finally {
       vi.useRealTimers();
     }

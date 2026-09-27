@@ -20,6 +20,7 @@ import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { useAuthStore } from '@/stores/auth';
 import { UiButton, UiDialog, UiInput, UiStatusBadge, UiTooltip, toast } from '@/ui';
+import { monthlyRange } from '@/lib/quota-window-usage';
 import { costGapNote } from '@/lib/usage-pricing';
 import type { UsageSummary, VirtualKeyView } from '@/types/generated-api';
 
@@ -59,7 +60,7 @@ function formatInstant(iso?: string | null): string {
   return iso ? new Date(iso).toLocaleString() : '—';
 }
 
-// ---- monthly snapshot (caliber: the usage page's totals row) ----
+// ---- 本月速览：窗口 = 当月 1 日 00:00:00Z 起（monthlyRange）；计数器口径与用量页 totals 行一致 ----
 
 const keys = ref<VirtualKeyView[] | null>(null);
 const summary = ref<UsageSummary | null>(null);
@@ -73,9 +74,12 @@ function formatCount(n: number): string {
 
 async function loadSnapshot() {
   snapshotError.value = '';
+  // #PH89: 速览自称「本月」，就要本月的窗口。省略 from/to 时后端按 MAX_WINDOW = 93 天
+  // 解析（UsageStatsService.java:127），「本月成本」画的是近三个月的花费。
+  const month = monthlyRange(new Date());
   const [keysResult, summaryResult] = await Promise.allSettled([
     api.listVirtualKeys(),
-    api.usageSummary('project'),
+    api.usageSummary('project', month.from, month.to),
   ]);
   if (keysResult.status === 'fulfilled') keys.value = keysResult.value;
   if (summaryResult.status === 'fulfilled') summary.value = summaryResult.value;
