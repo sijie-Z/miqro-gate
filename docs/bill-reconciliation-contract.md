@@ -27,7 +27,7 @@
 | `amount` | decimal string | 是 | 账单金额（原币种） |
 | `currency` | string(ISO 4217) | 是 | 币种（默认 USD/CNY 由导入请求指定） |
 | `status` | string | 否 | 官方状态（success/error/…），非 success 行只参与四态计数 |
-| `provider_row_ref` | string | 否 | 账单原始行号/ID，报告回溯用 |
+| `provider_row_ref` | string（最长 256 字符） | 否 | 账单原始行号/ID，报告回溯用；超长按码点截断到 256 并记一条 `FIELD_TOO_LONG` 行错误，所在行仍参与四态计数 |
 
 上传文件 = UTF-8 JSONL（逐行一个对象）；`.gz` 可选。首行不允许 BOM/元数据行（元数据放请求参数）。
 
