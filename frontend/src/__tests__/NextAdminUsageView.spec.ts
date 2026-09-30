@@ -6,6 +6,7 @@ import { defineComponent } from 'vue';
 import NextAdminUsageView from '@/views/next/NextAdminUsageView.vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
+import { localDateTime, localDayKey, localTzOffsetMinutes } from '@/utils/datetime';
 import type {
   ModelCallTimeline,
   UsageGroup,
@@ -1252,5 +1253,84 @@ describe('NextAdminUsageView', () => {
     }
 
     wrapper.unmount();
+  });
+
+  // #PH89: the 维度分解 dropdown offers 日/月, and the backend buckets those two
+  // dimensions by `tzOffsetMinutes` — null means UTC (`AdminUsageStatsService.java:143`).
+  // The trend chart on the same screen (`loadSeries`, `:756`) and the hourly table
+  // (`:536`) pass the viewer's offset; the breakdown summary did not, so one record
+  // sat in two different days on one screen: 请求日志 printed its local day, the
+  // table above it printed the UTC one.
+  //
+  // Zone handling: the offset and the expected day are *derived from the runner's own
+  // zone*, never pinned. Mocking `Date.prototype.getTimezoneOffset` moves only the API
+  // parameter — `formatTime` renders through the runtime's local getters, which no such
+  // mock reaches — so a pinned offset makes the two halves of the test disagree on every
+  // runner but the pinned one. (Measured: a pinned UTC+8 version passed on the UTC+8 dev
+  // host, failed on `TZ=America/New_York`, and would have failed on the UTC CI runner.)
+  //
+  // Two kinds of assertion, both needed: the request-parameter ones hold in *every* zone
+  // (before the fix the key is simply absent, and absent ≠ any offset), while the rendered
+  // one only bites where the local day actually differs from the UTC day — never true on
+  // the UTC CI runner (#1301).
+  it('#PH89 维度分解的日/月分桶用查看者本地日，与同屏请求日志一致', async () => {
+    const offset = localTzOffsetMinutes();
+    const utcIso = '2026-09-03T17:30:00Z';
+    const utcDay = utcIso.slice(0, 10);
+    const localDay = localDayKey(utcIso);
+    const dayGroup = (day: string) => group(day, day, 1, 17, 28, 0.004);
+    mockApi.adminUsageSummary.mockImplementation(async (query) => ({
+      groupBy: String(query?.groupBy ?? 'project'),
+      // The server rule (verified against a live control-plane: offset unset / 480 /
+      // -240 give three different bucket rows): no offset ⇒ UTC buckets, otherwise the
+      // offset decides the day.
+      groups: [dayGroup(query?.tzOffsetMinutes === offset ? localDay : utcDay)],
+      totals: group('__totals__', '合计', 1, 17, 28, 0.004),
+    }));
+    mockApi.adminUsageRecords.mockResolvedValue({
+      items: [recordRow(1, { occurredAt: utcIso })],
+      page: 1,
+      size: 20,
+      total: 1,
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    // 查询 issues exactly two summaries — the breakdown (`groupBy: 'project'`) and the
+    // trend (`groupBy: seriesDim`, default 'day'). Both must carry the offset; before
+    // the fix only the trend did, which is the whole defect.
+    const initial = mockApi.adminUsageSummary.mock.calls;
+    expect(initial.map(([q]) => q?.groupBy).sort()).toEqual(['day', 'project']);
+    for (const [query] of initial) {
+      expect(query?.tzOffsetMinutes).toBe(offset);
+    }
+
+    // The request log states the day the viewer is in.
+    expect(wrapper.find('[data-testid="usage-records-table"]').text()).toContain(
+      localDateTime(utcIso),
+    );
+
+    // 维度分解 → 日 must agree with it.
+    await wrapper.find('[data-testid="usage-tab-breakdown"]').trigger('click');
+    await flushPromises();
+    await wrapper
+      .find('[data-testid="usage-group-by"] .stub-option[data-option="day"]')
+      .trigger('click');
+    await flushPromises();
+
+    // Re-bucketing goes through `loadBreakdown`, not `load` — every `groupBy: 'day'`
+    // call now issued must carry the offset, else the dropdown switch reintroduces it.
+    const dayCalls = mockApi.adminUsageSummary.mock.calls.filter(([q]) => q?.groupBy === 'day');
+    expect(dayCalls.length).toBeGreaterThan(1);
+    for (const [query] of dayCalls) {
+      expect(query?.tzOffsetMinutes).toBe(offset);
+    }
+
+    const breakdown = wrapper.find('[data-testid="usage-breakdown-table"]');
+    expect(breakdown.text()).toContain(localDay);
+    if (localDay !== utcDay) {
+      expect(breakdown.text()).not.toContain(utcDay);
+    }
   });
 });
